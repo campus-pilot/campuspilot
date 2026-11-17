@@ -32,7 +32,7 @@ import { LoaderCircle } from 'lucide-react';
 import Link from 'next/link';
 import { client, orpc } from '@/lib/orpc';
 import { DISABLE_WARNINGS } from './school-feature-warnings';
-import { SchoolTierCard } from './school-tier-card';
+import { SchoolPlanCard } from './school-plan-card';
 
 /** The features whose catalogue config is not `z.null()`, i.e. that have settings to edit. */
 type FeaturesWithSettings = {
@@ -356,15 +356,15 @@ function FeatureFlagsHeading() {
     <div className="flex flex-col gap-1">
       <h1 className="text-2xl font-semibold tracking-tight">Plan and features</h1>
       <p className="text-sm text-muted-foreground">
-        The school&apos;s tier decides which CampusPilot features it has. Below, a feature can be adjusted for this
-        school alone: always on, always off, or following the tier. Changes apply at once; the school&apos;s staff
-        cannot change them.
+        The school&apos;s plan (its subscription, or a higher trial) decides which CampusPilot features it has.
+        Below, a feature can be adjusted for this school alone: always on, always off, or following the tier.
+        Changes apply at once; the school&apos;s staff cannot change them.
       </p>
     </div>
   );
 }
 
-/** One school's plan: its tier, then a card per catalogue feature with what the tier gives and the school's adjustment. */
+/** One school's plan: its subscription and trial, then a card per catalogue feature with what the plan's tier gives and the school's adjustment. */
 export function SchoolFeatureFlags({ schoolId }: { schoolId: string }) {
   const flagsQuery = useQuery(
     orpc.systemAdmin.getSchoolFeatureFlags.queryOptions({ input: { id: schoolId } }),
@@ -402,11 +402,11 @@ export function SchoolFeatureFlags({ schoolId }: { schoolId: string }) {
     );
   }
 
-  const { tier, subscribedTier, features, invalidConfigs } = state.data;
+  const { tier, features, invalidConfigs } = state.data;
   return (
     <section className="mx-auto flex w-full max-w-4xl flex-col gap-5">
       <FeatureFlagsHeading />
-      <SchoolTierCard schoolId={schoolId} tier={subscribedTier} features={features} />
+      <SchoolPlanCard schoolId={schoolId} plan={state.data} />
       {schoolFeatureEntries(features).map((entry) => (
         <FeatureFlagCard
           key={entry.feature}

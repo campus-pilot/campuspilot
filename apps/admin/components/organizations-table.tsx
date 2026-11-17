@@ -6,10 +6,12 @@ import type { SchoolDto } from '@campuspilot/api/routers/system-admin/school/sch
 import {
   DataTable,
   DataTableSuspense,
+  TableFilterBar,
   TableSearchBar,
   useDataTableListState,
   type DataTableColumnDef,
   type DataTableListController,
+  type TableFilterConfig,
 } from '@campuspilot/components/data-grid';
 import { Badge } from '@campuspilot/ui/components/badge';
 import { orpc } from '@/lib/orpc';
@@ -18,10 +20,24 @@ import { SchoolAvatar } from './school-avatar';
 import { SchoolBadges } from './school-badges';
 
 type OrganizationOrderField = 'name' | 'location' | 'createdAt' | 'updatedAt';
+/** `plan`: schools on an active trial, or schools without a plan (docs/school-trials.md). */
+type OrganizationFilters = { plan?: 'trial' | 'none' };
 type OrganizationListController = DataTableListController<
   OrganizationOrderField,
-  never
+  OrganizationFilters
 >;
+
+const organizationFilters: TableFilterConfig<keyof OrganizationFilters>[] = [
+  {
+    id: 'plan',
+    label: 'Plan',
+    type: 'single',
+    options: [
+      { value: 'trial', label: 'On a trial' },
+      { value: 'none', label: 'No plan' },
+    ],
+  },
+];
 
 const dateFormatter = new Intl.DateTimeFormat('en', {
   dateStyle: 'medium',
@@ -103,6 +119,7 @@ function OrganizationRows({
         limit: controller.query.limit,
         searchQuery: controller.query.searchQuery,
         orderBy: controller.query.orderBy,
+        filters: controller.query.filters?.plan ? { plan: controller.query.filters.plan } : undefined,
       },
     }),
   );
@@ -122,7 +139,7 @@ function OrganizationRows({
       showPagination
       state={controller.tableState}
       emptyMessage={
-        controller.query.searchQuery
+        controller.query.searchQuery || controller.query.filters?.plan
           ? 'No organizations match this search.'
           : 'No organizations have been added yet.'
       }
@@ -131,7 +148,7 @@ function OrganizationRows({
 }
 
 export function OrganizationsTable() {
-  const controller = useDataTableListState<OrganizationOrderField>({
+  const controller = useDataTableListState<OrganizationOrderField, OrganizationFilters>({
     defaultOrderBy: { field: 'name', direction: 'asc' },
   });
   const suspenseKey = JSON.stringify(controller.query);
@@ -144,10 +161,17 @@ export function OrganizationsTable() {
           Browse and manage the schools on CampusPilot.
         </p>
       </div>
-      <TableSearchBar
-        placeholder="Search organizations…"
-        onSearchChange={controller.onSearchChange}
-      />
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <TableSearchBar
+          placeholder="Search organizations…"
+          onSearchChange={controller.onSearchChange}
+        />
+        <TableFilterBar
+          filters={organizationFilters}
+          values={controller.query.filters ?? {}}
+          onValuesChange={controller.onFiltersChange}
+        />
+      </div>
       <DataTableSuspense
         key={suspenseKey}
         columnCount={organizationColumns.length}
