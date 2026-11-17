@@ -21,6 +21,11 @@ export const mySchoolDtoSchema = z.object({
    */
   hasActivePlan: z.boolean(),
   /**
+   * The school subscribes to a tier. Without one, the end of the trial that
+   * gives its plan leaves it blocked, which the trial's notice says.
+   */
+  hasSubscription: z.boolean(),
+  /**
    * When the trial that gives the school its plan ends (ISO date-time);
    * null when no trial gives the plan. Management warns in the trial's last
    * days.

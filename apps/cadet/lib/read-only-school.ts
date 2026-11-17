@@ -15,7 +15,7 @@ import {
 export const CADET_SCHOOL_SUSPENDED_MESSAGE =
   'Your school is suspended. You can still view everything, but nothing can be changed. Contact your school.';
 
-export const CADET_SCHOOL_NO_PLAN_MESSAGE = "Your school's plan has ended. You can still view everything. Contact your school.";
+export const CADET_SCHOOL_NO_PLAN_MESSAGE = "Your school's plan has ended, so the portal is blocked. Contact your school.";
 
 /** The notice's title and text for each reason. */
 export const CADET_READ_ONLY_SCHOOL_NOTICES = {

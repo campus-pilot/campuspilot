@@ -138,6 +138,8 @@ describe('a suspended school is read-only for its staff', () => {
     );
     // The gate answers before the input is validated, so a malformed change is refused the same way.
     await expectSchoolSuspended(client.school.updateSchool({ schoolId: school.id } as never));
+    // The inputs trim the id, so the gate does too: a padded id names the same school, not none.
+    await expectSchoolSuspended(client.school.updateSchool({ schoolId: ` ${school.id} `, name: 'Renamed With Padding' }));
     expect(await storedSchool(school.id)).toMatchObject({ name: school.name, cadetShowClassAverages: false });
     expect(await client.school.listClasses({ schoolId: school.id })).toEqual([]);
 
@@ -201,6 +203,13 @@ describe('a suspended school is read-only for its staff', () => {
     await expectSchoolSuspended(
       createTestClient(adminSession).school.updateSchool({ schoolId: school.id, name: 'Corrected As A Member' }),
     );
+
+    // Platform administration is not held, even for an administrator who is a member (purging their demo school).
+    try {
+      await createTestClient(adminSession).systemAdmin.retryDemoSchoolPurge({ schoolId: school.id });
+    } catch (error) {
+      expect(isSchoolSuspendedError(error)).toBe(false);
+    }
 
     // A teacher may not rename the school anyway; as a member they are told the school is suspended.
     const teacher = createTestClient((await createSchoolStaffSession(school.id, [{ role: 'teacher', meta: { classIds: [] } }])).session);

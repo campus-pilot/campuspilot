@@ -2,13 +2,12 @@
 
 import { useForm } from '@tanstack/react-form';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { z } from 'zod';
 import {
   resolveSchoolPlan,
   SCHOOL_TIERS,
   schoolTierCatalogue,
-  schoolTierRank,
   type SchoolTier,
 } from '@campuspilot/api/routers/school/feature-flags/feature-flags.dto';
 import { ConfirmationDialog } from '@campuspilot/components/confirmation-dialog';
@@ -92,7 +91,8 @@ function useTrialForm(defaultValues: TrialFormValues, save: (value: TrialFormVal
 
 type TrialForm = ReturnType<typeof useTrialForm>;
 
-function TrialTierField({ form, idPrefix }: { form: TrialForm; idPrefix: string }) {
+/** `autoFocus`: the field takes keyboard focus when it appears (the Change form opened from its button). */
+function TrialTierField({ form, idPrefix, autoFocus = false }: { form: TrialForm; idPrefix: string; autoFocus?: boolean }) {
   return (
     <form.Field name="tier">
       {(field) => (
@@ -102,7 +102,7 @@ function TrialTierField({ form, idPrefix }: { form: TrialForm; idPrefix: string 
             value={field.state.value}
             options={TIER_OPTIONS}
             onValueChange={(tier) => field.handleChange(tier)}
-            triggerProps={{ id: `${idPrefix}-tier`, className: 'w-full sm:w-48' }}
+            triggerProps={{ id: `${idPrefix}-tier`, className: 'w-full sm:w-48', autoFocus }}
           />
         </div>
       )}
@@ -126,6 +126,7 @@ function TrialEndField({ form, idPrefix }: { form: TrialForm; idPrefix: string }
               onBlur={field.handleBlur}
               onChange={(event) => field.handleChange(event.target.value)}
               aria-invalid={field.state.meta.errors.length > 0}
+              aria-describedby={field.state.meta.errors.length > 0 ? `${idPrefix}-end-error` : undefined}
             />
             <Button
               type="button"
@@ -136,19 +137,21 @@ function TrialEndField({ form, idPrefix }: { form: TrialForm; idPrefix: string }
               +1 month
             </Button>
           </div>
-          {fieldErrorMessages(field.state.meta.errors).map((message) => (
-            <p key={message} className="text-xs text-destructive">{message}</p>
-          ))}
+          <div id={`${idPrefix}-end-error`} role="alert" className="flex flex-col gap-1 empty:hidden">
+            {fieldErrorMessages(field.state.meta.errors).map((message) => (
+              <p key={message} className="text-xs text-destructive">{message}</p>
+            ))}
+          </div>
         </div>
       )}
     </form.Field>
   );
 }
 
-function TrialFields({ form, idPrefix }: { form: TrialForm; idPrefix: string }) {
+function TrialFields({ form, idPrefix, autoFocus = false }: { form: TrialForm; idPrefix: string; autoFocus?: boolean }) {
   return (
     <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-      <TrialTierField form={form} idPrefix={idPrefix} />
+      <TrialTierField form={form} idPrefix={idPrefix} autoFocus={autoFocus} />
       <TrialEndField form={form} idPrefix={idPrefix} />
     </div>
   );
@@ -176,7 +179,7 @@ function TrialFormFooter({
         <div className="flex flex-col gap-3">
           <PlanChangeSummary features={plan.features} planTier={planTierWithTrial(plan.subscribedTier, values.tier)} />
           {errors.map((error) => (
-            <p key={formErrorText(error)} className="text-xs text-destructive">{formErrorText(error)}</p>
+            <p key={formErrorText(error)} role="alert" className="text-xs text-destructive">{formErrorText(error)}</p>
           ))}
           <div className="flex flex-wrap justify-end gap-2">
             {onCancel ? <Button type="button" variant="outline" disabled={isSubmitting} onClick={onCancel}>Cancel</Button> : null}
@@ -245,7 +248,8 @@ function ChangeTrialForm({ schoolId, plan, trial, onDone }: { schoolId: string; 
         void form.handleSubmit();
       }}
     >
-      <TrialFields form={form} idPrefix="change-trial" />
+      {/* Opened from Change: keyboard focus moves into the form. */}
+      <TrialFields form={form} idPrefix="change-trial" autoFocus />
       <TrialFormFooter
         form={form}
         plan={plan}
@@ -300,7 +304,7 @@ function EndTrialButton({ schoolId, plan, trial }: { schoolId: string; plan: Sch
 
 /** Said when the trial is not above the subscription: it runs, but gives the school nothing more. */
 function TrialBelowSubscriptionNote({ trial, subscribedTier }: { trial: ActiveTrial; subscribedTier: SchoolTier | null }) {
-  if (subscribedTier === null || schoolTierRank[trial.tier] > schoolTierRank[subscribedTier]) return null;
+  if (subscribedTier === null || resolveSchoolPlan({ subscribedTier, activeTrial: trial }).source === 'trial') return null;
   return (
     <p className="text-xs text-muted-foreground">
       The school subscribes to {schoolTierCatalogue[subscribedTier].label}, so this trial changes nothing while it runs.
@@ -311,6 +315,12 @@ function TrialBelowSubscriptionNote({ trial, subscribedTier }: { trial: ActiveTr
 /** The active trial: its tier and end, with Change and End trial. Editing is UI state, not form state. */
 function ActiveTrialPanel({ schoolId, plan, trial }: { schoolId: string; plan: SchoolPlanFlags; trial: ActiveTrial }) {
   const [editing, setEditing] = useState(false);
+  // Closing the form unmounts what had focus (Cancel, Save): focus goes back to Change, not to the top of the page.
+  const changeButton = useRef<HTMLButtonElement>(null);
+  const closeForm = () => {
+    setEditing(false);
+    changeButton.current?.focus();
+  };
   return (
     <div className="flex flex-col gap-3 rounded-lg border p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -321,14 +331,15 @@ function ActiveTrialPanel({ schoolId, plan, trial }: { schoolId: string; plan: S
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" disabled={editing} onClick={() => setEditing(true)}>
+          {/* Not disabled while the form is open: a focused button that becomes disabled drops keyboard focus. */}
+          <Button ref={changeButton} type="button" variant="outline" aria-expanded={editing} onClick={() => setEditing(true)}>
             Change
           </Button>
           <EndTrialButton schoolId={schoolId} plan={plan} trial={trial} />
         </div>
       </div>
       <TrialBelowSubscriptionNote trial={trial} subscribedTier={plan.subscribedTier} />
-      {editing ? <ChangeTrialForm schoolId={schoolId} plan={plan} trial={trial} onDone={() => setEditing(false)} /> : null}
+      {editing ? <ChangeTrialForm schoolId={schoolId} plan={plan} trial={trial} onDone={closeForm} /> : null}
     </div>
   );
 }

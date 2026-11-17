@@ -103,9 +103,11 @@ export const trialEndsAtSchema = z.iso.datetime({ offset: true }).describe("When
 
 /**
  * The longest a trial may run from now. A guard against a mistyped year in
- * the end date; a school that needs longer is a subscription.
+ * the end date; a school that needs longer is a subscription. 367, not 366:
+ * twelve calendar months that span 29 February end 366 days and most of a day
+ * from now (the end is the last second of a day in IST).
  */
-export const MAX_TRIAL_DAYS = 366;
+export const MAX_TRIAL_DAYS = 367;
 
 export const addSchoolInputSchema = z.object({
   slug: z.string().trim().min(1).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),

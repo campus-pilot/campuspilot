@@ -91,12 +91,14 @@ WHERE NOT EXISTS (
 	) AS eligible("role")
 	WHERE f."school_id" = a."school_id" AND f."feature" = 'assistant' AND eligible."role" = a."role"
 );--> statement-breakpoint
--- 5. A school whose administrator made roles eligible but where none is
---    switched on gets those roles switched on: what the administrator
---    enabled is enabled for the school. A school that has a role switched
---    on keeps exactly its own choice. `eligibleRoles` stays in the stored
---    config (the new config schema ignores it), so an API of the previous
---    release still reads these rows while this one rolls out.
+-- 5. A school whose assistant is on, whose administrator made roles eligible
+--    and where none is switched on gets those roles switched on: what the
+--    administrator enabled is enabled for the school. A school that has a
+--    role switched on keeps exactly its own choice. A school whose assistant
+--    is off gets no row: switching it on later then switches on the default
+--    roles. `eligibleRoles` stays in the stored assistant config (the new
+--    config schema ignores it), so an API of the previous release still reads
+--    the assistant rows while this one rolls out.
 INSERT INTO "school_assistant_access_role" ("school_id", "role", "updated_by")
 SELECT f."school_id", eligible."role", NULL
 FROM "school_feature_flag" f
@@ -104,6 +106,7 @@ CROSS JOIN LATERAL jsonb_array_elements_text(
 	CASE WHEN jsonb_typeof(f."config" -> 'eligibleRoles') = 'array' THEN f."config" -> 'eligibleRoles' ELSE '[]'::jsonb END
 ) AS eligible("role")
 WHERE f."feature" = 'assistant'
+	AND f."enabled" = true
 	AND eligible."role" IN ('principal', 'manager', 'teacher', 'accountant', 'exam_coordinator')
 	AND NOT EXISTS (SELECT 1 FROM "school_assistant_access_role" a WHERE a."school_id" = f."school_id")
 ON CONFLICT DO NOTHING;

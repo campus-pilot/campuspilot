@@ -271,7 +271,7 @@ describe('migration 0073: subscription tiers', () => {
         noneSwitchedOn: await schoolWithRoles({ eligible: ['principal', 'manager'], switchedOn: [] }),
         // Only a role that was never eligible was switched on: it granted nothing, so the eligible roles apply.
         onlyIneligible: await schoolWithRoles({ eligible: ['principal'], switchedOn: ['accountant'] }),
-        // The same rule whether the assistant is on or off: the list is kept for when it is switched on.
+        // The assistant is off: nobody could use it, so its eligible roles are not switched on.
         disabled: await schoolWithRoles({ eligible: ['teacher'], switchedOn: [], enabled: false }),
         // The school's own choice among the eligible roles is kept exactly.
         ownChoice: await schoolWithRoles({ eligible: ['principal', 'manager', 'teacher'], switchedOn: ['manager'] }),
@@ -290,7 +290,8 @@ describe('migration 0073: subscription tiers', () => {
           overlap: ['teacher'],
           noneSwitchedOn: ['manager', 'principal'],
           onlyIneligible: ['principal'],
-          disabled: ['teacher'],
+          // The assistant is off: no role is written, so switching it on later switches the default roles on.
+          disabled: [],
           ownChoice: ['manager'],
           noConfig: [],
           noAssistantRow: [],

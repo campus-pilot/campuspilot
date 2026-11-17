@@ -77,7 +77,7 @@ describe('AppFrame', () => {
     });
     renderWithQuery(<AppFrame>content</AppFrame>);
     expect(await screen.findByText('School plan ended')).toBeTruthy();
-    expect(screen.getByText("Your school's plan has ended. You can still view everything. Contact your school.")).toBeTruthy();
+    expect(screen.getByText("Your school's plan has ended, so the portal is blocked. Contact your school.")).toBeTruthy();
     expect(screen.getByText('content')).toBeTruthy();
   });
 

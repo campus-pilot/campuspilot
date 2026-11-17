@@ -118,7 +118,7 @@ describe('systemAdmin.startSchoolTrial', () => {
     const school = await createTestSchool({ tier: null });
     const { client } = await adminClient();
     await expectRpcCode(client.systemAdmin.startSchoolTrial({ id: school.id, tier: 'pro', endsAt: iso(-1) }), 'BAD_REQUEST');
-    await expectRpcCode(client.systemAdmin.startSchoolTrial({ id: school.id, tier: 'pro', endsAt: iso(367) }), 'BAD_REQUEST');
+    await expectRpcCode(client.systemAdmin.startSchoolTrial({ id: school.id, tier: 'pro', endsAt: iso(368) }), 'BAD_REQUEST');
     await expectRpcCode(client.systemAdmin.startSchoolTrial({ id: school.id, tier: 'pro', endsAt: 'next month' }), 'BAD_REQUEST');
     await expectRpcCode(client.systemAdmin.startSchoolTrial({ id: 'sch_missing', tier: 'pro', endsAt: iso(30) }), 'NOT_FOUND');
     expect(await storedTrials(school.id)).toEqual([]);

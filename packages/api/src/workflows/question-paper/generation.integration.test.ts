@@ -490,6 +490,27 @@ describe('question paper generation job', () => {
     expect(none.requests).toHaveLength(0);
   });
 
+  it('stops a job already running when its school becomes read-only: no retry after a suspension, no save after a trial ended', async () => {
+    const world = await createQuestionPaperWorld();
+    const suspend = () => db.update(schoolTable).set({ suspendedAt: new Date(), suspendedReason: 'Misuse' }).where(eq(schoolTable.id, world.schoolId));
+    const lift = () => db.update(schoolTable).set({ suspendedAt: null, suspendedReason: null }).where(eq(schoolTable.id, world.schoolId));
+
+    // Suspended while the first request was busy: the retry is not sent.
+    const retried = await queueJob(world);
+    const busy = new Error('429');
+    const flaky = scriptedModel([async () => { await suspend(); throw busy; }, answer(ENGLISH_SCIENCE)], { kind: () => 'busy' });
+    expect(await runQuestionPaperGeneration({ jobId: retried.job.id, attempt: 1 }, direct, depsFor(flaky.model, { retryDelaysMs: [1], sleep: async () => {} }))).toEqual({ status: 'failed', code: 'school_suspended' });
+    expect(flaky.requests).toHaveLength(1);
+    await lift();
+
+    // The plan ran out while the answer was being written: the request is paid for, but no version is saved.
+    const saved = await queueJob(world, { subjectSlug: 'math' });
+    const answered = scriptedModel([async () => { await db.update(schoolTable).set({ tier: null }).where(eq(schoolTable.id, world.schoolId)); return answer(ENGLISH_SCIENCE); }]);
+    expect(await runQuestionPaperGeneration({ jobId: saved.job.id, attempt: 1 }, direct, depsFor(answered.model))).toEqual({ status: 'failed', code: 'no_plan' });
+    expect(await db.select().from(examQuestionPaperVersionTable).where(eq(examQuestionPaperVersionTable.paperId, saved.paper.id))).toHaveLength(0);
+    expect(await requestsOf(saved.job.id)).toHaveLength(1);
+  });
+
   it('stops quietly, saving nothing, when the sweep ended the job while the model was working', async () => {
     const world = await createQuestionPaperWorld();
     const { job, paper } = await queueJob(world);

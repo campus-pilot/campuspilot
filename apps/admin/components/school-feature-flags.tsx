@@ -239,7 +239,7 @@ function FeatureFlagForm({ schoolId, entry, state, configInvalid }: FeatureFlagF
               </p>
             ) : null}
             {errors.map((error) => (
-              <p key={formError(error)} className="text-xs text-destructive">
+              <p key={formError(error)} role="alert" className="text-xs text-destructive">
                 {formError(error)}
               </p>
             ))}

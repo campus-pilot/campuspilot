@@ -23,9 +23,10 @@ import {
  * - an administrator suspended it (`school.suspended_at`);
  * - it has no active plan: no subscribed tier and no active trial
  *   (`resolveSchoolPlan` gives no tier).
- * Its staff and students then still sign in and read everything, and every
- * change is refused with {@link schoolWriteRefusedError}. Nothing is deleted
- * or hidden.
+ * Its staff and students then still sign in and every change is refused
+ * with {@link schoolWriteRefusedError}. Nothing is deleted. A suspended
+ * school keeps its features, so everything stays readable; a school without
+ * a plan also has no tier features, so it is blocked beyond read-only.
  *
  * Every enforcement point decides through this file so they cannot drift
  * apart:
@@ -162,10 +163,11 @@ export async function assertSchoolWritableByCaller(context: Pick<Context, 'db' |
 export function schoolPlanFactsOf(input: {
   subscribedTier: SchoolTier | null;
   trial: Pick<ActiveSchoolTrial, 'tier' | 'endsAt'> | null;
-}): { hasActivePlan: boolean; trialEndsAt: string | null } {
+}): { hasActivePlan: boolean; hasSubscription: boolean; trialEndsAt: string | null } {
   const plan = resolveSchoolPlan({ subscribedTier: input.subscribedTier, activeTrial: input.trial });
   return {
     hasActivePlan: plan.tier !== null,
+    hasSubscription: input.subscribedTier !== null,
     trialEndsAt: plan.source === 'trial' && input.trial ? input.trial.endsAt.toISOString() : null,
   };
 }

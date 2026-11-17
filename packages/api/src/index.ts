@@ -80,29 +80,37 @@ function assertAssistantToolPolicy(
  * The school is the input's `schoolId`, the name every school-scoped
  * procedure uses (`school-suspension.integration.test.ts` checks that every
  * write of the school router has it). The input is read before its own
- * validation, so only a string is taken from it.
+ * validation, so only a string is taken from it, trimmed as the inputs trim
+ * it (`z.string().trim()`): otherwise " sch_x" would name no school here and
+ * the school the procedure then acts on.
+ *
+ * Platform administration (`systemAdmin.*`) is not held: it acts on a school
+ * from outside it, even when the administrator is also a member (the
+ * principal of a demo school they created).
  */
 async function assertSchoolWritableForWrite(
   context: Context,
   meta: ProcedureMeta,
+  path: readonly string[],
   input: unknown,
 ) {
   if (meta.mcp?.access === "read") return;
+  if (path[0] === "systemAdmin") return;
   const schoolId =
     typeof input === "object" && input !== null
       ? (input as Record<string, unknown>).schoolId
       : undefined;
   if (typeof schoolId !== "string") return;
-  await assertSchoolWritableByCaller(context, schoolId);
+  await assertSchoolWritableByCaller(context, schoolId.trim());
 }
 
-const requireAuth = o.middleware(async ({ context, next, procedure }, input) => {
+const requireAuth = o.middleware(async ({ context, next, procedure, path }, input) => {
   if (!context.session?.user) {
     throw rpcError.unauthorized();
   }
   assertOAuthScope(context, procedure["~orpc"].meta);
   assertAssistantToolPolicy(context, procedure["~orpc"].meta, input);
-  await assertSchoolWritableForWrite(context, procedure["~orpc"].meta, input);
+  await assertSchoolWritableForWrite(context, procedure["~orpc"].meta, path, input);
   return next({
     context: {
       db: context.db,

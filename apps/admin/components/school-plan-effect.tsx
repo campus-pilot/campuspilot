@@ -71,7 +71,7 @@ export function LostFeatureWarnings({ lost }: { lost: SchoolFeatureKey[] }) {
 
 /** What a school without a plan means for its people, said wherever a change can leave it there. */
 export const NO_PLAN_CONSEQUENCE =
-  'Its staff and students can still sign in and view everything, but nothing can be changed until it gets a subscription or a trial. Nothing is deleted.';
+  'It will be blocked: its staff can still sign in, but nothing can be changed and every feature of a plan is off (student records, notices, the Cadet Portal) until it gets a subscription or a trial. Nothing is deleted.';
 
 /**
  * Reads everything that shows a school's plan again after a change: the

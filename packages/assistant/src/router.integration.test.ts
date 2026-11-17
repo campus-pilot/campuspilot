@@ -424,6 +424,17 @@ describe('stopping a run that waits for approval', () => {
 });
 
 describe('deleting a conversation', () => {
+  it('is refused while the school is read-only (suspended, or without an active plan), and deletes nothing', async () => {
+    for (const code of ['school_suspended', 'no_plan'] as const) {
+      const turn = await finishedConversationWithEverything();
+      // The user still sees the assistant there; only changes are refused.
+      loadAccessMock.mockResolvedValue({ ...ALLOWED, suspended: code === 'school_suspended', noPlan: code === 'no_plan', allowed: false, refusal: { code, message: `Refused: ${code}.` } });
+      await expect(remove(turn, turn.userId)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      const [kept] = await db.select().from(assistantConversationTable).where(eq(assistantConversationTable.id, turn.conversationId));
+      expect(kept?.deletedAt, code).toBeNull();
+    }
+  });
+
   it('is soft: every row stays, marked deleted by its user, and nothing else changes', async () => {
     const turn = await finishedConversationWithEverything();
     const other = await addConversation(turn, 'Keep me');

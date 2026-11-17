@@ -140,7 +140,7 @@ function SubscriptionForm({ schoolId, plan }: { schoolId: string; plan: SchoolPl
           <div className="flex flex-col gap-3">
             {picked !== current ? <PlanChangeSummary features={plan.features} planTier={planTierWith(picked, plan.trial)} /> : null}
             {errors.map((error) => (
-              <p key={formErrorText(error)} className="text-xs text-destructive">
+              <p key={formErrorText(error)} role="alert" className="text-xs text-destructive">
                 {formErrorText(error)}
               </p>
             ))}
@@ -198,7 +198,7 @@ export function SchoolPlanCard({ schoolId, plan }: { schoolId: string; plan: Sch
         </CardTitle>
         <CardDescription>
           The school has the features of the higher of its subscription and its trial. Without either it has no plan:
-          its staff and students can view everything but change nothing. Features you adjusted below stay as adjusted.
+          it is blocked: nothing can be changed and the features of a plan are off. Features you adjusted below stay as adjusted.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-6">

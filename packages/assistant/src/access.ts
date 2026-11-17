@@ -45,6 +45,18 @@ export function assertCanSee(decision: AssistantAccessDecision): void {
   throw assistantAccessError(decision.refusal ?? { code: 'role_not_enabled', message: 'You cannot use the AI assistant in this school.' });
 }
 
+/**
+ * Throws unless {@link canSee} and the school can be changed: deleting a
+ * conversation or an unsent attachment is a change, refused while the school
+ * is read-only (suspended, or without an active plan). Stopping a run and
+ * declining an approval only stop spending, so they keep {@link assertCanSee}.
+ */
+export function assertCanChange(decision: AssistantAccessDecision): void {
+  assertCanSee(decision);
+  const refusal = decision.refusal;
+  if (refusal && (refusal.code === 'school_suspended' || refusal.code === 'no_plan')) throw assistantAccessError(refusal);
+}
+
 /** Throws unless the user may start or continue a turn now (feature, role, the school not suspended, limit). */
 export function assertCanUse(decision: AssistantAccessDecision): void {
   assertCanSee(decision);

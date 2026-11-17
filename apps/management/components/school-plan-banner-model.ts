@@ -34,12 +34,16 @@ const trialEndFormatter = new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kol
  * The informational notice in a trial's last {@link TRIAL_ENDING_NOTICE_DAYS}
  * days, or null at any other time and when no trial gives the school its
  * plan (`trialEndsAt` null). The day is shown in IST, like the rest of the
- * platform.
+ * platform. A school without a subscription is told it will then be blocked;
+ * one with a subscription only loses what the trial added.
  */
-export function trialEndingNotice(trialEndsAt: string | null, now: Date = new Date()): string | null {
+export function trialEndingNotice(trialEndsAt: string | null, hasSubscription: boolean, now: Date = new Date()): string | null {
   if (trialEndsAt === null) return null;
   const end = new Date(trialEndsAt);
   const left = end.getTime() - now.getTime();
   if (left <= 0 || left > TRIAL_ENDING_NOTICE_DAYS * DAY_MS) return null;
-  return `Your trial ends on ${trialEndFormatter.format(end)}. Contact CampusPilot to keep using these features.`;
+  const day = trialEndFormatter.format(end);
+  return hasSubscription
+    ? `Your trial ends on ${day}. Contact CampusPilot to keep using these features.`
+    : `Your trial ends on ${day}. Without a subscription the school is then blocked. Contact CampusPilot to continue.`;
 }

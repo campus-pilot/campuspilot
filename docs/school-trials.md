@@ -91,7 +91,7 @@ school without a plan with its own reason:
 
 ```
 ORPCError('FORBIDDEN', {
-  message: 'This school has no active plan. You can still view everything, but nothing can be changed. Contact CampusPilot to continue.',
+  message: 'This school has no active plan, so it is blocked: nothing can be changed and the features of a plan are off. Contact CampusPilot to continue.',
   data: { reason: 'SCHOOL_NO_PLAN' },
 })
 ```
@@ -112,7 +112,7 @@ Clients tell the reasons apart with `schoolWriteRefusalOf(error)`,
 
 | Procedure | What it does |
 | --- | --- |
-| `systemAdmin.startSchoolTrial({ id, tier, endsAt })` | Starts a trial now. `endsAt` is an ISO date-time with offset, in the future and at most 366 days ahead (`MAX_TRIAL_DAYS`, a guard against a mistyped year). CONFLICT while the school has an active trial: change or end that one instead. |
+| `systemAdmin.startSchoolTrial({ id, tier, endsAt })` | Starts a trial now. `endsAt` is an ISO date-time with offset, in the future and at most 367 days ahead (`MAX_TRIAL_DAYS`, a guard against a mistyped year). CONFLICT while the school has an active trial: change or end that one instead. |
 | `systemAdmin.updateSchoolTrial({ id, trialId, tier?, endsAt? })` | Changes the **active** trial's tier or end (extend or shorten; the end stays in the future and after the start). A trial that ended or ran out cannot be changed (CONFLICT). |
 | `systemAdmin.endSchoolTrial({ id, trialId })` | Sets `ended_at = now()` and `ended_by`. Idempotent: a trial that has already ended keeps its first end, and one that ran out by itself is left as it is (so `ended_at` always lies inside the trial). |
 | `systemAdmin.listSchoolTrials({ id })` | The history, newest first, each with `active` decided by the database's clock. |
@@ -164,10 +164,11 @@ server's refusal is shown where that screen shows a failed save.
   suspended or the no-plan message, suspension first. `TrialEndingBanner`
   shows "Your trial ends on 17 Dec. Contact CampusPilot to keep using these
   features." in the trial's last 7 days only (`trialEndingNotice`), nothing
-  during the rest of it. The RPC link and the assistant client read the
+  during the rest of it. A school without a subscription (`hasSubscription`
+  in `listMySchools`) is told instead that it is then blocked. The RPC link and the assistant client read the
   school list again on either refusal (`lib/orpc.ts`).
 - **Cadet Portal.** `ReadOnlySchoolNotice` shows "Your school's plan has
-  ended. You can still view everything. Contact your school." (or the
+  ended, so the portal is blocked. Contact your school." (or the
   suspended notice); a refused change says the same and reads the school
   again. Students are not told about trials.
 

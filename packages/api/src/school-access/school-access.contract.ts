@@ -28,7 +28,7 @@ export const SCHOOL_SUSPENDED_MESSAGE =
 
 /** What a member of a school without an active plan is told. */
 export const SCHOOL_NO_PLAN_MESSAGE =
-  'This school has no active plan. You can still view everything, but nothing can be changed. Contact CampusPilot to continue.';
+  'This school has no active plan, so it is blocked: nothing can be changed and the features of a plan are off. Contact CampusPilot to continue.';
 
 /** The message of each refusal, as the server sends it. */
 export const SCHOOL_WRITE_REFUSAL_MESSAGES = {

@@ -26,7 +26,8 @@ export function ReadOnlySchoolBanner({ schoolId }: { schoolId: string }) {
   const school = useMySchool(schoolId);
   const reason = school ? readOnlySchoolReason(school) : null;
   if (reason === null) return null;
-  return <AppShellAlert key={reason} slug={`school:${schoolId}:${reason}`} type="warning" message={READ_ONLY_SCHOOL_MESSAGES[reason]} />;
+  // Above the pages' own alerts: only two are shown (one on a phone), and this one must always be seen.
+  return <AppShellAlert key={reason} slug={`school:${schoolId}:${reason}`} type="warning" message={READ_ONLY_SCHOOL_MESSAGES[reason]} priority={1} />;
 }
 
 /**
@@ -37,7 +38,7 @@ export function ReadOnlySchoolBanner({ schoolId }: { schoolId: string }) {
  */
 export function TrialEndingBanner({ schoolId }: { schoolId: string }) {
   const school = useMySchool(schoolId);
-  const notice = school ? trialEndingNotice(school.trialEndsAt) : null;
+  const notice = school ? trialEndingNotice(school.trialEndsAt, school.hasSubscription) : null;
   if (notice === null) return null;
   return <AppShellAlert slug={`school:${schoolId}:trial-ending`} type="normal" message={notice} />;
 }

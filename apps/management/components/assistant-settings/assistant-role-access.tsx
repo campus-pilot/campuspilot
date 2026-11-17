@@ -81,7 +81,7 @@ function SaveButton({ form }: { form: RoleAccessForm }) {
       {({ isDirty, isSubmitting, errors }) => (
         <div className="flex flex-col gap-2">
           {errors.map((error) => (
-            <p key={String(error)} className="text-xs text-destructive">
+            <p key={String(error)} role="alert" className="text-xs text-destructive">
               {typeof error === 'object' && error && 'form' in error ? String(error.form) : String(error)}
             </p>
           ))}

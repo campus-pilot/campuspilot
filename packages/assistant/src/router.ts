@@ -6,7 +6,7 @@ import { ASSISTANT_LIST_PAGE_SIZE, type AssistantStreamEvent } from '@campuspilo
 import { implement, ORPCError } from '@orpc/server';
 
 import { attachmentNotReadyMessage, bindAttachments, deleteConversationAttachments, lockUnsentAttachments, toAttachmentRef, unreadableAttachmentMessage } from './attachments';
-import { assertCanSee, assertCanUse, assertMember, canSee, loadAssistantAccess } from './access';
+import { assertCanChange, assertCanSee, assertCanUse, assertMember, canSee, loadAssistantAccess } from './access';
 import { assertMayManagePaper, mayReachConversation, type ConversationNeed } from './conversation-access';
 import { listPaperConversations } from './paper-conversations';
 import { db } from './db';
@@ -524,7 +524,7 @@ export const assistantRouter = os.router({
    * change; for the user it is gone from every procedure.
    */
   deleteConversation: authed.deleteConversation.handler(async ({ context, input }) => {
-    await assertReadAccess(context, input.schoolId);
+    assertCanChange(await loadAssistantAccess(context.session, input.schoolId));
     const owned = await ownedConversation(context, input.schoolId, input.conversationId);
     // Deleting a conversation shared with a paper takes it from everyone working on that paper, so its starter must still
     // be one of them (may continue it); otherwise it is answered like any conversation they cannot reach.

@@ -47,12 +47,17 @@ export function parseTrialEnd(endsAt: string, startsAt: Date | null = null): Dat
   return end;
 }
 
-/** The PostgreSQL exclusion violation of `school_trial_no_overlap` as CONFLICT, or null for any other error. */
+/** A database refusal of a trial as the API answers it: the exclusion violation of `school_trial_no_overlap` as CONFLICT, the end-before-start check as BAD_REQUEST; null for any other error. */
 export function trialOverlapConflict(error: unknown) {
   let current: unknown = error;
   while (typeof current === 'object' && current !== null) {
     if ('code' in current && current.code === '23P01') {
       return rpcError.conflict('This school already has a trial at that time. Change or end it instead.', current);
+    }
+    // The end is checked against this server's clock, the start is the database's now(): a clock difference can still
+    // put the end first. Said as the same mistake parseTrialEnd reports, not as a server error.
+    if ('code' in current && current.code === '23514' && 'constraint' in current && current.constraint === 'school_trial_ends_after_start_check') {
+      return rpcError.badRequest('The trial must end in the future.', current);
     }
     current = 'cause' in current ? current.cause : undefined;
   }

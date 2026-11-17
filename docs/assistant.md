@@ -120,9 +120,10 @@ on for a school that has no role switched on, the default roles are switched
 on with it (`ASSISTANT_DEFAULT_ROLES`: principal, manager, exam coordinator,
 accountant; `switchOnDefaultAssistantRoles`), so an enabled assistant is
 usable at once. A school that already has a role switched on keeps exactly its
-list, also across switching the assistant off and on. (Migration 0071 merged
+list, also across switching the assistant off and on. (Migration 0073 merged
 the two earlier lists: a school kept the roles that were both eligible and
-switched on, or, where none was switched on, got the eligible ones.)
+switched on, or, where its assistant was on and none was switched on, got the
+eligible ones.)
 
 **Use** (start or continue a turn) is decided by one API function,
 `resolveAssistantAccess` (`packages/api/src/assistant/access.ts`). Each fact is
