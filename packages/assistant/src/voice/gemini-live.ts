@@ -10,6 +10,7 @@ import {
 } from '@google/genai';
 import { VOICE_INPUT_SAMPLE_RATE } from '@campuspilot/assistant-contract/voice';
 
+import { GEMINI_API_VERSION } from '../runtime/providers/gemini-api-version';
 import type { VoiceSettings } from './config';
 import type { VoiceConnectInput, VoiceConnection, VoiceEvent, VoiceProvider, VoiceResultDelivery, VoiceUsage } from './provider';
 
@@ -128,7 +129,7 @@ function liveConfig(settings: VoiceSettings, input: VoiceConnectInput) {
 export const VOICE_CONNECT_TIMEOUT_MS = 15_000;
 
 export function createGeminiLiveProvider(settings: VoiceSettings): VoiceProvider {
-  const client = new GoogleGenAI({ apiKey: settings.apiKey });
+  const client = new GoogleGenAI({ apiKey: settings.apiKey, apiVersion: GEMINI_API_VERSION });
 
   return {
     id: 'gemini',

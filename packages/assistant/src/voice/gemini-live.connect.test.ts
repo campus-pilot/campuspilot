@@ -13,11 +13,15 @@ import type { VoiceEvent } from './provider';
  */
 const live = vi.hoisted(() => ({
   attempts: [] as Array<{ callbacks: { onclose?: ((event: never) => void) | null }; ready: (session: unknown) => void }>,
+  clientOptions: [] as unknown[],
 }));
 
 vi.mock('@google/genai', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@google/genai')>()),
   GoogleGenAI: class {
+    constructor(options: unknown) {
+      live.clientOptions.push(options);
+    }
     live = {
       connect: (params: { callbacks: LiveCallbacks }) =>
         new Promise((resolve) => {
@@ -49,6 +53,11 @@ afterEach(() => {
 });
 
 describe('connecting to the voice model', () => {
+  it('creates its client on v1beta, the only Gemini API version that serves the Live API', () => {
+    createGeminiLiveProvider(SETTINGS);
+    expect(live.clientOptions.at(-1)).toEqual({ apiKey: 'test-key', apiVersion: 'v1beta' });
+  });
+
   it('fails when the socket closes before the model is ready, instead of waiting for ever', async () => {
     const events: VoiceEvent[] = [];
     const connecting = connect(events);
