@@ -15,8 +15,9 @@ import { QUESTION_PAPER_EXAMPLES } from '@campuspilot/question-paper/examples';
 import { ORPCError } from '@orpc/server';
 import { and, asc, eq } from 'drizzle-orm';
 import sharp from 'sharp';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+import { settleDerivatives } from '../../../test/image-derivatives';
 import { createQuestionPaperWorld, switchAssistantRoles, type QuestionPaperWorld } from '../../../test/question-paper';
 import { setTestSchoolFeature } from '../../../test/fixtures';
 import { handleQuestionPaperPageUpload } from '../../routers/school/question-paper/question-paper.http';
@@ -25,6 +26,12 @@ import { QUESTION_PAPER_JOB_FAILURES } from './constants';
 import { defaultGenerationDeps, runQuestionPaperGeneration, type GenerationDeps, type StepRunner } from './generation';
 import { QUESTION_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT, QUESTION_PAPER_JOB_SYSTEM_PROMPT, TEACHER_INSTRUCTIONS_END, TEACHER_INSTRUCTIONS_START, TEMPLATE_PRINTS_START } from './prompt';
 import type { ModelUsage, QuestionPaperModel, TextPart, TextResult } from './model';
+
+/** The worker's image job runs inline (`test/image-derivatives.ts`): a job reads only pages whose copies exist. */
+vi.mock('../image-derivatives/outbox', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../image-derivatives/outbox')>()),
+  requestImageDerivatives: (await import('../../../test/image-derivatives')).runDerivativesInline,
+}));
 
 const { 'hindi-maths': HINDI_MATH, 'english-science': ENGLISH_SCIENCE } = QUESTION_PAPER_EXAMPLES;
 const HEVC_STILL = readFileSync(new URL('../../files/__fixtures__/hevc-still.heic', import.meta.url));
@@ -92,6 +99,7 @@ async function queueJob(
     const response = await handleQuestionPaperPageUpload(uploadRequest(page.bytes, page.type, page.name), manager.context, key);
     expect(response.status).toBe(200);
   }
+  await settleDerivatives();
   const [paper] = await db
     .select()
     .from(examQuestionPaperTable)

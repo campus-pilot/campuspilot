@@ -124,7 +124,7 @@ export const assistantTranscriptRoleEnum = pgEnum("assistant_transcript_role", [
  */
 export const assistantAttachmentDerivativeStatusEnum = pgEnum(
   "assistant_attachment_derivative_status",
-  ["ready", "unsupported"],
+  ["ready", "unsupported", "pending", "failed"],
 );
 
 /**
@@ -451,8 +451,11 @@ export const assistantAttachmentTable = pgTable(
     height: integer("height"),
     s3Key: text("s3_key").notNull().unique(),
     /**
-     * Images only (null for a document): `unsupported` when the server could
-     * not decode it (HEIC), so only the original exists.
+     * Images only (null for a document). `pending` until the worker has made
+     * the derivatives (`workflows/image-derivatives`); `unsupported` when the
+     * server could not decode it (HEIC), so only the original exists; `failed`
+     * when a JPEG, PNG or WebP could not be decoded or the worker did not
+     * finish in time. A message cannot be sent with a `pending` or `failed` one.
      */
     derivativeStatus: assistantAttachmentDerivativeStatusEnum(
       "derivative_status",

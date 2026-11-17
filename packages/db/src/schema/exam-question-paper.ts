@@ -13,6 +13,10 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import type { QuestionPaperNotice } from "@campuspilot/question-paper/hash";
+import {
+  QUESTION_PAPER_PAGE_ROTATIONS,
+  type QuestionPaperPageRotation,
+} from "@campuspilot/question-paper/pages";
 
 import { generateId } from "../id";
 import { artifactTable } from "./artifact";
@@ -33,14 +37,31 @@ import { schoolSessionTable } from "./session";
  */
 
 /**
- * Whether the server could decode an uploaded image. Its own fact: never
- * inferred from the content type. `ready` = thumbnail and model derivative
- * exist; `unsupported` = sharp could not decode it (HEIC), so the original is
- * stored but neither derivative exists. Shared with chat attachments.
+ * Whether the server has made the derivatives of an uploaded image. Its own
+ * fact: never inferred from the content type. The worker makes them after the
+ * upload (`workflows/image-derivatives`), so a stored image starts `pending`.
+ * `ready` = thumbnail and model derivative exist; `unsupported` = sharp could
+ * not decode it (HEIC), so the original is stored but neither derivative
+ * exists; `failed` = a JPEG, PNG or WebP that could not be decoded, or one the
+ * worker did not finish in time: the page must be removed and uploaded again.
+ * The same values as chat attachments' own enum.
  */
 export const questionPaperPageDerivativeStatusEnum = pgEnum(
   "question_paper_page_derivative_status",
-  ["ready", "unsupported"],
+  ["ready", "unsupported", "pending", "failed"],
+);
+
+/**
+ * Whether a page's bytes have arrived. Its own fact, separate from the
+ * derivatives: pages are reserved in the order the user picked them
+ * (`awaiting`, no file facts yet) and their photos then upload in parallel
+ * into those rows (`stored`), so the paper's page order never depends on which
+ * upload finishes first. An `awaiting` row the upload never filled is removed
+ * by the sweep (`QUESTION_PAPER_PAGE_RESERVATION_TTL_MS`).
+ */
+export const questionPaperPageUploadStatusEnum = pgEnum(
+  "question_paper_page_upload_status",
+  ["awaiting", "stored"],
 );
 
 /** Lifecycle of one durable generation request. */
@@ -156,19 +177,51 @@ export const examQuestionPaperPageTable = pgTable(
       .references(() => schoolTable.id),
     /** 1-based order within the paper. */
     position: integer("position").notNull(),
-    originalS3Key: text("original_s3_key").notNull().unique(),
+    uploadStatus: questionPaperPageUploadStatusEnum("upload_status")
+      .notNull()
+      .default("stored"),
+    /** Null while `awaiting`: the key's extension comes from the uploaded bytes. */
+    originalS3Key: text("original_s3_key").unique(),
     /** The client's file name, display only, sanitised. */
     originalName: text("original_name").notNull(),
-    contentType: text("content_type").notNull(),
-    byteSize: integer("byte_size").notNull(),
+    /** Null while `awaiting`, like `byteSize` and `sha256`. */
+    contentType: text("content_type"),
+    byteSize: integer("byte_size"),
     /** Used to warn about a duplicate page in the UI, never a constraint. */
-    sha256: text("sha256").notNull(),
-    /** Null when the image could not be decoded. */
+    sha256: text("sha256"),
+    /** When the bytes arrived; the worker's deadline for the derivatives runs from here. */
+    storedAt: timestamp("stored_at", { withTimezone: true }),
+    /**
+     * The displayed size: after EXIF orientation and `rotation`, so it is the
+     * size of the derivatives' shape. Null when the image could not be decoded
+     * and its header states no size.
+     */
     width: integer("width"),
     height: integer("height"),
     derivativeStatus: questionPaperPageDerivativeStatusEnum(
       "derivative_status",
     ).notNull(),
+    /**
+     * Clockwise quarter turns (0, 90, 180, 270) a person applied on top of the
+     * photo's EXIF orientation, because a page photographed with the phone held
+     * sideways is still on its side after EXIF orientation. Its own fact: the
+     * original object is never changed; the thumbnail and the model derivative
+     * are made from the original with this turn applied, and `width`/`height`
+     * follow it. Only a page whose derivatives exist (`ready`) can be turned.
+     */
+    rotation: integer("rotation")
+      .$type<QuestionPaperPageRotation>()
+      .notNull()
+      .default(0),
+    /**
+     * How often the thumbnail and model derivative were made again after the
+     * upload (0: they are the upload's own). Bumped with every change of
+     * `rotation`. The page image URLs carry it, so a browser never shows a
+     * cached redirect to an earlier turn's (deleted) objects. Its own counter:
+     * never inferred from `rotation` (turning right and back left returns to
+     * the same rotation with new objects).
+     */
+    derivativeRevision: integer("derivative_revision").notNull().default(0),
     thumbS3Key: text("thumb_s3_key"),
     modelS3Key: text("model_s3_key"),
     modelContentType: text("model_content_type"),
@@ -192,8 +245,18 @@ export const examQuestionPaperPageTable = pgTable(
       sql`(${table.derivativeStatus} = 'ready') = (${table.thumbS3Key} is not null and ${table.modelS3Key} is not null)`,
     ),
     check(
+      "exam_question_paper_page_rotation_check",
+      sql`${table.rotation} in (${sql.raw(QUESTION_PAPER_PAGE_ROTATIONS.join(", "))}) and (${table.rotation} = 0 or ${table.derivativeStatus} = 'ready') and ${table.derivativeRevision} >= 0`,
+    ),
+    check(
       "exam_question_paper_page_size_check",
-      sql`${table.byteSize} between 1 and ${sql.raw(String(MAX_PAGE_BYTES))} and ${table.position} >= 1`,
+      sql`${table.position} >= 1 and (${table.byteSize} is null or ${table.byteSize} between 1 and ${sql.raw(String(MAX_PAGE_BYTES))})`,
+    ),
+    // A stored page has every file fact; an awaiting one has none and nothing derived from it. The status is
+    // compared as text: a migration may not use an enum value added in the same transaction.
+    check(
+      "exam_question_paper_page_upload_check",
+      sql`(${table.uploadStatus} = 'stored') = (${table.originalS3Key} is not null and ${table.contentType} is not null and ${table.byteSize} is not null and ${table.sha256} is not null and ${table.storedAt} is not null) and (${table.uploadStatus} = 'stored' or ${table.derivativeStatus}::text = 'pending')`,
     ),
     check(
       "exam_question_paper_page_content_type_check",

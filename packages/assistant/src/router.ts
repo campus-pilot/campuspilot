@@ -5,7 +5,7 @@ import { assistantContract } from '@campuspilot/assistant-contract/contract';
 import { ASSISTANT_LIST_PAGE_SIZE, type AssistantStreamEvent } from '@campuspilot/assistant-contract/dto';
 import { implement, ORPCError } from '@orpc/server';
 
-import { bindAttachments, deleteConversationAttachments, lockUnsentAttachments, toAttachmentRef, unreadableAttachmentMessage } from './attachments';
+import { attachmentNotReadyMessage, bindAttachments, deleteConversationAttachments, lockUnsentAttachments, toAttachmentRef, unreadableAttachmentMessage } from './attachments';
 import { assertCanSee, assertCanUse, assertMember, canSee, loadAssistantAccess } from './access';
 import { assertMayManagePaper, mayReachConversation, type ConversationNeed } from './conversation-access';
 import { listPaperConversations } from './paper-conversations';
@@ -386,6 +386,8 @@ export const assistantRouter = os.router({
       // Attachments are bound in this transaction: the message either carries every
       // one of them or is not saved (decision D46 is checked here, before any cost).
       const attachments = await lockUnsentAttachments(tx, { schoolId: input.schoolId, userId, ids: input.attachmentIds });
+      const notReady = attachmentNotReadyMessage(attachments);
+      if (notReady) throw new ORPCError('BAD_REQUEST', { message: notReady });
       const unreadable = unreadableAttachmentMessage(attachments, readableMimeTypesOf(provider.id));
       if (unreadable) throw new ORPCError('BAD_REQUEST', { message: unreadable });
       if (!input.conversationId) {

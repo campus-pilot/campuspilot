@@ -28,11 +28,14 @@ import {
   deleteQuestionPaper,
   deleteQuestionPaperPage,
   getQuestionPaper,
+  releaseQuestionPaperPage,
+  reserveQuestionPaperPages,
   getQuestionPaperDetail,
   getQuestionPaperFacts,
   listQuestionPaperVersions,
   listQuestionPapers,
   reorderQuestionPaperPages,
+  rotateQuestionPaperPage,
   startQuestionPaperGeneration,
 } from './question-paper.service';
 import { readTemplatePrints } from './question-paper.template-prints';
@@ -372,6 +375,43 @@ export const schoolQuestionPaperRouter = {
       }
     }),
 
+  reserveQuestionPaperPages: protectedProcedure
+    .route(route('Reserve question paper pages', 'Reserve the next pages of a paper, one per photo about to be uploaded, in the order given. Each photo is then sent to its own page (POST .../pages/{pageId}), so uploads may run in parallel without changing the order. A reserved page whose photo does not arrive within 15 minutes is removed. Refused when the paper would pass 20 pages or a generation runs.'))
+    .meta(humanOnly('write'))
+    .input(dto.reservePagesInputSchema)
+    .use(manageClass)
+    .use(requireQuestionPaperAssistantAccess())
+    .output(dto.reservePagesOutputSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        return await reserveQuestionPaperPages(context.db, {
+          scope: await resolvePaperScope(context.db, input),
+          userId: userId(context),
+          fileNames: input.fileNames,
+        });
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
+  releaseQuestionPaperPage: protectedProcedure
+    .route(route('Release a reserved question paper page', 'Remove a reserved page whose photo never arrived (its upload failed or was cancelled) and renumber the rest. A page that has its photo is deleted with deleteQuestionPaperPage instead.'))
+    .meta(humanOnly('write', true))
+    .input(dto.releasePageInputSchema)
+    .use(manageClass)
+    .use(requireQuestionPaperAssistantAccess())
+    .output(dto.releasePageOutputSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        return await releaseQuestionPaperPage(context.db, {
+          scope: await resolvePaperScope(context.db, input),
+          pageId: input.pageId,
+        });
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
   deleteQuestionPaperPage: protectedProcedure
     .route(route('Delete a question paper page', 'Delete one uploaded page photo and renumber the rest. expectedPageRevision must be the revision you last saw. Refused while a generation runs.'))
     .meta(humanOnly('write', true))
@@ -384,6 +424,26 @@ export const schoolQuestionPaperRouter = {
         return await deleteQuestionPaperPage(context.db, {
           scope: await resolvePaperScope(context.db, input),
           pageId: input.pageId,
+          expectedPageRevision: input.expectedPageRevision,
+        });
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
+  rotateQuestionPaperPage: protectedProcedure
+    .route(route('Turn a question paper page', "Turn one uploaded page photo to a rotation (clockwise degrees on top of the photo's own orientation: 0, 90, 180 or 270), for a page photographed sideways. The original upload is kept as it is; the thumbnail and the copy the AI reads are made again turned. expectedPageRevision must be the revision you last saw (CONFLICT otherwise); a turn bumps it. Refused while a generation runs and for a photo the server cannot read (HEIC)."))
+    .meta(humanOnly('write'))
+    .input(dto.rotatePageInputSchema)
+    .use(manageClass)
+    .use(requireQuestionPaperAssistantAccess())
+    .output(dto.rotatePageOutputSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        return await rotateQuestionPaperPage(context.db, {
+          scope: await resolvePaperScope(context.db, input),
+          pageId: input.pageId,
+          rotation: input.rotation,
           expectedPageRevision: input.expectedPageRevision,
         });
       } catch (error) {

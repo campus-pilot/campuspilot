@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest';
 import { createTestSchool } from '../../test/fixtures';
 
 /**
- * Migration 0071 puts every existing school on a subscription tier and
+ * Migration 0073 puts every existing school on a subscription tier and
  * rewrites its `school_feature_flag` rows as adjustments, and merges the two
  * assistant role lists into one. Its promise is that **no school gains or
  * loses a feature on deploy**.
@@ -32,7 +32,7 @@ import { createTestSchool } from '../../test/fixtures';
  * inside a transaction that is rolled back, and this file runs in the
  * platform-wide group, after every other file, alone.
  */
-const DATA_STATEMENTS = readFileSync(resolve(cwd(), '../db/src/migrations/0071_subscription-tiers.sql'), 'utf8')
+const DATA_STATEMENTS = readFileSync(resolve(cwd(), '../db/src/migrations/0073_subscription-tiers.sql'), 'utf8')
   .split('--> statement-breakpoint')
   .map((statement) =>
     statement
@@ -119,7 +119,7 @@ async function afterMigration(check: (transaction: DatabaseExecutor) => Promise<
     });
 }
 
-describe('migration 0071: subscription tiers', () => {
+describe('migration 0073: subscription tiers', () => {
   it('ships the five data statements this test runs, in the order that matters', () => {
     expect(DATA_STATEMENTS.map((statement) => statement.split('\n')[0]!.trim())).toEqual([
       'UPDATE "school" AS s',

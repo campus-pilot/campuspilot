@@ -1,10 +1,19 @@
 import { QUESTION_PAPER_LIMITS } from '@campuspilot/question-paper/limits';
+import { QUESTION_PAPER_PAGE_ROTATIONS } from '@campuspilot/question-paper/pages';
 import { z } from 'zod';
 
 /** The most pages (uploaded photos) one paper may hold (R3). */
 export const QUESTION_PAPER_MAX_PAGES = 20;
 /** The largest accepted original photo, 15 MiB (D24). */
 export const QUESTION_PAPER_MAX_PAGE_BYTES = 15 * 1024 * 1024;
+/**
+ * How long a reserved page may wait for its photo before the sweep removes it
+ * (`releaseExpiredPageReservations`). A photo is shrunk in the browser before
+ * it is sent (about 1 MB), so this is far longer than a slow upload takes; a
+ * reservation left by a closed tab blocks generation at most this long, and
+ * the screen offers to remove it at once.
+ */
+export const QUESTION_PAPER_PAGE_RESERVATION_TTL_MS = 15 * 60 * 1000;
 /**
  * The longest teacher's instructions a generation job accepts, in UTF-16 code
  * units (what a textarea's `maxLength` and `String.length` count), after
@@ -209,8 +218,24 @@ export const reorderPagesInputSchema = paperKeySchema.extend({
   pageIds: z.array(id).min(1).max(QUESTION_PAPER_MAX_PAGES).describe('Every page id, in the new order.'),
   expectedPageRevision: z.number().int().min(0),
 });
+export const reservePagesInputSchema = paperKeySchema.extend({
+  /** One display name per picked photo, in the order the pages should have. */
+  fileNames: z.array(z.string().max(500)).min(1).max(QUESTION_PAPER_MAX_PAGES),
+});
+export const releasePageInputSchema = paperKeySchema.extend({ pageId: id });
 export const deletePageInputSchema = paperKeySchema.extend({
   pageId: id,
+  expectedPageRevision: z.number().int().min(0),
+});
+/**
+ * Turning a page sends the rotation it should have (absolute, like a reorder
+ * sends the whole new order), checked against the revision the caller saw.
+ */
+export const rotatePageInputSchema = paperKeySchema.extend({
+  pageId: id,
+  rotation: z
+    .literal(QUESTION_PAPER_PAGE_ROTATIONS)
+    .describe('Clockwise degrees the page is turned on top of the photo\'s own (EXIF) orientation: 0, 90, 180 or 270.'),
   expectedPageRevision: z.number().int().min(0),
 });
 export const previewDraftInputSchema = paperKeySchema.extend({ html: paperHtmlInput, conversationId: draftChatInput });
@@ -225,12 +250,28 @@ export const pageDtoSchema = z.object({
   id: z.string(),
   position: z.number().int(),
   originalName: z.string(),
-  contentType: z.string(),
-  byteSize: z.number().int(),
-  sha256: z.string(),
+  /**
+   * `awaiting` while the page is reserved and its photo is still on its way;
+   * `stored` once the photo arrived. The file facts below are null until then.
+   */
+  uploadStatus: z.enum(['awaiting', 'stored']),
+  contentType: z.string().nullable(),
+  byteSize: z.number().int().nullable(),
+  sha256: z.string().nullable(),
   width: z.number().int().nullable(),
   height: z.number().int().nullable(),
-  derivativeStatus: z.enum(['ready', 'unsupported']),
+  /**
+   * `pending` until the worker has made the thumbnail and the model copy (and
+   * while the photo is awaited); `ready` once both exist; `unsupported` for a
+   * photo the server cannot decode (HEIC), whose original the model may still
+   * read; `failed` for one that could not be read at all, to remove and upload
+   * again. Generation waits for every page to be `ready` or `unsupported`.
+   */
+  derivativeStatus: z.enum(['pending', 'ready', 'unsupported', 'failed']),
+  /** Clockwise quarter turns a person applied on top of the photo's EXIF orientation; the derivatives and the size follow it. */
+  rotation: z.literal(QUESTION_PAPER_PAGE_ROTATIONS),
+  /** Changes whenever the thumbnail and model copy are made again; the page image URLs carry it so a cached image is never shown. */
+  derivativeRevision: z.number().int(),
 });
 
 const jobSchema = z.object({
@@ -447,6 +488,9 @@ export const listCopySourcesOutputSchema = z.object({
 export const startGenerationOutputSchema = z.object({ jobId: z.string(), status: z.literal('queued') });
 export const reorderPagesOutputSchema = z.object({ pageRevision: z.number().int() });
 export const deletePageOutputSchema = z.object({ pageRevision: z.number().int() });
+export const reservePagesOutputSchema = z.object({ pages: z.array(pageDtoSchema), pageRevision: z.number().int() });
+export const releasePageOutputSchema = z.object({ released: z.boolean(), pageRevision: z.number().int() });
+export const rotatePageOutputSchema = z.object({ page: pageDtoSchema, pageRevision: z.number().int() });
 export const deletePaperOutputSchema = z.object({ deleted: z.literal(true) });
 
 export const previewOutputSchema = z.object({

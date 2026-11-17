@@ -2,6 +2,10 @@ import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import {
   applyPageOrder,
+  assistantCollapsedOf,
+  canCompareOf,
+  compareAsked,
+  comparePageIndex,
   currentJobFailure,
   generatedVersionReady,
   detailPollInterval,
@@ -13,9 +17,19 @@ import {
   resolveView,
   resolveVersionNo,
   shownPaperOf,
-  runInOrder,
+  runWithConcurrency,
+  pagePreviewFallback,
+  pageTurnBlockedReason,
+  pagesNotReadyReason,
+  pagesProcessing,
+  patchStoredPage,
+  releaseFailedUpload,
+  unreservedUploads,
+  scrollAfterZoom,
+  turnedRotation,
   uploadsInFlight,
 } from './question-paper-model';
+import { QueryClient } from '@tanstack/react-query';
 
 const scope = { schoolId: 'sch 1', sessionId: 'ses_1', examSlug: 'half-yearly', classId: 'cls_1', subjectSlug: 'science', modeSlug: 'theory' };
 
@@ -52,10 +66,26 @@ test('the version follows the URL when it exists, else the latest', () => {
   assert.equal(resolveVersionNo('1', []), null);
 });
 
-test('the detail is polled only while a job is in flight', () => {
+const page = (position: number, uploadStatus: 'awaiting' | 'stored', derivativeStatus: string) => ({ position, uploadStatus, derivativeStatus });
+
+test('the detail is polled while a job is in flight or a photo is processed, faster for photos', () => {
+  const ready = [page(1, 'stored', 'ready')];
   assert.equal(detailPollInterval(undefined), false);
-  assert.equal(detailPollInterval({ activeJob: null }), false);
-  assert.equal(detailPollInterval({ activeJob: { id: 'j' } }), 3000);
+  assert.equal(detailPollInterval({ activeJob: null, pages: ready }), false);
+  assert.equal(detailPollInterval({ activeJob: { id: 'j' }, pages: ready }), 3000);
+  assert.equal(detailPollInterval({ activeJob: null, pages: [...ready, page(2, 'stored', 'pending')] }), 1000);
+  // A reservation whose photo has not arrived is waited for by its upload, not by polling.
+  assert.equal(detailPollInterval({ activeJob: null, pages: [page(1, 'awaiting', 'pending')] }), false);
+});
+
+test('pages are ready only when every photo arrived and was processed; a failure is named first', () => {
+  assert.equal(pagesNotReadyReason([]), null);
+  assert.equal(pagesNotReadyReason([page(1, 'stored', 'ready'), page(2, 'stored', 'unsupported')]), null);
+  assert.equal(pagesNotReadyReason([page(1, 'stored', 'pending')]), 'Preparing the photos…');
+  assert.match(pagesNotReadyReason([page(1, 'stored', 'ready'), page(2, 'awaiting', 'pending')])!, /Page 2 is still uploading/);
+  assert.match(pagesNotReadyReason([page(1, 'awaiting', 'pending'), page(2, 'stored', 'failed')])!, /Page 2 could not be read/);
+  assert.equal(pagesProcessing([page(1, 'awaiting', 'pending')]), false);
+  assert.equal(pagesProcessing([page(1, 'stored', 'pending')]), true);
 });
 
 test('the paper side shows a named version, else the unsaved draft, else the latest version', () => {
@@ -82,14 +112,28 @@ test('conflicts are recognised by code', () => {
   assert.equal(isConflict(null), false);
 });
 
-test('uploads run one after another in the order given, even after a failure', async () => {
+test('uploads start in order, at most the limit at once, and a failure does not stop the rest', async () => {
   const log: string[] = [];
-  await runInOrder(['a', 'b', 'c'], async (item) => {
+  let running = 0;
+  let peak = 0;
+  await runWithConcurrency(['a', 'b', 'c', 'd', 'e'], 3, async (item) => {
+    running += 1;
+    peak = Math.max(peak, running);
     log.push(`start ${item}`);
-    await new Promise((resolve) => setTimeout(resolve, item === 'a' ? 15 : 1));
+    await new Promise((resolve) => setTimeout(resolve, item === 'a' ? 20 : 2));
+    running -= 1;
     log.push(`end ${item}`);
+    if (item === 'b') throw new Error('upload failed');
   });
-  assert.deepEqual(log, ['start a', 'end a', 'start b', 'end b', 'start c', 'end c']);
+  assert.equal(peak, 3);
+  assert.deepEqual(log.filter((line) => line.startsWith('start')), ['start a', 'start b', 'start c', 'start d', 'start e']);
+  assert.equal(log.filter((line) => line.startsWith('end')).length, 5);
+  // The slow first photo finishes last: order of completion is free, the pages were reserved in order.
+  assert.equal(log.at(-1), 'end a');
+});
+
+test('only photos without a reserved page are added to the page count', () => {
+  assert.equal(unreservedUploads([{ status: 'converting' }, { status: 'uploading', pageId: 'qpg_1' }, { status: 'error' }]), 1);
 });
 
 test('photos on their way count as in flight, a failed one does not', () => {
@@ -142,4 +186,91 @@ test('an unsaved draft is shown only while no version was saved after it', () =>
   // The photo job (or another chat) saved a version after the draft was written.
   assert.equal(draftIsNewest(draftAt, [{ createdAt: new Date('2026-11-14T11:00:00Z') }, { createdAt: new Date('2026-11-14T09:00:00Z') }]), false);
   assert.equal(draftIsNewest(draftAt, [{ createdAt: draftAt }]), false);
+});
+
+test('a stored page patched into the cache survives a read of the paper that was already in flight', async () => {
+  const queryClient = new QueryClient();
+  const queryKey = ['detail'];
+  queryClient.setQueryData(queryKey, { pages: [{ id: 'B', uploadStatus: 'awaiting' }] });
+  // The processing poll left before B was stored, so it answers with B still awaiting.
+  const poll = queryClient
+    .fetchQuery({ queryKey, staleTime: 0, queryFn: () => new Promise((resolve) => setTimeout(() => resolve({ pages: [{ id: 'B', uploadStatus: 'awaiting' }] }), 20)) })
+    .catch(() => undefined);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await patchStoredPage(queryClient, queryKey, { id: 'B', uploadStatus: 'stored' });
+  await poll;
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.deepEqual(queryClient.getQueryData(queryKey), { pages: [{ id: 'B', uploadStatus: 'stored' }] });
+  queryClient.clear();
+});
+
+test('a failed upload whose page turns out to hold its photo is reported as stored, not missing', async () => {
+  assert.equal(await releaseFailedUpload(async () => ({ released: true })), 'released');
+  // The store committed and only its answer was lost: the release says the page already has its photo.
+  assert.equal(await releaseFailedUpload(async () => Promise.reject(Object.assign(new Error('This page already has its photo.'), { code: 'CONFLICT' }))), 'stored');
+  // Any other failure of the release leaves the photo reported as not added (the server sweeps the page).
+  assert.equal(await releaseFailedUpload(async () => Promise.reject(new Error('Unable to reach the server.'))), 'released');
+});
+
+test('the page preview says the AI can read a photo only when it was stored and is merely undrawable', () => {
+  assert.equal(pagePreviewFallback({ uploadStatus: 'stored', derivativeStatus: 'unsupported' }), 'This photo cannot be shown here. The AI can still read it.');
+  assert.equal(pagePreviewFallback({ uploadStatus: 'stored', derivativeStatus: 'failed' }), 'This photo could not be read. Remove the page and add the photo again.');
+  assert.equal(pagePreviewFallback({ uploadStatus: 'awaiting', derivativeStatus: 'pending' }), 'This photo has not arrived. Remove the page and add the photo again.');
+});
+
+test('a page can be turned only once its copies exist, and the viewer says why not before that', () => {
+  assert.equal(pageTurnBlockedReason({ uploadStatus: 'stored', derivativeStatus: 'ready' }), null);
+  assert.equal(pageTurnBlockedReason({ uploadStatus: 'awaiting', derivativeStatus: 'pending' }), 'This photo is still uploading.');
+  assert.equal(pageTurnBlockedReason({ uploadStatus: 'stored', derivativeStatus: 'pending' }), 'This photo is still being prepared.');
+  assert.equal(pageTurnBlockedReason({ uploadStatus: 'stored', derivativeStatus: 'failed' }), 'This photo could not be read.');
+  assert.equal(pageTurnBlockedReason({ uploadStatus: 'stored', derivativeStatus: 'unsupported' }), "This photo's format cannot be turned.");
+});
+
+test('Rotate right turns a page a quarter clockwise and Rotate left a quarter back, wrapping at a full turn', () => {
+  const rotations = [0, 90, 180, 270] as const;
+  assert.deepEqual(rotations.map((rotation) => turnedRotation(rotation, 'right')), [90, 180, 270, 0]);
+  assert.deepEqual(rotations.map((rotation) => turnedRotation(rotation, 'left')), [270, 0, 90, 180]);
+  for (const rotation of rotations) assert.equal(turnedRotation(turnedRotation(rotation, 'right'), 'left'), rotation);
+});
+
+test('comparing with the photos is asked for by ?compare=1 only', () => {
+  assert.equal(compareAsked('1'), true);
+  for (const raw of [null, undefined, '', '0', 'true', 'yes', '2']) assert.equal(compareAsked(raw), false);
+});
+
+test('a paper can be compared only when it has photos and a paper on screen', () => {
+  assert.equal(canCompareOf({ pageCount: 3, shown: { kind: 'version', versionNo: 2 } }), true);
+  assert.equal(canCompareOf({ pageCount: 1, shown: { kind: 'draft' } }), true);
+  // Made in chat or copied from an earlier paper: nothing was photographed.
+  assert.equal(canCompareOf({ pageCount: 0, shown: { kind: 'version', versionNo: 1 } }), false);
+  // Photos whose first paper is still being generated: nothing to read against them yet.
+  assert.equal(canCompareOf({ pageCount: 3, shown: { kind: 'nothing' } }), false);
+});
+
+test('the assistant folds away while comparing and is as it was left afterwards', () => {
+  const open = { collapsed: false, shownWhileComparing: false };
+  assert.equal(assistantCollapsedOf({ ...open, comparing: false }), false);
+  assert.equal(assistantCollapsedOf({ ...open, comparing: true }), true);
+  // Opened again during the comparison: it stays open, and that says nothing about how it is left afterwards.
+  assert.equal(assistantCollapsedOf({ collapsed: true, shownWhileComparing: true, comparing: true }), false);
+  assert.equal(assistantCollapsedOf({ collapsed: true, shownWhileComparing: true, comparing: false }), true);
+  assert.equal(assistantCollapsedOf({ collapsed: true, shownWhileComparing: false, comparing: false }), true);
+});
+
+test('the comparison shows the page stepped to, and the first when it is gone or none was chosen', () => {
+  const ids = ['a', 'b', 'c'];
+  assert.equal(comparePageIndex(ids, null), 0);
+  assert.equal(comparePageIndex(ids, 'c'), 2);
+  assert.equal(comparePageIndex(ids, 'removed'), 0);
+  assert.equal(comparePageIndex([], 'a'), -1);
+  assert.equal(comparePageIndex([], null), -1);
+});
+
+test('zooming keeps the point under the pointer where it was', () => {
+  // Fitted page, pressed 100 px in and 300 px down: at twice the size that point is at (200, 600), so the pane scrolls by the difference.
+  assert.deepEqual(scrollAfterZoom({ x: 0, y: 0 }, { x: 100, y: 300 }, 2), { x: 100, y: 300 });
+  // Already scrolled down the fitted page.
+  assert.deepEqual(scrollAfterZoom({ x: 0, y: 400 }, { x: 100, y: 300 }, 2), { x: 100, y: 1100 });
+  // Zooming out is the inverse, so in and out returns to where it started.
+  assert.deepEqual(scrollAfterZoom({ x: 100, y: 1100 }, { x: 100, y: 300 }, 0.5), { x: 0, y: 400 });
 });

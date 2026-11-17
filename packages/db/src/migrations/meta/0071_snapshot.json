@@ -1,5 +1,5 @@
 {
-  "id": "6e151ef3-fb30-45b1-96fa-ecb353236cea",
+  "id": "3c6ec5a3-d33e-4332-b451-b0d6b88fbdbb",
   "prevId": "5e1bb8b5-bc8a-4657-aa84-a8875f13b275",
   "version": "7",
   "dialect": "postgresql",
@@ -7007,6 +7007,20 @@
           "primaryKey": false,
           "notNull": true
         },
+        "rotation": {
+          "name": "rotation",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "derivative_revision": {
+          "name": "derivative_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
         "thumb_s3_key": {
           "name": "thumb_s3_key",
           "type": "text",
@@ -7154,6 +7168,10 @@
         "exam_question_paper_page_derivative_check": {
           "name": "exam_question_paper_page_derivative_check",
           "value": "(\"exam_question_paper_page\".\"derivative_status\" = 'ready') = (\"exam_question_paper_page\".\"thumb_s3_key\" is not null and \"exam_question_paper_page\".\"model_s3_key\" is not null)"
+        },
+        "exam_question_paper_page_rotation_check": {
+          "name": "exam_question_paper_page_rotation_check",
+          "value": "\"exam_question_paper_page\".\"rotation\" in (0, 90, 180, 270) and (\"exam_question_paper_page\".\"rotation\" = 0 or \"exam_question_paper_page\".\"derivative_status\" = 'ready') and \"exam_question_paper_page\".\"derivative_revision\" >= 0"
         },
         "exam_question_paper_page_size_check": {
           "name": "exam_question_paper_page_size_check",
@@ -11835,30 +11853,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
-        },
-        "tier": {
-          "name": "tier",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "suspended_at": {
-          "name": "suspended_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "suspended_reason": {
-          "name": "suspended_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "suspended_by": {
-          "name": "suspended_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {},
@@ -11869,19 +11863,6 @@
           "tableTo": "user",
           "columnsFrom": [
             "demo_created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "school_suspended_by_user_id_fk": {
-          "name": "school_suspended_by_user_id_fk",
-          "tableFrom": "school",
-          "tableTo": "user",
-          "columnsFrom": [
-            "suspended_by"
           ],
           "columnsTo": [
             "id"
@@ -11901,16 +11882,7 @@
         }
       },
       "policies": {},
-      "checkConstraints": {
-        "school_tier_check": {
-          "name": "school_tier_check",
-          "value": "\"school\".\"tier\" is null or \"school\".\"tier\" in ('plus', 'pro', 'enterprise')"
-        },
-        "school_suspension_reason_check": {
-          "name": "school_suspension_reason_check",
-          "value": "(\"school\".\"suspended_at\" is null) = (\"school\".\"suspended_reason\" is null)"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.school_member": {
@@ -13502,7 +13474,7 @@
           "name": "enabled",
           "type": "boolean",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "config": {
           "name": "config",

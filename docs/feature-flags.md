@@ -57,7 +57,7 @@ lacks stop at once, exactly as if each had been switched off (the tables
 below); their data is kept. A trial changes the plan the same way while it
 runs and when it ends.
 
-**Existing schools** were put on tiers by migration `0071_subscription-tiers.sql`
+**Existing schools** were put on tiers by migration `0073_subscription-tiers.sql`
 so that no school gained or lost a feature on deploy: each got the lowest
 tier that covers what it had (the Cadet Portal in use: Enterprise; student
 management without it: Pro; neither: Plus), and whatever it had that its new
@@ -99,8 +99,8 @@ Browser apps do not depend on `@campuspilot/db`; they import the same names from
 
 ## Storage
 
-The subscribed tier is `school.tier` (text with a CHECK; migration 0071) and
-trials are rows of `school_trial` (migration 0072, [School trials](school-trials.md)).
+The subscribed tier is `school.tier` (text with a CHECK; migration 0073) and
+trials are rows of `school_trial` (migration 0074, [School trials](school-trials.md)).
 What is stored per feature is the school's **adjustment** and the feature's
 settings:
 
@@ -479,7 +479,7 @@ showing past spend.
 5. No migration is needed unless an existing, already-used capability becomes a
    feature, or the feature joins a tier whose existing schools must not get
    it (or must keep it): then write the adjustments for existing schools in
-   the same release, as 0071 did for `whatsapp` and `notices`.
+   the same release, as 0073 did for `whatsapp` and `notices`.
 6. Tests: `createTestSchool()` without a `tier` makes the baseline school
    most suites need (student management and WhatsApp on, nothing else: a
    Plus school with those two adjusted on); `createTestSchool({ tier })`

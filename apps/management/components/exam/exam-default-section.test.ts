@@ -77,4 +77,13 @@ test('paper links encode every segment and keep what the screen shows in the que
     questionPaperWorkspaceHref(scope, { start: 'sources' }),
     '/school/s/sessions/x/exam/half%20yearly/question-paper/c%2F1/sci/theory?start=sources',
   );
+  // Comparing with the photos is in the address only while it is on.
+  assert.equal(
+    questionPaperWorkspaceHref(scope, { version: 2, compare: true }),
+    '/school/s/sessions/x/exam/half%20yearly/question-paper/c%2F1/sci/theory?version=2&compare=1',
+  );
+  assert.equal(
+    questionPaperWorkspaceHref(scope, { compare: false }),
+    '/school/s/sessions/x/exam/half%20yearly/question-paper/c%2F1/sci/theory',
+  );
 });

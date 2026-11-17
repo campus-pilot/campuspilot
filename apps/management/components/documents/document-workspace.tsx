@@ -440,8 +440,8 @@ function DocumentWorkspaceContent({
                   <DialogHeader className="shrink-0 border-b px-5 py-4 pr-12">
                     <DialogTitle>{documentCreateTitles[documentType]}</DialogTitle>
                     <DialogDescription>
-                      Choose the source data, preview the result, and create the
-                      PDF.
+                      Choose the source data and download the PDF. You can
+                      preview it first.
                     </DialogDescription>
                   </DialogHeader>
                   <div className="min-h-0 overflow-y-auto p-4 sm:p-5">

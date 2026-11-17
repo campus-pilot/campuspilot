@@ -60,7 +60,7 @@ session heading in every examination screen.
 The session Documents create page starts with document-type cards only. The four
 academic cards plus Bills and Receipts share this surface; account statements stay
 contextual to an admission ledger. Each card opens a wide responsive dialog for
-that type's settings, explicit preview, PDF creation, download, and history action.
+that type's settings, optional preview, one-click PDF download, and history action.
 Contextual document links open the same dialog with applicable values preselected;
 closing it returns to a clean card view.
 
@@ -286,7 +286,13 @@ the implementation and APIs in more detail.
   for such a screen: it is the window less the shell's header and its alert rows, so the
   screen still fits when a notice bar is showing. On a phone the studio is an ordinary
   page: the paper alone with a bar at the bottom that opens the assistant full-screen. What is shown lives in
-  `?start=&version=&chat=`. Heading, top-right overflow (All versions, Download latest
+  `?start=&version=&chat=&compare=`. *Compare with photos* (one toggle icon in the header row, only for a
+  paper with photos) splits the paper's pane into two equal panes, the photographed page on the left and the
+  paper on the right, each scrolling on its own, and folds the assistant into its strip while it is on. The
+  photo's few controls (zoom, the page stepper, turning) are small ghost icons in a strip inside its frame, so
+  the two documents stay the content and their frames stay the same rectangle. On a phone a *Photos | Paper*
+  switch above the frame swaps what it shows. Use this pattern when two documents are read against each
+  other: one toggle, equal panes, no synchronised scrolling unless the two really map line for line. Heading, top-right overflow (All versions, Download latest
   PDF, the ways to add a new version, Delete paper with an app confirmation), breadcrumbs for
   navigation, no back button.
 - Uploading, reordering, deleting and generating are closed when the exam is

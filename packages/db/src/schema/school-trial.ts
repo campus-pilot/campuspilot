@@ -17,7 +17,7 @@ import { schoolTable } from "./school";
  * (`resolveSchoolPlan` in the feature catalogue).
  *
  * Two trials of one school never overlap: migration
- * `0072_school-trials.sql` adds an EXCLUDE constraint (btree_gist) over
+ * `0074_school-trials.sql` adds an EXCLUDE constraint (btree_gist) over
  * `tstzrange(starts_at, coalesce(ended_at, ends_at))`, which drizzle cannot
  * declare, so it is not in this file.
  */

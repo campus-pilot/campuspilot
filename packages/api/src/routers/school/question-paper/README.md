@@ -15,10 +15,10 @@ each) and **figures** (uploaded images printed inside a version).
 | File | Responsibility |
 | --- | --- |
 | `question-paper.router.ts` | oRPC procedures and their MCP metadata |
-| `question-paper.http.ts` | multipart upload and redirecting reads of page photos |
+| `question-paper.http.ts` | multipart upload and redirecting reads of page photos (`thumb`, `model`, `original`) |
 | `question-paper.access.ts` | the AI assistant gate |
 | `question-paper.scope.ts` | what a paper key means today (plan, names, lifecycle) |
-| `question-paper.service.ts` | lists, pages, deletion, figures, queueing a generation |
+| `question-paper.service.ts` | lists, pages (upload, reorder, turn, delete), deletion, figures, queueing a generation |
 | `question-paper.version.service.ts` | validation (`checkQuestionPaperDraft`), saving a version, previews, downloads |
 | `question-paper.sanitize.ts` / `.css.ts` | the `question_paper_body` sanitiser profile (allowlists, NO ANIMATION, scoped CSS, caps) |
 | `question-paper.output.ts` / `.tree.ts` | the exact output grammar (tokens, balance) and the parse5 tree check (the browser builds the grammar's tree inside `.qp-body`); both run at save and at every render |
@@ -37,7 +37,7 @@ each) and **figures** (uploaded images printed inside a version).
 Every procedure and route checks, in this order:
 
 1. **OPA class permission**: `class.exam.question_paper.read` (list, view, preview,
-   download, versions) or `.manage` (upload, reorder, delete, generate, save, copy). A
+   download, versions) or `.manage` (upload, reorder, turn, delete, generate, save, copy). A
    teacher only for the classes in their role's `meta.classIds`; principal, manager and
    exam coordinator for every class of the school; nobody else.
 2. **The assistant gate** (`requireQuestionPaperAssistantAccess`): the school has the
@@ -62,19 +62,23 @@ sources are of the same class).
 All changes to a paper's pages, jobs and versions run under a `FOR UPDATE` lock of the
 paper row.
 
-- `page_revision` is the token of reorder, delete page and generate
-  (`expectedPageRevision`): any page change bumps it.
+- `page_revision` is the token of reorder, turn page (`rotateQuestionPaperPage`), delete
+  page and generate (`expectedPageRevision`): any page change bumps it, a turn too (the
+  model's input changed).
 - `latest_version_no` is the token of `saveQuestionPaperVersion`
   (`expectedVersionNo`); a stale value is CONFLICT. It is its own column, never
   `max(version_no)`.
 - One job in flight per paper (partial unique index). While it exists, uploading,
-  reordering and deleting pages and deleting the paper are refused with CONFLICT.
+  reordering, turning and deleting pages and deleting the paper are refused with CONFLICT.
 - The printed version number must equal the stored one, so a save renders after
   reading `latest_version_no` and re-checks it under the lock. An agent save with a
   stale `expectedVersionNo` is CONFLICT; an AI job save (no expectation) renders again
   (up to 3 times) when another version landed in between.
 - Storage is outside the transaction: bytes are uploaded first and deleted again
   if the row cannot be written; deletes after a commit are best effort and logged.
+  Turning a page writes its new derivatives under new keys (a random token per turn) before
+  the lock, so two racing turns never share an object; the old derivatives are deleted after
+  the commit. The original upload is never changed.
 
 ## Tools for agents
 
@@ -84,7 +88,8 @@ advanced-tool meta tools, and by the in-app assistant): `listQuestionPapers`,
 (the literal name, decision D36; model-facing `school_learn_question_paper_generation`),
 `validateQuestionPaperDraft` and `saveQuestionPaperVersion` (a write, so the assistant
 asks the user to approve it). Everything else is *hidden*: a human action that is
-never offered to MCP clients or the assistant (page photos, the AI job, previews,
+never offered to MCP clients or the assistant (page photos, including reordering, turning
+and deleting them, the AI job, previews,
 downloads and starting from an earlier paper).
 
 `getQuestionPaper`, `getQuestionPaperDraft`, `validateQuestionPaperDraft` and `learn_question_paper_generation`
@@ -163,7 +168,8 @@ are the target's own rows and objects). Deleting a paper that was copied from cl
 ## Demo seed
 
 `workflows/demo-school/steps.ts` (`seedQuestionPaper`) calls `resolvePaperScope`,
-`addQuestionPaperPage` and `saveQuestionPaperVersion` directly as the demo's principal,
+`addQuestionPaperPage` (then `processPageDerivatives`, since it runs in the worker) and
+`saveQuestionPaperVersion` directly as the demo's principal,
 because a demo school keeps the `assistant` feature off and the procedures refuse
 without it. If you change those functions' signatures or what they check, the seed and
 its test (`demo-question-papers.integration.test.ts`) must follow. See

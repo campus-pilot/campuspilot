@@ -23,7 +23,7 @@ A trial is not a feature flag and not a suspension. The subscription
 | Plan | computed, never stored | The tier the school's features follow, and where it comes from. |
 
 Table `school_trial` (`packages/db/src/schema/school-trial.ts`, migration
-`0072_school-trials.sql`): `id` (`trial_…`), `school_id` (ON DELETE CASCADE:
+`0074_school-trials.sql`): `id` (`trial_…`), `school_id` (ON DELETE CASCADE:
 a trial is the school's own history and goes with it, also in the demo
 purge), `tier` (CHECK: a catalogue tier), `starts_at` (default `now()`),
 `ends_at` (CHECK: after `starts_at`), `ended_at` (set when an administrator

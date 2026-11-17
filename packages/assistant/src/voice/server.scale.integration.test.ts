@@ -53,7 +53,10 @@ const ORIGIN = 'http://management.invalid';
 /** 40 ms of microphone audio (16 kHz, 16-bit). */
 const MIC_FRAME_BYTES = 1280;
 const MIC_FRAME_MS = 40;
-/** 100 ms of the assistant's voice (24 kHz, 16-bit); its first 8 bytes carry when it was sent. */
+/**
+ * 100 ms of the assistant's voice (24 kHz, 16-bit). Its first 8 bytes carry when it was sent, the next 4 the
+ * counting round it belongs to.
+ */
 const VOICE_FRAME_BYTES = 4800;
 const VOICE_FRAME_MS = 100;
 
@@ -81,7 +84,7 @@ const ALLOWED: AssistantAccessDecision = {
 };
 
 /** The scripted voice model's side of every session. */
-const model = { audioIn: 0, audioOut: 0, quiet: false, speaking: [] as Array<ReturnType<typeof setInterval>> };
+const model = { audioIn: 0, audioOut: 0, round: 0, quiet: false, speaking: [] as Array<ReturnType<typeof setInterval>> };
 
 let server: Server;
 let url: string;
@@ -109,6 +112,7 @@ beforeAll(async () => {
           if (model.quiet) return;
           const pcm = Buffer.alloc(VOICE_FRAME_BYTES);
           pcm.writeDoubleLE(performance.now(), 0);
+          pcm.writeUInt32LE(model.round, 8);
           model.audioOut += 1;
           input.onEvent({ type: 'audio', pcm });
         }, VOICE_FRAME_MS);
@@ -151,8 +155,11 @@ describe('the voice endpoint under many sessions', () => {
           socket.on('unexpected-response', (_request, response) => reject(new Error(`refused with ${response.statusCode}`)));
           socket.on('message', (data, isBinary) => {
             if (isBinary) {
+              const frame = data as Buffer;
+              // A frame the model sent before the counters were reset is still on its way: it is not in `model.audioOut`.
+              if (frame.readUInt32LE(8) !== model.round) return;
               voiceFrames += 1;
-              delays.push(performance.now() - (data as Buffer).readDoubleLE(0));
+              delays.push(performance.now() - frame.readDoubleLE(0));
               return;
             }
             const message = voiceServerMessageSchema.parse(JSON.parse(data.toString()));
@@ -169,6 +176,8 @@ describe('the voice endpoint under many sessions', () => {
     const admitMs = performance.now() - startedAt;
 
     // Count from the moment everyone is in: what arrived while the last sessions were still starting is not the steady state.
+    // Frames already sent carry the old round, so one arriving after this point is not counted on either side.
+    model.round += 1;
     delays.length = 0;
     voiceFrames = 0;
     model.audioIn = 0;

@@ -1,6 +1,6 @@
 {
-  "id": "9a63b31d-7b4c-4e7c-8a19-697442a9d13a",
-  "prevId": "6e151ef3-fb30-45b1-96fa-ecb353236cea",
+  "id": "ae60d16b-b138-4b7e-896d-9610d98c0915",
+  "prevId": "3c6ec5a3-d33e-4332-b451-b0d6b88fbdbb",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -6958,11 +6958,19 @@
           "primaryKey": false,
           "notNull": true
         },
+        "upload_status": {
+          "name": "upload_status",
+          "type": "question_paper_page_upload_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'stored'"
+        },
         "original_s3_key": {
           "name": "original_s3_key",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "original_name": {
           "name": "original_name",
@@ -6974,19 +6982,25 @@
           "name": "content_type",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "byte_size": {
           "name": "byte_size",
           "type": "integer",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "sha256": {
           "name": "sha256",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "stored_at": {
+          "name": "stored_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         },
         "width": {
           "name": "width",
@@ -7006,6 +7020,20 @@
           "typeSchema": "public",
           "primaryKey": false,
           "notNull": true
+        },
+        "rotation": {
+          "name": "rotation",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "derivative_revision": {
+          "name": "derivative_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
         },
         "thumb_s3_key": {
           "name": "thumb_s3_key",
@@ -7155,9 +7183,17 @@
           "name": "exam_question_paper_page_derivative_check",
           "value": "(\"exam_question_paper_page\".\"derivative_status\" = 'ready') = (\"exam_question_paper_page\".\"thumb_s3_key\" is not null and \"exam_question_paper_page\".\"model_s3_key\" is not null)"
         },
+        "exam_question_paper_page_rotation_check": {
+          "name": "exam_question_paper_page_rotation_check",
+          "value": "\"exam_question_paper_page\".\"rotation\" in (0, 90, 180, 270) and (\"exam_question_paper_page\".\"rotation\" = 0 or \"exam_question_paper_page\".\"derivative_status\" = 'ready') and \"exam_question_paper_page\".\"derivative_revision\" >= 0"
+        },
         "exam_question_paper_page_size_check": {
           "name": "exam_question_paper_page_size_check",
-          "value": "\"exam_question_paper_page\".\"byte_size\" between 1 and 15728640 and \"exam_question_paper_page\".\"position\" >= 1"
+          "value": "\"exam_question_paper_page\".\"position\" >= 1 and (\"exam_question_paper_page\".\"byte_size\" is null or \"exam_question_paper_page\".\"byte_size\" between 1 and 15728640)"
+        },
+        "exam_question_paper_page_upload_check": {
+          "name": "exam_question_paper_page_upload_check",
+          "value": "(\"exam_question_paper_page\".\"upload_status\" = 'stored') = (\"exam_question_paper_page\".\"original_s3_key\" is not null and \"exam_question_paper_page\".\"content_type\" is not null and \"exam_question_paper_page\".\"byte_size\" is not null and \"exam_question_paper_page\".\"sha256\" is not null and \"exam_question_paper_page\".\"stored_at\" is not null) and (\"exam_question_paper_page\".\"upload_status\" = 'stored' or \"exam_question_paper_page\".\"derivative_status\"::text = 'pending')"
         },
         "exam_question_paper_page_content_type_check": {
           "name": "exam_question_paper_page_content_type_check",
@@ -11835,30 +11871,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
-        },
-        "tier": {
-          "name": "tier",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "suspended_at": {
-          "name": "suspended_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "suspended_reason": {
-          "name": "suspended_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "suspended_by": {
-          "name": "suspended_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {},
@@ -11869,19 +11881,6 @@
           "tableTo": "user",
           "columnsFrom": [
             "demo_created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "school_suspended_by_user_id_fk": {
-          "name": "school_suspended_by_user_id_fk",
-          "tableFrom": "school",
-          "tableTo": "user",
-          "columnsFrom": [
-            "suspended_by"
           ],
           "columnsTo": [
             "id"
@@ -11901,16 +11900,7 @@
         }
       },
       "policies": {},
-      "checkConstraints": {
-        "school_tier_check": {
-          "name": "school_tier_check",
-          "value": "\"school\".\"tier\" is null or \"school\".\"tier\" in ('plus', 'pro', 'enterprise')"
-        },
-        "school_suspension_reason_check": {
-          "name": "school_suspension_reason_check",
-          "value": "(\"school\".\"suspended_at\" is null) = (\"school\".\"suspended_reason\" is null)"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.school_member": {
@@ -13502,7 +13492,7 @@
           "name": "enabled",
           "type": "boolean",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "config": {
           "name": "config",
@@ -13581,187 +13571,6 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.school_trial": {
-      "name": "school_trial",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "school_id": {
-          "name": "school_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "tier": {
-          "name": "tier",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "starts_at": {
-          "name": "starts_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "ends_at": {
-          "name": "ends_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "ended_at": {
-          "name": "ended_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ended_by": {
-          "name": "ended_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "school_trial_school_id_idx": {
-          "name": "school_trial_school_id_idx",
-          "columns": [
-            {
-              "expression": "school_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "starts_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "school_trial_created_by_idx": {
-          "name": "school_trial_created_by_idx",
-          "columns": [
-            {
-              "expression": "created_by",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "school_trial_ended_by_idx": {
-          "name": "school_trial_ended_by_idx",
-          "columns": [
-            {
-              "expression": "ended_by",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "school_trial_school_id_school_id_fk": {
-          "name": "school_trial_school_id_school_id_fk",
-          "tableFrom": "school_trial",
-          "tableTo": "school",
-          "columnsFrom": [
-            "school_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "school_trial_created_by_user_id_fk": {
-          "name": "school_trial_created_by_user_id_fk",
-          "tableFrom": "school_trial",
-          "tableTo": "user",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "school_trial_ended_by_user_id_fk": {
-          "name": "school_trial_ended_by_user_id_fk",
-          "tableFrom": "school_trial",
-          "tableTo": "user",
-          "columnsFrom": [
-            "ended_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "school_trial_tier_check": {
-          "name": "school_trial_tier_check",
-          "value": "\"school_trial\".\"tier\" in ('plus', 'pro', 'enterprise')"
-        },
-        "school_trial_ends_after_start_check": {
-          "name": "school_trial_ends_after_start_check",
-          "value": "\"school_trial\".\"ends_at\" > \"school_trial\".\"starts_at\""
-        },
-        "school_trial_ended_after_start_check": {
-          "name": "school_trial_ended_after_start_check",
-          "value": "\"school_trial\".\"ended_at\" >= \"school_trial\".\"starts_at\""
-        }
-      },
       "isRLSEnabled": false
     },
     "public.notice_class": {
@@ -14282,7 +14091,9 @@
       "schema": "public",
       "values": [
         "ready",
-        "unsupported"
+        "unsupported",
+        "pending",
+        "failed"
       ]
     },
     "public.assistant_attachment_kind": {
@@ -14416,7 +14227,17 @@
       "schema": "public",
       "values": [
         "ready",
-        "unsupported"
+        "unsupported",
+        "pending",
+        "failed"
+      ]
+    },
+    "public.question_paper_page_upload_status": {
+      "name": "question_paper_page_upload_status",
+      "schema": "public",
+      "values": [
+        "awaiting",
+        "stored"
       ]
     },
     "public.question_paper_version_source": {

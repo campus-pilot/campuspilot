@@ -8,6 +8,7 @@ import {
 import {
   handleAssistantAttachmentDelete,
   handleAssistantAttachmentRead,
+  handleAssistantAttachmentStatus,
   handleAssistantAttachmentUpload,
 } from '@campuspilot/assistant/attachments.http';
 import { createAssistantRequestHandler } from '@campuspilot/assistant/http';
@@ -28,6 +29,7 @@ import { handleSchoolLogoUpload } from '@campuspilot/api/routers/system-admin/sc
 import { handleSchoolLogoBlob } from '@campuspilot/api/routers/school/logo/logo.blob';
 import {
   handleQuestionPaperPageRead,
+  handleQuestionPaperPageStore,
   handleQuestionPaperPageUpload,
 } from '@campuspilot/api/routers/school/question-paper/question-paper.http';
 import { handleSchoolManifestBlob } from '@campuspilot/api/routers/school/manifest/manifest.blob';
@@ -263,7 +265,8 @@ app.delete('/api/blob/schools/:schoolId/admissions/:admissionId/documents/:fileI
  * school usually shares one public IP, so several teachers uploading 20 page
  * papers at once must not starve each other. The limit is not what protects
  * the server from heavy photos: the handler caps a photo at 15 MiB and 40
- * megapixels and the decoder runs two photos at a time per process. Reads are
+ * megapixels, the browser shrinks photos before sending them, and the decode
+ * runs in the worker (`workflows/image-derivatives`), never here. Reads are
  * not limited here: they are permissioned redirects.
  */
 const QUESTION_PAPER_PAGES_PATH =
@@ -289,6 +292,16 @@ app.post(QUESTION_PAPER_PAGES_PATH, questionPaperUploadRateLimit, async (context
   const apiContext = await createContext({ context });
   return handleQuestionPaperPageUpload(context.req.raw, apiContext, key, (error) =>
     reportUploadError(context.var.logger, 'question-paper.page.upload.error', key, error),
+  );
+});
+
+/** The photo of a page reserved with `reserveQuestionPaperPages`; the same limit as a single-request upload. */
+app.post(`${QUESTION_PAPER_PAGES_PATH}/:pageId`, questionPaperUploadRateLimit, async (context) => {
+  const key = questionPaperKey(context);
+  const pageId = context.req.param('pageId');
+  const apiContext = await createContext({ context });
+  return handleQuestionPaperPageStore(context.req.raw, apiContext, key, pageId, (error) =>
+    reportUploadError(context.var.logger, 'question-paper.page.store.error', { ...key, pageId }, error),
   );
 });
 
@@ -353,6 +366,16 @@ app.post(ASSISTANT_ATTACHMENTS_PATH, assistantAttachmentUploadRateLimit, (contex
   const schoolId = context.req.param('schoolId');
   return handleAssistantAttachmentUpload(context.req.raw, schoolId, (error) =>
     reportUploadError(context.var.logger, 'assistant.attachment.upload.error', { schoolId }, error),
+  );
+});
+
+app.get(`${ASSISTANT_ATTACHMENTS_PATH}/:attachmentId`, (context) => {
+  const input = {
+    schoolId: context.req.param('schoolId'),
+    attachmentId: context.req.param('attachmentId'),
+  };
+  return handleAssistantAttachmentStatus(context.req.raw, input, (error) =>
+    reportUploadError(context.var.logger, 'assistant.attachment.status.error', input, error),
   );
 });
 

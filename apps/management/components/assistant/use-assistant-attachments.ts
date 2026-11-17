@@ -16,8 +16,10 @@ import { prepareUploadFile } from '@/components/question-paper/prepare-upload-fi
  * converted to JPEG in the browser where the browser can decode it (Safari),
  * and otherwise goes up as it is for the model to read where its provider can
  * (decision D24); a PDF goes up exactly as picked; any other file is refused
- * before it uploads. The server then decides the kind again from the bytes,
- * stores the file and answers with the attachment. Only an image the server
+ * before it uploads. A photo over 1.5 MB is shrunk to a JPEG first
+ * (`prepareUploadFile`). The server then decides the kind again from the
+ * bytes, stores the file and answers with the attachment; the upload
+ * resolves once the worker has made an image's copies. Only an image the server
  * decoded gets a thumbnail address; a document never does (its bytes are not
  * served back to a browser). The list of attachments itself is a field of the
  * composer's form.

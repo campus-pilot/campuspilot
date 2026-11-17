@@ -20,7 +20,7 @@ suspension does not give a school a plan.
 
 `school.suspended_at` (null while the school is not suspended), with
 `school.suspended_reason` (set exactly while it is suspended; a CHECK holds
-that) and `school.suspended_by`. Migration `0071_subscription-tiers.sql`.
+that) and `school.suspended_by`. Migration `0073_subscription-tiers.sql`.
 
 The reason is the administrator's own note. It is shown in the admin app
 only; the school's staff and students are told to contact support (staff) or

@@ -2,7 +2,9 @@ import { createHash } from 'node:crypto';
 
 import { ORPCError } from '@orpc/server';
 import { rpcError } from '@campuspilot/api/errors';
-import { makeImageDerivatives } from '@campuspilot/api/files/image-derivative';
+import { checkImageHeader } from '@campuspilot/api/files/image-derivative';
+import { assistantAttachmentKeys } from '@campuspilot/api/workflows/image-derivatives/keys';
+import { requestImageDerivatives } from '@campuspilot/api/workflows/image-derivatives/outbox';
 import {
   deleteObjects,
   deleteObjectsBestEffort,
@@ -43,12 +45,6 @@ import type { AttachmentFile } from './runtime/providers/types';
 
 export type AttachmentRow = typeof assistantAttachmentTable.$inferSelect;
 
-const attachmentKeys = {
-  original: (schoolId: string, id: string, extension: string) =>
-    `schools/${schoolId}/assistant/attachments/${id}/original.${extension}`,
-  thumb: (schoolId: string, id: string) => `schools/${schoolId}/assistant/attachments/${id}/thumb.jpg`,
-  model: (schoolId: string, id: string) => `schools/${schoolId}/assistant/attachments/${id}/model.jpg`,
-} as const;
 
 /** The objects of an attachment row, for deleting. */
 export const attachmentObjectKeys = (row: Pick<AttachmentRow, 's3Key' | 'thumbS3Key' | 'modelS3Key'>) => [
@@ -88,6 +84,7 @@ export function toAttachmentRef(row: AttachmentRow): AssistantAttachmentRef {
     width: row.width,
     height: row.height,
     previewable: row.kind === 'image' && row.derivativeStatus === 'ready',
+    derivativeStatus: row.derivativeStatus,
   };
 }
 
@@ -203,10 +200,12 @@ export async function deleteUnsentAttachment(
 }
 
 /**
- * Stores one uploaded file as an unsent attachment. An image gets its
- * derivatives first (a JPEG/PNG/WebP that cannot be decoded is a 415); a
- * document gets none: its bytes are stored exactly as uploaded and never
- * parsed, rendered or rewritten. Then the objects, then the row. The cap of
+ * Stores one uploaded file as an unsent attachment. An image's header is read
+ * first (over 40 megapixels is a 413); its thumbnail and model copy are made
+ * by the worker after the commit (`workflows/image-derivatives`), so the row
+ * starts `pending` and this request never decodes it. A document gets none:
+ * its bytes are stored exactly as uploaded and never parsed, rendered or
+ * rewritten. Then the object, then the row. The cap of
  * unsent attachments per user and school (both kinds together) is counted
  * under an advisory lock for that pair, so parallel uploads cannot pass it
  * together. `file.kind`, `contentType` and `extension` come from the bytes
@@ -219,26 +218,20 @@ export async function createAttachment(
     schoolId: string;
     userId: string;
     file: { bytes: Buffer; kind: AssistantAttachmentKind; contentType: string; extension: string; name: string };
+    /** Hands a stored image to the worker; the default is the outbox hand-over. Tests replace it. */
+    requestDerivatives?: (attachmentId: string) => void;
   },
 ): Promise<AssistantAttachmentRef> {
   const { schoolId, userId, file } = input;
-  const derivatives = file.kind === 'image' ? await makeImageDerivatives(file.bytes, file.contentType) : null;
+  const size = file.kind === 'image' ? await checkImageHeader(file.bytes) : null;
   const id = generateId('assistantAttachment');
   // Storage first, then a short transaction (the page upload's order): no connection or advisory lock is held across
   // storage calls. Keys derive from the id, so nothing can collide; every failure removes what was written.
-  const originalKey = attachmentKeys.original(schoolId, id, file.extension);
-  const ready = derivatives?.status === 'ready' ? derivatives : null;
-  const thumbKey = ready ? attachmentKeys.thumb(schoolId, id) : null;
-  const modelKey = ready ? attachmentKeys.model(schoolId, id) : null;
+  const originalKey = assistantAttachmentKeys.original(schoolId, id, file.extension);
   const written: string[] = [originalKey];
   let freed: string[] = [];
   try {
     await putObject(originalKey, file.bytes, file.contentType);
-    if (ready && thumbKey && modelKey) {
-      written.push(thumbKey, modelKey);
-      await putObject(thumbKey, ready.thumb.bytes, ready.thumb.contentType);
-      await putObject(modelKey, ready.model.bytes, ready.model.contentType);
-    }
     const ref = await database.transaction(async (tx) => {
       freed = [];
       await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`assistant-attachments:${schoolId}:${userId}`}, 0))`);
@@ -281,19 +274,16 @@ export async function createAttachment(
           contentType: file.contentType,
           byteSize: file.bytes.byteLength,
           sha256: createHash('sha256').update(file.bytes).digest('hex'),
-          width: derivatives?.width ?? null,
-          height: derivatives?.height ?? null,
+          width: size?.width ?? null,
+          height: size?.height ?? null,
           s3Key: originalKey,
-          // A document has no derivative status at all; an image is `ready` or `unsupported`.
-          derivativeStatus: derivatives ? (ready ? 'ready' : 'unsupported') : null,
-          thumbS3Key: thumbKey,
-          modelS3Key: modelKey,
-          modelContentType: ready ? ready.model.contentType : null,
-          modelByteSize: ready ? ready.model.bytes.byteLength : null,
+          // A document has no derivative status at all; an image waits for the worker.
+          derivativeStatus: file.kind === 'image' ? 'pending' : null,
         })
         .returning();
       return toAttachmentRef(row!);
     });
+    if (file.kind === 'image') (input.requestDerivatives ?? ((attachmentId: string) => requestImageDerivatives('attachment', attachmentId)))(id);
     // The evicted rows are gone for good; their objects follow (best effort, logged with the keys).
     await deleteObjectsBestEffort(freed);
     return ref;
@@ -377,6 +367,45 @@ export function unreadableAttachmentMessage(
     }
   }
   return null;
+}
+
+/**
+ * The first attachment a message cannot be sent with yet: an image whose
+ * thumbnail and model copy the worker has not made (`pending`) or could not
+ * make (`failed`). The composer waits for every image before it enables
+ * sending, so this only answers a client that did not.
+ */
+export function attachmentNotReadyMessage(rows: ReadonlyArray<Pick<AttachmentRow, 'kind' | 'originalName' | 'derivativeStatus'>>): string | null {
+  for (const row of rows) {
+    if (row.kind !== 'image') continue;
+    if (row.derivativeStatus === 'pending') return `${row.originalName} is still being processed. Send again in a moment.`;
+    if (row.derivativeStatus === 'failed') return `${row.originalName} could not be read as an image. Remove it and attach it again.`;
+  }
+  return null;
+}
+
+/**
+ * The reference of one unsent attachment of this user, as the upload
+ * returned it but current (the composer waits on `derivativeStatus`). Null
+ * when it is not there, not this user's, or already sent.
+ */
+export async function findUnsentAttachmentRef(
+  database: AssistantDatabase,
+  input: { schoolId: string; userId: string; attachmentId: string },
+): Promise<AssistantAttachmentRef | null> {
+  const [row] = await database
+    .select()
+    .from(assistantAttachmentTable)
+    .where(
+      and(
+        eq(assistantAttachmentTable.id, input.attachmentId),
+        eq(assistantAttachmentTable.schoolId, input.schoolId),
+        eq(assistantAttachmentTable.userId, input.userId),
+        isNull(assistantAttachmentTable.itemId),
+      ),
+    )
+    .limit(1);
+  return row ? toAttachmentRef(row) : null;
 }
 
 /** The newest bytes kept in memory: the tool loop sends the history again on every step. */
