@@ -37,6 +37,22 @@ function RejectedRequestNotice({ request }: { request: LatestRequest }) {
   );
 }
 
+/** The note CampusPilot wrote when approving the person's latest request, or null without one. */
+export function approvalNoteOf(status: SchoolCreationStatusDto): string | null {
+  const request = status.latestRequest;
+  return request?.status === 'approved' ? request.decisionNote : null;
+}
+
+function ApprovedRequestNotice({ note }: { note: string }) {
+  return (
+    <Alert className="text-left">
+      <Info aria-hidden />
+      <AlertTitle>Your request was approved</AlertTitle>
+      <AlertDescription>{note}</AlertDescription>
+    </Alert>
+  );
+}
+
 /** The person used their allowance: their request's state, and the form to ask again when nothing is pending. */
 function LimitReached({ status }: { status: SchoolCreationStatusDto }) {
   const request = status.latestRequest;
@@ -54,7 +70,17 @@ function LimitReached({ status }: { status: SchoolCreationStatusDto }) {
 }
 
 function StatusBody({ status }: { status: SchoolCreationStatusDto }) {
-  if (status.refusal === null) return <CreateSchoolForm limit={status.limit} used={status.used} />;
+  if (status.refusal === null) {
+    const note = approvalNoteOf(status);
+    return note ? (
+      <div className="flex flex-col gap-4">
+        <ApprovedRequestNotice note={note} />
+        <CreateSchoolForm limit={status.limit} used={status.used} />
+      </div>
+    ) : (
+      <CreateSchoolForm limit={status.limit} used={status.used} />
+    );
+  }
   if (status.refusal === 'limit_reached') return <LimitReached status={status} />;
   return (
     <Alert className="text-left">

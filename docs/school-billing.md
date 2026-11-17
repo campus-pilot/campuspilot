@@ -129,12 +129,14 @@ Clients tell the reasons apart with `schoolWriteRefusalOf(error)`,
 ## The AI limit counts per period
 
 The assistant's spend limit (the feature config's `monthlyLimitUsd`, kept
-under that name) counts spend over the school's **active billing period**
-(`schoolSpendWindow` in `packages/api/src/assistant/spend.ts`), so every
-28-day period gets exactly one limit's worth however the calendar months
-fall; a trial that crosses a month boundary no longer gets two. A school
-without a period (a standing tier alone) still counts the IST calendar month.
-The spend cache key names the window (`assistant:spend:{school}:period:{id}`
+under that name) counts spend over 28-day steps of the school's **active
+billing period** (`schoolSpendWindow` in
+`packages/api/src/assistant/spend.ts`), so every 28 days get exactly one
+limit's worth however the calendar months fall; a trial that crosses a month
+boundary no longer gets two. Paid and free periods are one step long; a longer
+or extended trial gets one limit per 28 days from its start. A school without
+a period (a standing tier alone) still counts the IST calendar month. The
+spend cache key names the window (`assistant:spend:{school}:period:{id}:{step}`
 or `…:{YYYY-MM}`).
 
 ## Administration
@@ -148,7 +150,7 @@ overlap that still reaches the database is answered CONFLICT.
 | `systemAdmin.getSchoolBilling({ id })` | Every period and invoice, newest first, and `coveredUntil`. |
 | `systemAdmin.startSchoolTrial({ id, tier, endsAt })` | Starts a trial now (default in the admin app: 28 days). At most 367 days ahead (`MAX_TRIAL_DAYS`). CONFLICT while a period is active. |
 | `systemAdmin.updateSchoolTrial({ id, periodId, tier?, endsAt? })` | Changes the **active trial's** tier or end. Paid and complimentary periods cannot be changed, only ended or voided. |
-| `systemAdmin.endSchoolBillingPeriod({ id, periodId })` | Ends the active period now (any kind). Its invoice is unchanged; void it to record a refund. Idempotent. |
+| `systemAdmin.endSchoolBillingPeriod({ id, periodId })` | Ends the active period now (any kind), or cancels an upcoming complimentary period so it never begins (`ended_at = starts_at`; an upcoming paid period is cancelled by voiding its invoice). Its invoice is unchanged; void it to record a refund. Idempotent. |
 | `systemAdmin.addSchoolBillingPeriods({ id, kind, tier, periodCount, start, amountMinor?, paymentReference?, note? })` | Adds 1 to 13 consecutive periods (`MAX_PERIODS_PER_INVOICE`): `paid` creates the invoice (at the active price × periods unless `amountMinor` is given; refused without a price), `complimentary` none. `start: 'after_current'` begins where coverage ends (or now when uncovered), so a payment made early never loses time; `start: 'now'` cuts the active period at now and begins at once (an upgrade from a trial), refused while periods are already lined up after it. |
 | `systemAdmin.voidSchoolInvoice({ id, invoiceId })` | Marks it void; its periods that are not over end now, upcoming ones never begin, past ones stay as history. Idempotent. |
 | `systemAdmin.listSubscriptionPrices` / `setSubscriptionPrice({ tier, unitAmountMinor })` | The price catalogue; setting needs `system.subscription_price.update`. |
@@ -165,7 +167,7 @@ overlap that still reaches the database is answered CONFLICT.
   period with End (and Change for a trial) or Start a trial.
 - **Billing card** (below it): coverage, Add periods (paid or free, tier,
   number of periods, start, amount received, payment reference), the period
-  history and the payments, each with Void.
+  history (upcoming free periods with Cancel) and the payments, each with Void.
 - **Pricing page** (`/pricing`): the price of a 28-day period per tier.
 - **Badges** wherever a school is listed: standing tier, "Trial · Pro · ends
   17 Dec" (or Paid / Free), "No plan", Suspended.

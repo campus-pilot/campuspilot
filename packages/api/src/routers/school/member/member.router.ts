@@ -133,6 +133,15 @@ async function findSchoolMember(
   });
 }
 
+/**
+ * Holds the school row for the transaction, against a concurrent owner change
+ * (`updateSchoolOwner` locks it to update): taken before reading whether a
+ * member is the owner, so the owner guards below see the owner that commits.
+ */
+async function lockSchoolOwner(db: DatabaseExecutor, schoolId: string) {
+  await db.select({ id: schoolTable.id }).from(schoolTable).where(eq(schoolTable.id, schoolId)).for("share");
+}
+
 /** Refusal for removing a school's owner, the owner included. */
 const SCHOOL_OWNER_CANNOT_BE_REMOVED_MESSAGE =
   "The school's owner cannot be removed or leave the school. Contact CampusPilot to transfer ownership.";
@@ -597,6 +606,7 @@ export const schoolMemberRouter = {
     .handler(async ({ context, input, signal }) => {
       try {
         return await context.db.transaction(async (transaction) => {
+          await lockSchoolOwner(transaction, input.schoolId);
           const existingMember = await findSchoolMember(
             transaction,
             input.schoolId,
@@ -684,6 +694,7 @@ export const schoolMemberRouter = {
     .handler(async ({ context, input }) => {
       try {
         return await context.db.transaction(async (transaction) => {
+          await lockSchoolOwner(transaction, input.schoolId);
           const member = await findSchoolMember(
             transaction,
             input.schoolId,

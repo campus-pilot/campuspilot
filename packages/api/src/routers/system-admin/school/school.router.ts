@@ -24,7 +24,7 @@ import {
   updateSchoolOwnerInputSchema,
 } from "./school.dto";
 import { readSchoolDto, schoolRowToDto, selectSchoolsWithActivePeriod } from "./school.read";
-import { parseTrialEnd, startTrialPeriod } from "../../../billing/billing.service";
+import { lockSchool, parseTrialEnd, startTrialPeriod } from "../../../billing/billing.service";
 
 /** The school as the admin DTO after a change; NOT_FOUND when it does not exist. */
 async function requireSchoolDto(db: Parameters<typeof readSchoolDto>[0], schoolId: string) {
@@ -332,6 +332,10 @@ export const schoolRouter = {
     .handler(async ({ context, input }) => {
       try {
         return await context.db.transaction(async (transaction) => {
+          // Locked before the principal check: a member removal or role change
+          // holds the row while it reads who owns the school, so the check and
+          // the owner guards never pass on each other's stale view.
+          await lockSchool(transaction, input.id);
           if (input.ownerUserId !== null) {
             const [principal] = await transaction
               .select({ userId: schoolUserRoleTable.userId })

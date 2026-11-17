@@ -1,4 +1,5 @@
 import { BILLING_PERIOD_DAYS } from '@campuspilot/db/feature-flags/catalogue';
+import { billingPeriodEnd } from '@campuspilot/db/feature-flags/store';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { schoolBillingPeriodTable } from '@campuspilot/db/schema/school-billing';
 import { SYSTEM_ACTIONS } from '@campuspilot/opa/policies/system';
@@ -147,7 +148,7 @@ export const schoolBillingRouter = {
     .route({
       summary: "End a school's billing period now",
       description:
-        "End a school's active billing period (a trial, paid or complimentary period) now. The school then has its standing tier, the next period if one starts at once, or no plan (read-only). Its invoice, if any, is unchanged; void it to record a refund. Ending a period that is already over changes nothing. Requires system-administrator permission.",
+        "End a school's active billing period (a trial, paid or complimentary period) now, or cancel an upcoming complimentary period so it never starts. The school then has its standing tier, the next period if one starts at once, or no plan (read-only). Its invoice, if any, is unchanged; void it to record a refund (an upcoming paid period is cancelled that way). Ending a period that is already over or cancelled changes nothing. Requires system-administrator permission.",
       tags: ['System Admin', 'Billing'],
     })
     .meta(hidden('write', true))
@@ -159,12 +160,27 @@ export const schoolBillingRouter = {
         return await context.db.transaction(async (transaction) => {
           await lockSchool(transaction, input.id);
           const period = await requirePeriod(transaction, input.id, input.periodId);
-          // Only an active period is ended: one that is over keeps its own end,
-          // so `ended_at` always lies within the period's time.
-          if (!period.active) return period;
+          const [timing] = await transaction
+            .select({
+              upcoming: sql<boolean>`${schoolBillingPeriodTable.startsAt} > now()`,
+              open: sql<boolean>`${billingPeriodEnd()} > now() and ${billingPeriodEnd()} > ${schoolBillingPeriodTable.startsAt}`,
+            })
+            .from(schoolBillingPeriodTable)
+            .where(eq(schoolBillingPeriodTable.id, period.id));
+          // A period that is over or already cancelled keeps its own end, so
+          // `ended_at` always lies within the period's time.
+          if (!timing?.open) return period;
+          if (timing.upcoming && period.kind !== 'complimentary') {
+            throw rpcError.badRequest('An upcoming paid period is cancelled by voiding its payment.');
+          }
+          // An upcoming period ends at its start: it never begins, as when its invoice is voided.
           await transaction
             .update(schoolBillingPeriodTable)
-            .set({ endedAt: sql`now()`, endedBy: context.session.user.id, updatedAt: sql`now()` })
+            .set({
+              endedAt: sql`greatest(${schoolBillingPeriodTable.startsAt}, now())`,
+              endedBy: context.session.user.id,
+              updatedAt: sql`now()`,
+            })
             .where(eq(schoolBillingPeriodTable.id, period.id));
           return await requirePeriod(transaction, input.id, period.id);
         });

@@ -12,6 +12,12 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** The most periods one payment can cover (about a year of 28-day periods). */
 export const MAX_PERIODS_PER_INVOICE = 13;
 
+/** The largest amount an invoice can hold, in paise: amounts are stored as 32-bit integers. */
+export const MAX_AMOUNT_MINOR = 2_147_483_647;
+
+/** The highest price of one period, so the price × {@link MAX_PERIODS_PER_INVOICE} always fits an invoice. */
+export const MAX_PRICE_MINOR = Math.floor(MAX_AMOUNT_MINOR / MAX_PERIODS_PER_INVOICE);
+
 /**
  * The end of `count` consecutive billing periods starting at `start`: always
  * exactly {@link BILLING_PERIOD_DAYS} days each, so every period is equally

@@ -3,8 +3,9 @@ import { readSchoolFeatureConfig } from '@campuspilot/db/feature-flags/store';
 import { user } from '@campuspilot/db/schema/auth';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { schoolCreationTable } from '@campuspilot/db/schema/school-creation';
+import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
 import { schoolBillingPeriodTable } from '@campuspilot/db/schema/school-billing';
-import { eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 
 import { expectRpcCode } from '../../test/finance/assertions';
@@ -24,6 +25,7 @@ import {
   schoolCreationRefusalOf,
 } from './school-creation.contract';
 import { addBillingPeriods } from '../billing/billing.contract';
+import { slugifySchoolName } from '../workflows/demo-school/slug';
 
 /** Self-service school creation (docs/school-creation.md). */
 
@@ -143,6 +145,38 @@ describe('school.createSchool', () => {
   });
 });
 
+describe('two people creating a school of the same name at once', () => {
+  it('both get a school, under different slugs', async () => {
+    const people = await Promise.all([newcomer(), newcomer()]);
+    const name = `Same Name School ${Date.now()}`;
+    let created: Promise<Array<{ schoolId: string }>> | undefined;
+    const released = new Error('released');
+    await db
+      .transaction(async (tx) => {
+        // An uncommitted school holding the slug makes both creations pick it and wait at their insert,
+        // as two requests landing together would; rolling it back lets them go.
+        await tx.insert(schoolTable).values({ slug: slugifySchoolName(name), name, location: 'Pune' });
+        const pid = (await tx.execute<{ pid: number }>(sql`select pg_backend_pid() as pid`)).rows[0]!.pid;
+        created = Promise.all(people.map(({ client }) => client.schoolCreation.createSchool(newSchool(name))));
+        created.catch(() => undefined);
+        await expect
+          .poll(async () => (await db.execute(sql`select 1 from pg_stat_activity where ${pid} = any(pg_blocking_pids(pid))`)).rows.length, {
+            timeout: 8000,
+          })
+          .toBe(2);
+        throw released;
+      })
+      .catch((error: unknown) => {
+        if (error !== released) throw error;
+      });
+    const schools = await created!;
+    const slugs = await Promise.all(
+      schools.map(async ({ schoolId }) => (await db.select({ slug: schoolTable.slug }).from(schoolTable).where(eq(schoolTable.id, schoolId)))[0]?.slug),
+    );
+    expect(new Set(slugs).size).toBe(2);
+  });
+});
+
 describe('the owner stays', () => {
   it('cannot be removed or lose the principal role, by another principal or by themselves', async () => {
     const owner = await newcomer();
@@ -189,6 +223,40 @@ describe('the owner stays', () => {
     expect(await owner.client.schoolCreation.getStatus()).toMatchObject({ used: 1, refusal: 'limit_reached' });
   });
 });
+
+describe('the owner and a member change at the same moment', () => {
+  it('a transfer waits for a removal of the new owner that already started, then is refused', async () => {
+    const owner = await newcomer();
+    const { schoolId } = await owner.client.schoolCreation.createSchool(newSchool());
+    const candidate = await createTestUser();
+    await createTestSchoolMember({ schoolId, userId: candidate.id, roles: [{ role: 'principal' }] });
+    const admin = await adminClient();
+    const candidateRow = and(eq(schoolMemberTable.schoolId, schoolId), eq(schoolMemberTable.userId, candidate.id));
+
+    let removal: Promise<unknown> | undefined;
+    let transfer: Promise<unknown> | undefined;
+    await db.transaction(async (tx) => {
+      // Holds the member row so the removal stops after its owner check, at its delete.
+      await tx.select().from(schoolMemberTable).where(candidateRow).for('update');
+      removal = owner.client.school.removeMember({ schoolId, userId: candidate.id });
+      await expect.poll(() => waitingOn('delete from "school_member"'), { timeout: 8000 }).toBeGreaterThan(0);
+      transfer = admin.systemAdmin.updateSchoolOwner({ id: schoolId, ownerUserId: candidate.id });
+      transfer.catch(() => undefined);
+      // The transfer must wait for the removal rather than pass its principal check now.
+      await expect.poll(() => waitingOn('select "id" from "school"'), { timeout: 8000 }).toBeGreaterThan(0);
+    });
+    await removal;
+    await expectRpcCode(transfer!, 'BAD_REQUEST');
+    const [school] = await db.select({ ownerUserId: schoolTable.ownerUserId }).from(schoolTable).where(eq(schoolTable.id, schoolId));
+    expect(school?.ownerUserId).toBe(owner.userId);
+  });
+});
+
+/** How many statements starting with `prefix` are waiting on a lock now. */
+async function waitingOn(prefix: string) {
+  const result = await db.execute(sql`select 1 from pg_stat_activity where wait_event_type = 'Lock' and query like ${`${prefix}%`}`);
+  return result.rows.length;
+}
 
 describe('asking for more schools', () => {
   it('reaches administrators, and approving lets the person create up to the granted total', async () => {

@@ -15,7 +15,7 @@ import {
 } from '../../test/fixtures';
 import { schoolSpendWindow } from '../assistant/spend';
 import { isSchoolNoPlanError } from '../school-access/school-access.contract';
-import { addBillingPeriods, coveredUntil } from './billing.contract';
+import { addBillingPeriods, coveredUntil, MAX_PERIODS_PER_INVOICE, MAX_PRICE_MINOR } from './billing.contract';
 
 /**
  * School billing (docs/school-billing.md): 28-day periods, prices, invoices
@@ -70,6 +70,33 @@ describe('subscription prices', () => {
     const school = await createTestSchool();
     const { session } = await createSchoolStaffSession(school.id, [{ role: 'principal', meta: null }]);
     await expectRpcCode(createTestClient(session).systemAdmin.setSubscriptionPrice({ tier: 'pro', unitAmountMinor: 1 }), 'FORBIDDEN');
+  });
+});
+
+describe('amounts', () => {
+  it('refuse a price whose 13 periods would not fit an invoice, and record the highest price for 13 periods', async () => {
+    const client = await admin();
+    await expectRpcCode(client.systemAdmin.setSubscriptionPrice({ tier: 'enterprise', unitAmountMinor: MAX_PRICE_MINOR + 1 }), 'BAD_REQUEST');
+    await client.systemAdmin.setSubscriptionPrice({ tier: 'enterprise', unitAmountMinor: MAX_PRICE_MINOR });
+    const school = await createTestSchool({ tier: null });
+    const billing = await client.systemAdmin.addSchoolBillingPeriods({
+      id: school.id,
+      kind: 'paid',
+      tier: 'enterprise',
+      periodCount: MAX_PERIODS_PER_INVOICE,
+      start: 'now',
+    });
+    expect(billing.invoices).toMatchObject([{ amountMinor: MAX_PRICE_MINOR * MAX_PERIODS_PER_INVOICE }]);
+    // What the dialog sends for a blank amount at that price is accepted too.
+    const other = await createTestSchool({ tier: null });
+    await client.systemAdmin.addSchoolBillingPeriods({
+      id: other.id,
+      kind: 'paid',
+      tier: 'enterprise',
+      periodCount: MAX_PERIODS_PER_INVOICE,
+      start: 'now',
+      amountMinor: MAX_PRICE_MINOR * MAX_PERIODS_PER_INVOICE,
+    });
   });
 });
 
@@ -225,15 +252,78 @@ describe('systemAdmin.voidSchoolInvoice', () => {
   });
 });
 
+describe('cancelled periods', () => {
+  it('do not push back where the next payment starts', async () => {
+    const client = await admin();
+    await setPrices(client);
+    const school = await createTestSchool({ tier: null });
+    const trial = await createTestSchoolTrial({ schoolId: school.id, tier: 'plus', endsAt: daysFromNow(10) });
+    const booked = await client.systemAdmin.addSchoolBillingPeriods({ id: school.id, kind: 'paid', tier: 'plus', periodCount: 2, start: 'after_current' });
+    const voided = await client.systemAdmin.voidSchoolInvoice({ id: school.id, invoiceId: booked.invoices[0]!.id });
+    expect(voided.bookedUntil && ms(voided.bookedUntil)).toBe(ms(trial.endsAt));
+
+    const rebooked = await client.systemAdmin.addSchoolBillingPeriods({ id: school.id, kind: 'paid', tier: 'plus', periodCount: 1, start: 'after_current' });
+    const paid = rebooked.invoices.find(({ status }) => status === 'paid');
+    expect(paid && ms(paid.periodStart)).toBe(ms(trial.endsAt));
+    expect(rebooked.coveredUntil && ms(rebooked.coveredUntil)).toBe(ms(trial.endsAt) + PERIOD);
+  });
+
+  it('an upcoming free period can be cancelled, so a payment can start now', async () => {
+    const client = await admin();
+    await setPrices(client);
+    const school = await createTestSchool({ tier: null });
+    await createTestSchoolTrial({ schoolId: school.id, tier: 'plus', endsAt: daysFromNow(10) });
+    const lined = await client.systemAdmin.addSchoolBillingPeriods({ id: school.id, kind: 'complimentary', tier: 'plus', periodCount: 1, start: 'after_current' });
+    const gift = lined.periods.find(({ kind }) => kind === 'complimentary')!;
+    await expectRpcCode(client.systemAdmin.addSchoolBillingPeriods({ id: school.id, kind: 'paid', tier: 'pro', periodCount: 1, start: 'now' }), 'CONFLICT');
+
+    const cancelled = await client.systemAdmin.endSchoolBillingPeriod({ id: school.id, periodId: gift.id });
+    expect(cancelled.endedAt && ms(cancelled.endedAt)).toBe(ms(gift.startsAt));
+    // Cancelling again changes nothing.
+    expect(await client.systemAdmin.endSchoolBillingPeriod({ id: school.id, periodId: gift.id })).toEqual(cancelled);
+
+    const upgraded = await client.systemAdmin.addSchoolBillingPeriods({ id: school.id, kind: 'paid', tier: 'pro', periodCount: 1, start: 'now' });
+    expect(upgraded.periods.find(({ active }) => active)).toMatchObject({ kind: 'paid', tier: 'pro' });
+  });
+
+  it('an upcoming paid period is cancelled by voiding its invoice, not by ending it', async () => {
+    const client = await admin();
+    await setPrices(client);
+    const school = await createTestSchool({ tier: null });
+    await createTestSchoolTrial({ schoolId: school.id, tier: 'plus', endsAt: daysFromNow(10) });
+    const booked = await client.systemAdmin.addSchoolBillingPeriods({ id: school.id, kind: 'paid', tier: 'plus', periodCount: 1, start: 'after_current' });
+    const upcoming = booked.periods.find(({ kind }) => kind === 'paid')!;
+    await expectRpcCode(client.systemAdmin.endSchoolBillingPeriod({ id: school.id, periodId: upcoming.id }), 'BAD_REQUEST');
+  });
+});
+
 describe('the AI limit window', () => {
   it('is the active billing period, and the IST month for a school on a standing tier alone', async () => {
     const onTrial = await createTestSchool({ tier: null });
     const trial = await createTestSchoolTrial({ schoolId: onTrial.id, tier: 'plus', startsAt: daysFromNow(-3), endsAt: daysFromNow(25) });
-    expect(await schoolSpendWindow(db, onTrial.id)).toEqual({ key: `period:${trial.id}`, start: trial.startsAt, end: trial.endsAt });
+    expect(await schoolSpendWindow(db, onTrial.id)).toEqual({ key: `period:${trial.id}:0`, start: trial.startsAt, end: trial.endsAt });
 
     const standing = await createTestSchool({ tier: 'pro' });
     const window = await schoolSpendWindow(db, standing.id, new Date('2027-03-15T12:00:00+05:30'));
     expect(window.key).toBe('2027-03');
+  });
+
+  it('is one 28-day step of a longer trial, the last step ending with the trial', async () => {
+    const long = await createTestSchool({ tier: null });
+    const trial = await createTestSchoolTrial({ schoolId: long.id, tier: 'plus', startsAt: daysFromNow(-30), endsAt: daysFromNow(60) });
+    expect(await schoolSpendWindow(db, long.id)).toEqual({
+      key: `period:${trial.id}:1`,
+      start: new Date(ms(trial.startsAt) + PERIOD),
+      end: new Date(ms(trial.startsAt) + 2 * PERIOD),
+    });
+
+    const ending = await createTestSchool({ tier: null });
+    const last = await createTestSchoolTrial({ schoolId: ending.id, tier: 'plus', startsAt: daysFromNow(-60), endsAt: daysFromNow(10) });
+    expect(await schoolSpendWindow(db, ending.id)).toEqual({
+      key: `period:${last.id}:2`,
+      start: new Date(ms(last.startsAt) + 2 * PERIOD),
+      end: last.endsAt,
+    });
   });
 });
 

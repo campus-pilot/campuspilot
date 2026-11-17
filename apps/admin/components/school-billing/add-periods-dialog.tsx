@@ -58,7 +58,17 @@ function useActivePrices() {
   return prices;
 }
 
-function useAddPeriodsForm(schoolId: string, defaultTier: SchoolTier, onDone: () => void) {
+/**
+ * The total the dialog shows for a blank amount, sent as the amount so the
+ * invoice records what the administrator saw even if the price changed since
+ * (undefined while prices load: the server then uses the price it has).
+ */
+function shownPrice(prices: Map<SchoolTier, number>, value: AddPeriodsValues): number | undefined {
+  const unit = prices.get(value.tier);
+  return unit === undefined ? undefined : unit * value.periodCount;
+}
+
+function useAddPeriodsForm(schoolId: string, defaultTier: SchoolTier, prices: Map<SchoolTier, number>, onDone: () => void) {
   const refresh = useRefreshSchoolPlan(schoolId);
   return useForm({
     defaultValues: {
@@ -80,7 +90,7 @@ function useAddPeriodsForm(schoolId: string, defaultTier: SchoolTier, onDone: ()
             ? {
                 ...common,
                 kind: 'paid',
-                amountMinor: value.amount.trim() === '' ? undefined : (rupeesToPaise(value.amount) ?? undefined),
+                amountMinor: value.amount.trim() === '' ? shownPrice(prices, value) : (rupeesToPaise(value.amount) ?? undefined),
                 paymentReference: value.paymentReference || undefined,
                 note: value.note || undefined,
               }
@@ -259,7 +269,7 @@ export function AddPeriodsDialog({
   onClose: () => void;
 }) {
   const prices = useActivePrices();
-  const form = useAddPeriodsForm(schoolId, defaultTier, onClose);
+  const form = useAddPeriodsForm(schoolId, defaultTier, prices, onClose);
   return (
     <Dialog open onOpenChange={(open) => !open && !form.state.isSubmitting && onClose()}>
       <DialogContent className="sm:max-w-lg">

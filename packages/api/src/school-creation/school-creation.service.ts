@@ -135,21 +135,27 @@ export async function createOwnSchool(db: DatabaseExecutor, input: CreateOwnScho
   const status = await readSchoolCreationStatus(db, input.userId);
   if (status.refusal) throw schoolCreationRefusedError(status.refusal);
 
-  const slug = await uniqueSlug(slugifySchoolName(input.name) || 'school', async (candidate) =>
-    (await db.select({ id: schoolTable.id }).from(schoolTable).where(eq(schoolTable.slug, candidate)).limit(1)).length > 0,
-  );
-  const [school] = await db
-    .insert(schoolTable)
-    .values({
-      slug,
-      name: input.name,
-      location: input.location,
-      registrationNo: input.registrationNo,
-      tier: null,
-      ownerUserId: input.userId,
-    })
-    .returning({ id: schoolTable.id });
-  if (!school) throw rpcError.internal();
+  // The insert itself claims the slug: a slug taken meanwhile, even by another
+  // person's creation at the same moment, moves on to the next suffix.
+  const created: { id?: string } = {};
+  await uniqueSlug(slugifySchoolName(input.name) || 'school', async (candidate) => {
+    const [row] = await db
+      .insert(schoolTable)
+      .values({
+        slug: candidate,
+        name: input.name,
+        location: input.location,
+        registrationNo: input.registrationNo,
+        tier: null,
+        ownerUserId: input.userId,
+      })
+      .onConflictDoNothing({ target: schoolTable.slug })
+      .returning({ id: schoolTable.id });
+    created.id = row?.id;
+    return row === undefined;
+  });
+  if (!created.id) throw rpcError.internal();
+  const school = { id: created.id };
 
   await startTrialPeriod(db, {
     schoolId: school.id,

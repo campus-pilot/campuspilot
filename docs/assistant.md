@@ -472,7 +472,7 @@ cached in Redis for an hour. Every answer carries `computedAt`, which each
 usage page shows ("Updated 11 Nov, 7:12 pm IST") next to a Refresh button;
 Refresh sends `refresh: true`, which computes the figures again from the saved
 rows and replaces the cached answer for everyone reading that range. Refresh
-does not touch the 10-minute spend cache the monthly limit uses.
+does not touch the 10-minute spend cache the spending limit uses.
 Provider consoles group days in their own time zone: compare months, not days.
 INR is shown only in the admin app, at a rate the viewer types, kept in the
 browser's localStorage and never sent to the API.

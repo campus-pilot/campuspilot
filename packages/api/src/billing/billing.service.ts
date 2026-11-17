@@ -153,7 +153,8 @@ export async function readBookedUntil(db: DatabaseExecutor, schoolId: string): P
   const [row] = await db
     .select({ until: sql<string | Date | null>`max(${billingPeriodEnd()})` })
     .from(schoolBillingPeriodTable)
-    .where(and(eq(schoolBillingPeriodTable.schoolId, schoolId), gt(billingPeriodEnd(), sql`now()`)));
+    // A cancelled period that never began (`ended_at = starts_at`) books nothing.
+    .where(and(eq(schoolBillingPeriodTable.schoolId, schoolId), gt(billingPeriodEnd(), sql`now()`), gt(billingPeriodEnd(), schoolBillingPeriodTable.startsAt)));
   return row?.until ? new Date(row.until) : null;
 }
 

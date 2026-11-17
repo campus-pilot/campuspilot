@@ -1,4 +1,5 @@
 import type { DatabaseExecutor } from '@campuspilot/db';
+import { BILLING_PERIOD_DAYS } from '@campuspilot/db/feature-flags/catalogue';
 import { readSchoolPlan } from '@campuspilot/db/feature-flags/store';
 import { measure } from '@campuspilot/logger/perf';
 import { assistantModelRequestTable } from '@campuspilot/db/schema/assistant';
@@ -17,12 +18,16 @@ export const SPEND_CACHE_SECONDS = 10 * 60;
 
 const spendKey = (schoolId: string, window: string) => `assistant:spend:${schoolId}:${window}`;
 
+const STEP_MS = BILLING_PERIOD_DAYS * 24 * 60 * 60 * 1000;
+
 /**
  * The span a school's assistant limit counts spend over
- * (docs/school-billing.md): its active billing period, so every 28-day period
- * gets exactly one limit's worth however the calendar months fall. A school
- * without a period (on a standing tier alone) counts the IST calendar month
- * of `now`, as before billing periods existed.
+ * (docs/school-billing.md): the 28-day step of its active billing period that
+ * holds `now`, so every 28 days get exactly one limit's worth however the
+ * calendar months fall. Paid and free periods are one step long; a longer or
+ * extended trial gets one limit per 28 days from its start. A school without
+ * a period (on a standing tier alone) counts the IST calendar month of `now`,
+ * as before billing periods existed.
  */
 export async function schoolSpendWindow(
   db: DatabaseExecutor,
@@ -33,7 +38,13 @@ export async function schoolSpendWindow(
   // (each model request and tool call). Timed so the performance logs show
   // whether it ever costs enough to fold into the read-only check's query.
   const period = (await measure('assistant.spend.window', () => readSchoolPlan(db, schoolId)))?.period ?? null;
-  if (period) return { key: `period:${period.id}`, start: period.startsAt, end: period.endsAt };
+  if (period) {
+    const lastStep = Math.max(0, Math.ceil((period.endsAt.getTime() - period.startsAt.getTime()) / STEP_MS) - 1);
+    const step = Math.min(lastStep, Math.max(0, Math.floor((now.getTime() - period.startsAt.getTime()) / STEP_MS)));
+    const start = new Date(period.startsAt.getTime() + step * STEP_MS);
+    const end = new Date(Math.min(start.getTime() + STEP_MS, period.endsAt.getTime()));
+    return { key: `period:${period.id}:${step}`, start, end };
+  }
   const { month, start, end } = istMonthOf(now);
   return { key: month, start, end };
 }

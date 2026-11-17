@@ -7,7 +7,7 @@ import {
 } from '@campuspilot/db/feature-flags/catalogue';
 import { z } from 'zod';
 
-import { BILLING_START_OPTIONS, MAX_PERIODS_PER_INVOICE } from '../../../billing/billing.contract';
+import { BILLING_START_OPTIONS, MAX_AMOUNT_MINOR, MAX_PERIODS_PER_INVOICE, MAX_PRICE_MINOR } from '../../../billing/billing.contract';
 import { trialEndsAtSchema } from '../school/school.dto';
 
 /**
@@ -108,7 +108,7 @@ export const addSchoolBillingPeriodsInputSchema = z.discriminatedUnion('kind', [
     periodCount: z.number().int().min(1).max(MAX_PERIODS_PER_INVOICE),
     start: z.enum(BILLING_START_OPTIONS),
     /** What was charged, in paise; the tier's price × periods when left out. */
-    amountMinor: z.number().int().min(0).max(1_000_000_000).optional(),
+    amountMinor: z.number().int().min(0).max(MAX_AMOUNT_MINOR).optional(),
     /** How it was paid (UPI reference, cheque number). */
     paymentReference: z.string().trim().max(200).optional(),
     note: z.string().trim().max(1000).optional(),
@@ -144,5 +144,5 @@ export type SubscriptionPriceDto = z.infer<typeof subscriptionPriceDtoSchema>;
 export const setSubscriptionPriceInputSchema = z.object({
   tier: schoolTierSchema,
   /** The price of one period in paise. */
-  unitAmountMinor: z.number().int().min(0).max(1_000_000_000),
+  unitAmountMinor: z.number().int().min(0).max(MAX_PRICE_MINOR),
 });

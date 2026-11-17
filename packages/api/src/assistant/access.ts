@@ -91,8 +91,7 @@ const MESSAGES: Record<AssistantAccessRefusalCode, string> = {
     'Your role cannot use the AI assistant in this school. Your principal or manager can switch it on in Settings.',
   school_suspended: SCHOOL_SUSPENDED_MESSAGE,
   no_plan: SCHOOL_NO_PLAN_MESSAGE,
-  limit_reached:
-    'This school has reached its AI assistant limit for this month. The assistant is available again on the 1st.',
+  limit_reached: 'This school has reached its AI assistant spending limit for the current period.',
 };
 
 function refused(

@@ -34,15 +34,50 @@ function periodState(period: SchoolBillingPeriodDto, now: Date): string {
   return period.endedAt && period.endedAt < period.endsAt ? 'Ended early' : 'Over';
 }
 
-function PeriodRow({ period, now }: { period: SchoolBillingPeriodDto; now: Date }) {
+/** Cancelling an upcoming free period, so it never starts; paid ones are cancelled by voiding their invoice. */
+function CancelPeriodButton({ schoolId, period }: { schoolId: string; period: SchoolBillingPeriodDto }) {
+  const refresh = useRefreshSchoolPlan(schoolId);
+  const [confirming, setConfirming] = useState(false);
+  const cancel = useMutation(
+    orpc.systemAdmin.endSchoolBillingPeriod.mutationOptions({
+      onSuccess: () => {
+        refresh();
+        toast.success('Free period cancelled.');
+      },
+      onError: (error) => toast.error(error instanceof Error ? error.message : 'Unable to cancel the free period.'),
+      onSettled: () => setConfirming(false),
+    }),
+  );
+  return (
+    <>
+      <Button type="button" size="sm" variant="ghost" onClick={() => setConfirming(true)}>
+        Cancel
+      </Button>
+      <ConfirmationDialog
+        open={confirming}
+        title="Cancel this free period?"
+        description={`The free ${schoolTierCatalogue[period.tier].label} period from ${formatIstDate(period.startsAt)} will not start. Periods booked after it keep their dates. This cannot be undone.`}
+        confirmLabel={cancel.isPending ? 'Cancelling…' : 'Cancel period'}
+        confirmVariant="destructive"
+        pending={cancel.isPending}
+        onOpenChange={setConfirming}
+        onConfirm={() => cancel.mutate({ id: schoolId, periodId: period.id })}
+      />
+    </>
+  );
+}
+
+function PeriodRow({ schoolId, period, now }: { schoolId: string; period: SchoolBillingPeriodDto; now: Date }) {
+  const state = periodState(period, now);
   return (
     <li className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
       <span className="flex items-center gap-2">
         <Badge variant={period.active ? 'secondary' : 'outline'}>{KIND_LABELS[period.kind]}</Badge>
         {schoolTierCatalogue[period.tier].label}
       </span>
-      <span className="text-muted-foreground">
-        {formatIstDate(period.startsAt)} to {formatIstDate(periodEnd(period))} · {periodState(period, now)}
+      <span className="flex items-center gap-2 text-muted-foreground">
+        {formatIstDate(period.startsAt)} to {formatIstDate(periodEnd(period))} · {state}
+        {state === 'Upcoming' && period.kind === 'complimentary' ? <CancelPeriodButton schoolId={schoolId} period={period} /> : null}
       </span>
     </li>
   );
@@ -50,19 +85,24 @@ function PeriodRow({ period, now }: { period: SchoolBillingPeriodDto; now: Date 
 
 const PERIOD_LIST_LENGTH = 8;
 
-/** Periods from the newest; the history stays in the database however long it grows. */
-function PeriodList({ periods }: { periods: SchoolBillingPeriodDto[] }) {
+/**
+ * Periods from the newest; the history stays in the database however long it
+ * grows. Upcoming periods are always listed, so each one can be cancelled.
+ */
+function PeriodList({ schoolId, periods }: { schoolId: string; periods: SchoolBillingPeriodDto[] }) {
   const now = new Date();
   if (periods.length === 0) return <p className="text-sm text-muted-foreground">No billing periods yet.</p>;
+  const upcoming = periods.filter((period) => periodState(period, now) === 'Upcoming').length;
+  const shown = Math.max(PERIOD_LIST_LENGTH, upcoming);
   return (
     <div className="flex flex-col gap-1">
       <ul className="flex flex-col divide-y">
-        {periods.slice(0, PERIOD_LIST_LENGTH).map((period) => (
-          <PeriodRow key={period.id} period={period} now={now} />
+        {periods.slice(0, shown).map((period) => (
+          <PeriodRow key={period.id} schoolId={schoolId} period={period} now={now} />
         ))}
       </ul>
-      {periods.length > PERIOD_LIST_LENGTH ? (
-        <p className="text-xs text-muted-foreground">And {periods.length - PERIOD_LIST_LENGTH} earlier.</p>
+      {periods.length > shown ? (
+        <p className="text-xs text-muted-foreground">And {periods.length - shown} earlier.</p>
       ) : null}
     </div>
   );
@@ -131,8 +171,10 @@ function InvoiceList({ schoolId, invoices }: { schoolId: string; invoices: Schoo
 
 /** One line on where the school's coverage stands. */
 function coverageText(billing: SchoolBillingDto): string {
-  if (!billing.coveredUntil) return 'No period covers the school now. Without a standing tier it is read-only until a payment is recorded.';
-  return `Covered until ${formatIstDate(billing.coveredUntil)}. The school is read-only from then unless the next period is paid.`;
+  if (!billing.coveredUntil) {
+    return 'No period covers the school now. It has its standing tier if it has one, and is read-only otherwise, until a trial, payment or free period starts.';
+  }
+  return `Covered until ${formatIstDate(billing.coveredUntil)}. After that the school has its standing tier if it has one, and is read-only otherwise, unless another period starts.`;
 }
 
 function BillingBody({ schoolId, billing, defaultTier }: { schoolId: string; billing: SchoolBillingDto; defaultTier: SchoolTier }) {
@@ -148,7 +190,7 @@ function BillingBody({ schoolId, billing, defaultTier }: { schoolId: string; bil
       </div>
       <section className="flex flex-col gap-2" aria-label="Billing periods">
         <h3 className="text-sm font-medium">Periods</h3>
-        <PeriodList periods={billing.periods} />
+        <PeriodList schoolId={schoolId} periods={billing.periods} />
       </section>
       <section className="flex flex-col gap-2" aria-label="Payments">
         <h3 className="text-sm font-medium">Payments</h3>
