@@ -14,6 +14,48 @@ export const examDefinitionSchema = z
   })
   .describe('An exam defined for the academic session');
 
+/**
+ * Characters a new exam slug may use: lowercase letters, digits and
+ * underscores. It also matches the empty string so that an empty slug is
+ * reported once, by the length check, rather than also as malformed.
+ */
+export const EXAM_SLUG_PATTERN = /^[a-z0-9_]*$/;
+
+/**
+ * The rule for a new exam's slug, shared by the session settings editor, the
+ * Examinations list's Create examination dialog and `school.createExam`.
+ * Stored configurations are not re-validated against it: `examConfigSchema`
+ * keeps accepting any non-empty key so older slugs keep working.
+ */
+export const examSlugSchema = z
+  .string()
+  .trim()
+  .min(1, 'Exam slug is required')
+  .max(100, 'Exam slug must be 100 characters or fewer')
+  .regex(
+    EXAM_SLUG_PATTERN,
+    'Slug can only contain lowercase letters, numbers, and underscores',
+  );
+
+/**
+ * The display order a newly created exam takes: one after the highest order in
+ * the session, so it is listed last. Session settings keeps orders contiguous
+ * (1..n, renumbered on reorder and removal), where this equals the number of
+ * exams plus one, the order settings gives a new exam. Orders written by
+ * other paths can have gaps or ties; taking the maximum instead of the count
+ * keeps a new exam from sharing an order with the last one in that case.
+ */
+export function nextExamOrder(
+  examConfig: Readonly<Record<string, { order: number }>>,
+): number {
+  return (
+    Object.values(examConfig).reduce(
+      (highest, exam) => Math.max(highest, exam.order),
+      0,
+    ) + 1
+  );
+}
+
 export const examConfigSchema = z
   .record(
     z.string().min(1).describe("Exam slug (e.g. 'midterm', 'final')"),

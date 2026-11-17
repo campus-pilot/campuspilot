@@ -20,6 +20,10 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { useForm } from '@tanstack/react-form';
 import { z } from 'zod';
+import {
+  examSlugSchema,
+  nextExamOrder,
+} from '@campuspilot/db/schema/jsonb/session-config';
 import { Badge } from '@campuspilot/ui/components/badge';
 import { Button } from '@campuspilot/ui/components/button';
 import {
@@ -52,13 +56,10 @@ import {
   type ExamDefinition,
 } from './types';
 
+/** The slug rule is shared with the Examinations list and `school.createExam`. */
 const examFormSchema = z.object({
   name: z.string().trim().min(1, 'Exam name is required'),
-  slug: z
-    .string()
-    .trim()
-    .min(1, 'Exam slug is required')
-    .regex(/^[a-z0-9_]+$/, 'Slug can only contain lowercase letters, numbers, and underscores'),
+  slug: examSlugSchema,
 });
 
 function FieldErrors({ errors }: { errors: unknown[] }) {
@@ -333,7 +334,7 @@ export function ExaminationSection({
     const order =
       dialogState.editingSlug && current[dialogState.editingSlug]
         ? current[dialogState.editingSlug]!.order
-        : entries.length + 1;
+        : nextExamOrder(examConfig ?? {});
 
     current[values.slug] = {
       name: values.name,

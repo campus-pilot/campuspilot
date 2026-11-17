@@ -2,6 +2,7 @@ import { examOverview, examOverviews } from './exam-lifecycle.service';
 import { and, asc, eq } from 'drizzle-orm';
 import { classTable } from '@campuspilot/db/schema/class';
 import { schoolSessionTable } from '@campuspilot/db/schema/session';
+import { nextExamOrder } from '@campuspilot/db/schema/jsonb/session-config';
 import { examPlanTable, examTimetableTable } from '@campuspilot/db/schema/exam';
 import { resolvePaginationInput } from '../../../paginations';
 import { pageResult, route } from './exam.pagination';
@@ -157,7 +158,7 @@ export const schoolExamDefinitionRouter = {
     .route(
       route(
         'Create a session exam',
-        'Add a unique exam slug and definition to an active session. School exam administrators only.',
+        'Add a unique exam slug and definition to an active session, listed after the last exam unless an order is given. School exam administrators only.',
       ),
     )
     .meta({
@@ -179,7 +180,14 @@ export const schoolExamDefinitionRouter = {
             throw rpcError.conflict(
               'An exam with this slug already exists in the session.',
             );
-          const exam = { name: input.name, order: input.order };
+          // Read and written under the session row lock (FOR UPDATE), which the
+          // full-config `updateSession` save takes too: concurrent creations and
+          // saves run one after the other, each on the configuration the previous
+          // one committed, so this never drops another exam.
+          const exam = {
+            name: input.name,
+            order: input.order ?? nextExamOrder(session.config.examConfig),
+          };
           await tx
             .update(schoolSessionTable)
             .set({

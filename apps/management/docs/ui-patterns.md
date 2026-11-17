@@ -193,8 +193,13 @@ The [feature guide](../components/exam/README.md) and
 [backend contract](../../../packages/api/src/routers/school/exam/README.md) describe
 the implementation and APIs in more detail.
 
-- Session configuration defines examinations. There is no Create Exam action in
-  the examination workspace. Plan creation snapshots the existing subjects/modes.
+- Session configuration defines examinations. The Examinations list offers one
+  Create examination action (navbar, and the empty state), with no standard/custom
+  distinction: a name and a slug derived from it with the session settings rule,
+  saved by `school.createExam` into the session configuration and listed last. It
+  needs `CREATE_EXAM` and an active session, like every other exam mutation. There
+  is no Create Exam action inside an examination's workspace. Plan creation
+  snapshots the existing subjects/modes.
 - Generating plans leaves the examination Not started. Starting it is a separate,
   explicit school governance action. Completing and reopening are exam-wide.
   The normal UI has no per-subject plan approval prerequisite.

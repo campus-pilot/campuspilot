@@ -24,7 +24,18 @@ exam-governance boundary, including full-config replacements.
 
 ## Lifecycle and student-wide API
 
-1. Configure exam definitions in session settings. `getExamPlanPreview` returns
+1. Configure exam definitions in session settings, or create one with
+   `createExam` (the management Examinations list does). `createExam` takes a
+   slug in the settings format (`examSlugSchema`: lowercase letters, digits and
+   underscores, up to 100 characters; older stored slugs are not re-checked) and a
+   name, refuses a slug the session already has with `CONFLICT`, and lists the exam
+   after the highest existing order (`nextExamOrder`) unless `order` is given. It
+   reads and writes the configuration under the session row lock that the
+   full-config `updateSession` save also takes, so a creation never drops another
+   exam. The reverse is not guarded: `updateSession` replaces the whole exam map
+   with what its editor submitted, so a settings form loaded before a creation can
+   still remove that exam on save (unless it already has plans or a timetable).
+   `getExamPlanPreview` returns
    classes, registered enrollment counts, subjects, assessment modes and a
    configuration hash. `generateExamPlan` atomically creates draft planning snapshots and an explicit **ready** examination from
    that review. There is no per-subject approval prerequisite. A school principal,

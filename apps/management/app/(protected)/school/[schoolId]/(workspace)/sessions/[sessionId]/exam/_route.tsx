@@ -10,11 +10,15 @@ import {
 import { examHref, examClassHref, examResultsHref, questionPaperHref } from '@/components/exam/exam-model';
 import { QuestionPaperBreadcrumbValue } from '@/components/question-paper/question-paper-breadcrumb-value';
 import { ExamNavbarActions } from '@/components/exam/exam-navbar-actions';
+import { CreateExamAction } from '@/components/exam/exam-create';
 
 export const examPage = defineManagementPage<SchoolSessionRouteParams>({
   matches: (pathname) =>
     /^\/school\/[^/]+\/sessions\/[^/]+\/exam$/.test(pathname),
   title: 'Examinations',
+  actions: ({ schoolId, sessionId }) => (
+    <CreateExamAction scope={{ schoolId, sessionId }} />
+  ),
   breadcrumbs: ({ schoolId, sessionId }) =>
     sessionPageBreadcrumbs(schoolId, sessionId, {
       id: 'exam',

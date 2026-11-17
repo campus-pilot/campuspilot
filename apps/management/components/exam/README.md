@@ -5,7 +5,13 @@ controls, navigation, warnings and mobile verification. That guide also records
 the redesign decisions and the earlier approaches they replaced.
 
 The management flow is exam → class/section roster → student → every subject.
-Exams come from session settings. A dashed empty state opens a concise plan-review
+Exams come from session settings. The Examinations list's single Create examination
+action (`exam-create.tsx`; navbar and empty state) adds one to the session's
+settings through `school.createExam`: a name, and a slug that follows the name with
+the settings rule until the user types their own (`exam-create-model.ts`). The server
+lists it last and refuses a taken slug, shown beside the slug field. It is offered
+with `CREATE_EXAM` while the session is known to be active, and refreshes the list,
+the session (settings) and the sessions list on success. A dashed empty state opens a concise plan-review
 dialog with classes, student counts, subjects and modes. Each class row expands
 its subject/mode breakdown in a sub-table; there is no separate accordion. Automatic generation
 creates draft snapshots and a Not started examination; no per-subject approval step
@@ -75,7 +81,7 @@ Checks:
 
 ```sh
 pnpm --filter @campuspilot/api test
-pnpm dlx tsx@4.23.13 --tsconfig apps/management/tsconfig.exam-tests.json --test apps/management/components/exam/exam-validation.test.ts apps/management/components/exam/exam-student-workspace-model.test.ts
+pnpm dlx tsx@4.23.13 --tsconfig apps/management/tsconfig.exam-tests.json --test apps/management/components/exam/exam-validation.test.ts apps/management/components/exam/exam-student-workspace-model.test.ts apps/management/components/exam/exam-create-model.test.ts
 pnpm check-types
 ```
 

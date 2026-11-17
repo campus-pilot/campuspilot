@@ -6,7 +6,10 @@ import {
   resultMarksSchema,
   timetableConfigSchema,
 } from '@campuspilot/db/schema/jsonb/exam-config';
-import { examDefinitionSchema } from '@campuspilot/db/schema/jsonb/session-config';
+import {
+  examDefinitionSchema,
+  examSlugSchema,
+} from '@campuspilot/db/schema/jsonb/session-config';
 import { EXAM_STUDENT_REMARK_MAX_LENGTH } from '@campuspilot/db/schema/exam';
 import {
   createListInputSchema,
@@ -30,9 +33,24 @@ export const planScopeSchema = sessionScopeSchema.extend({
   examPlanId: z.string().min(1),
 });
 export const examDtoSchema = examDefinitionSchema.extend({ slug: z.string() });
-export const createExamInputSchema = examScopeSchema.extend({
-  name: z.string().trim().min(1).max(200),
-  order: z.number().int().positive(),
+/**
+ * A new exam. The slug follows the session settings rule (`examSlugSchema`),
+ * which is stricter than the slugs older configurations may hold, so it is
+ * checked here rather than in `examScopeSchema`. Without `order` the exam is
+ * listed last (`nextExamOrder`), decided under the session lock so two
+ * concurrent creations never read the same configuration.
+ */
+export const createExamInputSchema = sessionScopeSchema.extend({
+  examSlug: examSlugSchema.describe(
+    'Stable exam slug: lowercase letters, numbers and underscores, unique in the session.',
+  ),
+  name: z.string().trim().min(1, 'Exam name is required').max(200, 'Exam name must be 200 characters or fewer'),
+  order: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Display order. Omit to list the exam after the last one.'),
 });
 export const updateExamInputSchema = examScopeSchema
   .extend({

@@ -1,4 +1,8 @@
-import { sessionConfigSchema } from '@campuspilot/db/schema/jsonb/session-config';
+import {
+  examSlugSchema,
+  nextExamOrder,
+  sessionConfigSchema,
+} from '@campuspilot/db/schema/jsonb/session-config';
 import { describe, expect, it } from 'vitest';
 
 import type { resultValuesSchema } from './exam.dto';
@@ -274,5 +278,31 @@ describe('exam service validation', () => {
         validateResult(plan(), sessionConfigSchema.parse({}), result()),
       ).not.toThrow();
     });
+  });
+});
+
+describe('new exam order and slug rules', () => {
+  it('lists a new exam after the highest order, which is n + 1 for contiguous orders', () => {
+    expect(nextExamOrder({})).toBe(1);
+    expect(
+      nextExamOrder({ a: { order: 1 }, b: { order: 2 }, c: { order: 3 } }),
+    ).toBe(4);
+  });
+
+  it('does not reuse an order when stored orders have a gap, are unsorted or tie', () => {
+    expect(nextExamOrder({ a: { order: 1 }, b: { order: 3 } })).toBe(4);
+    expect(nextExamOrder({ a: { order: 5 }, b: { order: 2 } })).toBe(6);
+    expect(nextExamOrder({ a: { order: 2 }, b: { order: 2 } })).toBe(3);
+  });
+
+  it('accepts slugs in the session settings format only, trimmed, reporting an empty one once', () => {
+    expect(examSlugSchema.parse('  unit_test_1 ')).toBe('unit_test_1');
+    for (const slug of ['Unit', 'unit-test', 'unit test', 'é', 'a'.repeat(101)])
+      expect(examSlugSchema.safeParse(slug).success).toBe(false);
+    const empty = examSlugSchema.safeParse('  ');
+    expect(empty.success).toBe(false);
+    expect(empty.error?.issues.map((issue) => issue.message)).toEqual([
+      'Exam slug is required',
+    ]);
   });
 });
