@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import type { PlatformStatsDto } from '@campuspilot/api/routers/system-admin/stats/stats.dto';
-import { Badge } from '@campuspilot/ui/components/badge';
 import { Button } from '@campuspilot/ui/components/button';
 import {
   Card,
@@ -24,6 +23,7 @@ import {
 } from 'lucide-react';
 import { orpc } from '@/lib/orpc';
 import { SchoolAvatar } from './school-avatar';
+import { SchoolBadges } from './school-badges';
 import {
   StatsError,
   StatTile,
@@ -119,7 +119,7 @@ function RecentSchoolList() {
           >
             <SchoolAvatar school={school} size="sm" />
             <span className="min-w-0 flex-1 truncate font-medium">{school.name}</span>
-            {school.isDemo ? <Badge variant="outline">Demo</Badge> : null}
+            <SchoolBadges school={school} />
             <span className="shrink-0 text-muted-foreground">
               {school.createdAt ? dateFormatter.format(school.createdAt) : '—'}
             </span>

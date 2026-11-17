@@ -10,11 +10,12 @@ import type { Context } from '../../../context';
 import { rpcError, rpcErrorResponse } from '../../../errors';
 import { parseImageUpload } from '../../../files/image-upload';
 import { assertPermission } from '../../../permissions/authorization';
+import { assertSchoolWritableByCaller } from '../../../school-access/school-access.service';
 import {
   MAX_SCHOOL_LOGO_BYTES,
   SCHOOL_LOGO_FIELD_NAME,
 } from './school.constants';
-import { schoolDtoSchema, toSchoolDto } from './school.dto';
+import { readSchoolDto } from './school.read';
 
 type HttpErrorReporter = (error: unknown) => void;
 
@@ -31,6 +32,10 @@ export async function handleSchoolLogoUpload(
       action: SCHOOL_ACTIONS.UPDATE_LOGO,
       resource: { kind: 'school', schoolId },
     });
+    // The school's own staff may change its logo, so a read-only school
+    // (suspended, or without an active plan) refuses it for them; a platform
+    // administrator is not held.
+    await assertSchoolWritableByCaller(context, schoolId);
 
     const [existingSchool] = await context.db
       .select({ id: schoolTable.id })
@@ -66,7 +71,8 @@ export async function handleSchoolLogoUpload(
     // TODO: Schedule a durable workflow to delete the outdated logo object
     // after its replacement has been committed successfully.
 
-    const dto = schoolDtoSchema.parse(toSchoolDto(school));
+    const dto = await readSchoolDto(context.db, schoolId);
+    if (!dto) throw rpcError.notFound('School');
     return Response.json(dto);
   } catch (error) {
     reportError?.(error);

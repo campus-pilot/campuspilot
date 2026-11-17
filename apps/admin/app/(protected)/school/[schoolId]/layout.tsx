@@ -113,7 +113,7 @@ function navigationFor(
         {
           type: 'item',
           id: 'feature-flags',
-          label: 'Feature Flags',
+          label: 'Plan and features',
           href: schoolHref(schoolId, '/usage/feature-flags'),
           icon: Flag,
         },

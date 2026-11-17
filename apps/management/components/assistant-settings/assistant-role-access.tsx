@@ -4,7 +4,6 @@ import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authoriza
 import type { AssistantAccessDto } from '@campuspilot/api/routers/school/assistant-access/assistant-access.dto';
 import type { Role } from '@campuspilot/api/routers/school/member/member.dto';
 import { formatUsdText } from '@campuspilot/assistant-contract/money';
-import { Badge } from '@campuspilot/ui/components/badge';
 import { Button } from '@campuspilot/ui/components/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@campuspilot/ui/components/card';
 import { Label } from '@campuspilot/ui/components/label';
@@ -25,11 +24,10 @@ const roleAccessSchema = z.object({ enabled: z.record(z.string(), z.boolean()) }
 type RoleRow = AssistantAccessDto['roles'][number];
 
 /**
- * The switches for the school's roles. Each eligible role can be switched on
- * or off; a role the school switched on that the platform no longer makes
- * eligible is shown as not available on the plan and can only be switched
- * off; other roles are listed as not available. Only the changed roles are
- * sent.
+ * The switches for the school's roles: the assistant is on or off for each,
+ * and any role can be switched either way. It is the school's one list,
+ * which CampusPilot's administrators edit too, so the form starts from
+ * whatever was saved last by either. Only the changed roles are sent.
  */
 function useRoleAccessForm(schoolId: string, access: AssistantAccessDto) {
   const queryClient = useQueryClient();
@@ -59,32 +57,20 @@ function useRoleAccessForm(schoolId: string, access: AssistantAccessDto) {
 
 type RoleAccessForm = ReturnType<typeof useRoleAccessForm>;
 
-function RoleNote({ row }: { row: RoleRow }) {
-  if (row.eligible) return null;
-  return <Badge variant="outline">{row.enabled ? 'Not available on your plan' : 'Not available'}</Badge>;
-}
-
 function RoleSwitch({ form, row, canManage }: { form: RoleAccessForm; row: RoleRow; canManage: boolean }) {
   return (
     <form.Field name={`enabled.${row.role}`}>
-      {(field) => {
-        // Switching on needs eligibility; switching off is always possible.
-        const locked = !canManage || (!row.eligible && !field.state.value);
-        return (
-          <div className="flex items-center justify-between gap-4 py-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <Label htmlFor={`assistant-role-${row.role}`}>{roleLabels[row.role]}</Label>
-              <RoleNote row={row} />
-            </div>
-            <Switch
-              id={`assistant-role-${row.role}`}
-              checked={field.state.value}
-              disabled={locked}
-              onCheckedChange={(checked) => field.handleChange(checked)}
-            />
-          </div>
-        );
-      }}
+      {(field) => (
+        <div className="flex items-center justify-between gap-4 py-2">
+          <Label htmlFor={`assistant-role-${row.role}`}>{roleLabels[row.role]}</Label>
+          <Switch
+            id={`assistant-role-${row.role}`}
+            checked={field.state.value}
+            disabled={!canManage}
+            onCheckedChange={(checked) => field.handleChange(checked)}
+          />
+        </div>
+      )}
     </form.Field>
   );
 }
@@ -95,7 +81,7 @@ function SaveButton({ form }: { form: RoleAccessForm }) {
       {({ isDirty, isSubmitting, errors }) => (
         <div className="flex flex-col gap-2">
           {errors.map((error) => (
-            <p key={String(error)} className="text-xs text-destructive">
+            <p key={String(error)} role="alert" className="text-xs text-destructive">
               {typeof error === 'object' && error && 'form' in error ? String(error.form) : String(error)}
             </p>
           ))}
@@ -138,9 +124,10 @@ function limitText(access: AssistantAccessDto) {
 
 /**
  * Settings › AI assistant: which of the school's roles may use the in-app
- * assistant. The principal and manager decide, among the roles the plan
- * makes eligible. Every tool call is still checked against the person's own
- * permissions; this only decides who may ask.
+ * assistant. The principal and manager decide, for every role; CampusPilot's
+ * administrators can change the same list from the admin app, and each side
+ * sees what the other saved. Every tool call is still checked against the
+ * person's own permissions; this only decides who may ask.
  */
 export function AssistantRoleAccess({ schoolId }: { schoolId: string }) {
   const query = useQuery(orpc.school.getAssistantAccess.queryOptions({ input: { schoolId } }));
@@ -149,7 +136,8 @@ export function AssistantRoleAccess({ schoolId }: { schoolId: string }) {
       <CardHeader>
         <CardTitle>AI assistant</CardTitle>
         <CardDescription>
-          Choose which roles can use the assistant. It acts with each person’s own permissions.
+          Choose which roles can use the assistant. It acts with each person’s own permissions. This is your school’s list;
+          CampusPilot support can change it too.
           {query.data ? ` ${limitText(query.data)}` : null}
         </CardDescription>
       </CardHeader>

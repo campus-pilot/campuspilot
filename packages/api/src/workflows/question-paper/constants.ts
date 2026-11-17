@@ -31,6 +31,8 @@ export const QUESTION_PAPER_JOB_FAILURES = {
   limit_reached: 'This school has reached its AI limit for this month.',
   feature_disabled: 'The AI assistant is switched off for this school.',
   role_not_enabled: 'You cannot use the AI assistant in this school.',
+  school_suspended: 'This school is suspended, so nothing can be generated. Contact CampusPilot support.',
+  no_plan: 'This school has no active plan, so nothing can be generated. Contact CampusPilot to continue.',
   unsupported_page_format: 'A page is in a format the AI model cannot read. Convert it to JPEG and upload it again.',
   images_too_large: 'The pages are too large to send together. Remove some pages or upload smaller photos.',
   page_unreadable: 'A page could not be read. Upload it again.',

@@ -45,6 +45,7 @@ export const PREFIX_MAP = {
   notificationEvent: "nev",
   section: "sec",
   school: "sch",
+  schoolTrial: "trial",
   schoolSession: "sess",
   student: "stu",
 } as const;

@@ -23,9 +23,7 @@ import {
   resolvePaginationInput,
 } from "../../../paginations";
 import { requireSystemPermission } from "../../../permissions/system";
-import { SCHOOL_FEATURE_KEYS } from "@campuspilot/db/feature-flags/catalogue";
-import { setSchoolFeature } from "../../../feature-flags/feature-flags.service";
-import { DEMO_SCHOOL_FEATURE_DEFAULTS, DEMO_SCHOOL_STEPS } from "../../../workflows/demo-school/constants";
+import { DEMO_SCHOOL_STEPS, DEMO_SCHOOL_TIER } from "../../../workflows/demo-school/constants";
 import {
   generateRegistrationNumber,
   slugifySchoolName,
@@ -195,6 +193,10 @@ export const demoSchoolRouter = {
               registrationNo,
               isDemo: true,
               demoCreatedBy: adminId,
+              // A demo shows every product area, and the seed needs them
+              // (for example to save the Cadet Portal settings): its tier
+              // includes them all. The assistant is in no tier and stays off.
+              tier: DEMO_SCHOOL_TIER,
             })
             .returning();
           if (!school) throw rpcError.internal();
@@ -202,14 +204,6 @@ export const demoSchoolRouter = {
           // same membership and role rows inviteMember writes.
           await transaction.insert(schoolMemberTable).values({ schoolId: school.id, userId: adminId });
           await transaction.insert(schoolUserRoleTable).values({ schoolId: school.id, userId: adminId, role: "principal", meta: null });
-          // A demo shows every product area it is configured to show
-          // (DEMO_SCHOOL_FEATURE_DEFAULTS; new real schools start with only
-          // the catalogue defaults). The seed needs them too, for example to save the
-          // Cadet Portal settings.
-          for (const feature of SCHOOL_FEATURE_KEYS) {
-            if (!DEMO_SCHOOL_FEATURE_DEFAULTS[feature]) continue;
-            await setSchoolFeature(transaction, { schoolId: school.id, feature, enabled: true, config: null, updatedBy: adminId });
-          }
           const [job] = await transaction
             .insert(demoSchoolJobTable)
             .values({
@@ -224,7 +218,8 @@ export const demoSchoolRouter = {
             })
             .returning();
           if (!job) throw rpcError.internal();
-          return { school: toSchoolDto(school), job: toDemoSchoolJobDto(job) };
+          // A school created this instant has no trial.
+          return { school: toSchoolDto(school, null), job: toDemoSchoolJobDto(job) };
         });
       } catch (error) {
         throw toRpcError(error);

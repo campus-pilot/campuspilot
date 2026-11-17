@@ -32,53 +32,117 @@ import { protectedProcedure } from '../../../index';
 import { requireSchoolFeature } from '../../../permissions/feature';
 import { requireSchoolMember } from '../../../permissions/school-member';
 
-const OFF = { enabled: false, active: false, config: null };
-const ON = { enabled: true, active: true, config: null };
-/** Student management: on for a school with no row (its catalogue default). */
-const STUDENTS = ON;
+/** A feature the tier does not include, with no adjustment: off. */
+const OFF = { included: false, adjustment: null, enabled: false, active: false, config: null };
+/** A feature the tier includes, with no adjustment: on. */
+const IN_TIER = { included: true, adjustment: null, enabled: true, active: true, config: null };
+/** A feature outside the tier, switched on for this school (what `setTestSchoolFeature(..., true)` writes). */
+const ADDED = { included: false, adjustment: true, enabled: true, active: true, config: null };
+/** A feature outside the tier, explicitly switched off for this school. */
+const DECLINED = { included: false, adjustment: false, enabled: false, active: false, config: null };
+/** A feature of the tier, switched off for this school. */
+const REMOVED = { included: true, adjustment: false, enabled: false, active: false, config: null };
+
+/** A Pro school with no adjustment: student management and notices. */
+const PRO = { studentManagement: IN_TIER, cadet: OFF, notices: IN_TIER, whatsapp: OFF, assistant: OFF };
+/**
+ * A test school created without a tier (`createTestSchool()`): a Plus school
+ * with student management and WhatsApp switched on for it, and nothing else.
+ */
+const BASELINE = { studentManagement: ADDED, cadet: OFF, notices: OFF, whatsapp: ADDED, assistant: OFF };
 
 describe('school feature flag storage', () => {
-  it('reads a school without rows as every feature disabled but student management, which is on by default', async () => {
-    const school = await createTestSchool();
-    expect(await getSchoolFeatureFlags(db, school.id)).toEqual({ studentManagement: STUDENTS, cadet: OFF, notices: OFF, assistant: OFF });
+  it('reads a school without rows as exactly its tier, and a school that does not exist as having nothing', async () => {
+    const school = await createTestSchool({ tier: 'pro' });
+    expect(await getSchoolFeatureFlags(db, school.id)).toEqual(PRO);
+    expect(await readSchoolFeatureFlags(db, school.id)).toEqual({ tier: 'pro', subscribedTier: 'pro', trial: null, features: PRO, invalidConfigs: [] });
     expect(await getSchoolFeatureConfig(db, school.id, 'cadet')).toBeNull();
-    expect(await isSchoolFeatureEnabled(db, school.id, 'notices')).toBe(false);
-    expect(await isSchoolFeatureEnabled(db, 'sch_missing', 'cadet')).toBe(false);
     expect(await isSchoolFeatureEnabled(db, school.id, 'studentManagement')).toBe(true);
+    expect(await isSchoolFeatureEnabled(db, school.id, 'notices')).toBe(true);
+    expect(await isSchoolFeatureEnabled(db, school.id, 'cadet')).toBe(false);
+    expect(await isSchoolFeatureEnabled(db, school.id, 'whatsapp')).toBe(false);
+
+    // No school, no feature: also the ones every tier but Plus includes.
+    expect(await isSchoolFeatureEnabled(db, 'sch_missing', 'cadet')).toBe(false);
+    expect(await isSchoolFeatureEnabled(db, 'sch_missing', 'studentManagement')).toBe(false);
+    expect(await getSchoolFeatureFlags(db, 'sch_missing')).toEqual({
+      studentManagement: OFF,
+      cadet: OFF,
+      notices: OFF,
+      whatsapp: OFF,
+      assistant: OFF,
+    });
+    expect(await readSchoolFeatureFlags(db, 'sch_missing')).toBeNull();
+  });
+
+  it('reads a school without a tier as having no tier feature, while its adjustments still apply', async () => {
+    const school = await createTestSchool({ tier: null });
+    const NONE = { studentManagement: OFF, cadet: OFF, notices: OFF, whatsapp: OFF, assistant: OFF };
+    expect(await readSchoolFeatureFlags(db, school.id)).toEqual({ tier: null, subscribedTier: null, trial: null, features: NONE, invalidConfigs: [] });
+    expect(await isSchoolFeatureEnabled(db, school.id, 'studentManagement')).toBe(false);
+
+    await setSchoolFeature(db, { schoolId: school.id, feature: 'studentManagement', enabled: true, config: null, updatedBy: null });
+    await setSchoolFeature(db, { schoolId: school.id, feature: 'notices', enabled: true, config: null, updatedBy: null });
+    expect(await readSchoolFeatureFlags(db, school.id)).toEqual({
+      tier: null,
+      subscribedTier: null,
+      trial: null,
+      features: { ...NONE, studentManagement: ADDED, notices: ADDED },
+      invalidConfigs: [],
+    });
+    expect(await isSchoolFeatureEnabled(db, school.id, 'notices')).toBe(true);
+    // Following the tier means off: no tier includes anything for it.
+    await setSchoolFeature(db, { schoolId: school.id, feature: 'notices', enabled: null, config: null, updatedBy: null });
+    expect(await isSchoolFeatureEnabled(db, school.id, 'notices')).toBe(false);
+  });
+
+  it('gives a test school created without a tier student management and WhatsApp, as adjustments on a Plus school', async () => {
+    const school = await createTestSchool();
+    expect(await readSchoolFeatureFlags(db, school.id)).toEqual({ tier: 'plus', subscribedTier: 'plus', trial: null, features: BASELINE, invalidConfigs: [] });
   });
 
   it('stores each feature and school independently and records who changed it', async () => {
-    const [school, other] = await Promise.all([createTestSchool(), createTestSchool()]);
+    const [school, other] = await Promise.all([createTestSchool({ tier: 'pro' }), createTestSchool({ tier: 'pro' })]);
     const admin = await createAdminSession();
-    await setSchoolFeature(db, { schoolId: school.id, feature: 'notices', enabled: true, config: null, updatedBy: admin.user.id });
+    await setSchoolFeature(db, { schoolId: school.id, feature: 'cadet', enabled: true, config: null, updatedBy: admin.user.id });
 
-    expect(await getSchoolFeatureFlags(db, school.id)).toEqual({ studentManagement: STUDENTS, cadet: OFF, notices: ON, assistant: OFF });
-    expect(await getSchoolFeatureFlags(db, other.id)).toEqual({ studentManagement: STUDENTS, cadet: OFF, notices: OFF, assistant: OFF });
+    expect(await getSchoolFeatureFlags(db, school.id)).toEqual({ ...PRO, cadet: ADDED });
+    expect(await getSchoolFeatureFlags(db, other.id)).toEqual(PRO);
     const rows = await db.select().from(schoolFeatureFlagTable).where(eqSchool(school.id));
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ feature: 'notices', enabled: true, config: null, updatedBy: admin.user.id });
+    expect(rows[0]).toMatchObject({ feature: 'cadet', enabled: true, config: null, updatedBy: admin.user.id });
 
     // Replacing keeps one row per (school, feature).
-    await setSchoolFeature(db, { schoolId: school.id, feature: 'notices', enabled: false, config: null, updatedBy: null });
+    await setSchoolFeature(db, { schoolId: school.id, feature: 'cadet', enabled: false, config: null, updatedBy: null });
     const replaced = await db.select().from(schoolFeatureFlagTable).where(eqSchool(school.id));
     expect(replaced).toHaveLength(1);
     expect(replaced[0]).toMatchObject({ enabled: false, updatedBy: null });
+    expect(await isSchoolFeatureEnabled(db, school.id, 'cadet')).toBe(false);
+
+    // A null adjustment follows the tier again; the row stays, holding no decision.
+    await setSchoolFeature(db, { schoolId: school.id, feature: 'notices', enabled: false, config: null, updatedBy: null });
     expect(await isSchoolFeatureEnabled(db, school.id, 'notices')).toBe(false);
+    await setSchoolFeature(db, { schoolId: school.id, feature: 'notices', enabled: null, config: null, updatedBy: null });
+    expect(await isSchoolFeatureEnabled(db, school.id, 'notices')).toBe(true);
+    expect((await getSchoolFeatureFlags(db, school.id)).notices).toEqual(IN_TIER);
   });
 
-  it('refuses a config that does not match the feature and writes nothing', async () => {
-    const school = await createTestSchool();
+  it('refuses a config that does not match the feature and writes nothing, and a school that does not exist', async () => {
+    const school = await createTestSchool({ tier: 'pro' });
     await expect(
       setSchoolFeature(db, { schoolId: school.id, feature: 'cadet', enabled: true, config: { nope: 1 } as never, updatedBy: null }),
     ).rejects.toThrow();
     expect(await db.select().from(schoolFeatureFlagTable).where(eqSchool(school.id))).toEqual([]);
+    await expect(
+      setSchoolFeature(db, { schoolId: 'sch_missing', feature: 'cadet', enabled: true, config: null, updatedBy: null }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 
   it('ignores rows of a retired feature key', async () => {
-    const school = await createTestSchool({ features: ['cadet'] });
+    const school = await createTestSchool({ tier: 'pro', features: ['cadet'] });
     await db.insert(schoolFeatureFlagTable).values({ schoolId: school.id, feature: 'retired-feature' as never, enabled: true });
-    expect(await getSchoolFeatureFlags(db, school.id)).toEqual({ studentManagement: STUDENTS, cadet: ON, notices: OFF, assistant: OFF });
-    expect(await readSchoolFeatureFlags(db, school.id)).toEqual({ features: { studentManagement: STUDENTS, cadet: ON, notices: OFF, assistant: OFF }, invalidConfigs: [] });
+    expect(await getSchoolFeatureFlags(db, school.id)).toEqual({ ...PRO, cadet: ADDED });
+    expect(await readSchoolFeatureFlags(db, school.id)).toEqual({ tier: 'pro', subscribedTier: 'pro', trial: null, features: { ...PRO, cadet: ADDED }, invalidConfigs: [] });
   });
 
   /**
@@ -88,7 +152,7 @@ describe('school feature flag storage', () => {
    * this school have" are answered from the facts they ask for.
    */
   it('answers "is it enabled" from the enabled fact alone, whatever the stored config looks like', async () => {
-    const school = await createTestSchool();
+    const school = await createTestSchool({ tier: 'pro' });
     await db.insert(schoolFeatureFlagTable).values([
       { schoolId: school.id, feature: 'cadet', enabled: true, config: { stale: true } },
       { schoolId: school.id, feature: 'notices', enabled: false, config: { stale: true } },
@@ -105,7 +169,7 @@ describe('school feature flag storage', () => {
       message: 'The stored settings of Cadet Portal for this school are not valid. A platform administrator must save them again.',
     });
     // Every feature is still listed with its real enabled fact; the unusable configs are named.
-    expect(await readSchoolFeatureFlags(db, school.id)).toEqual({ features: { studentManagement: STUDENTS, cadet: ON, notices: OFF, assistant: OFF }, invalidConfigs: ['cadet', 'notices'] });
+    expect(await readSchoolFeatureFlags(db, school.id)).toEqual({ tier: 'pro', subscribedTier: 'pro', trial: null, features: { ...PRO, cadet: ADDED, notices: REMOVED }, invalidConfigs: ['cadet', 'notices'] });
     // A feature with nothing stored has a valid, empty config.
     const fresh = await createTestSchool({ features: ['notices'] });
     await expect(getSchoolFeatureConfig(db, fresh.id, 'notices')).resolves.toBeNull();
@@ -113,7 +177,7 @@ describe('school feature flag storage', () => {
   });
 
   it('keeps every gate, flag read and feature procedure working with a stale config, until an administrator saves it again', async () => {
-    const school = await createTestSchool();
+    const school = await createTestSchool({ tier: 'pro' });
     await db.insert(schoolFeatureFlagTable).values([
       { schoolId: school.id, feature: 'cadet', enabled: true, config: { stale: true } },
       { schoolId: school.id, feature: 'notices', enabled: true, config: ['stale'] },
@@ -127,14 +191,18 @@ describe('school feature flag storage', () => {
     // The app's own read of the flags, which gates every page, does too.
     await expect(principal.school.getFeatureFlags({ schoolId: school.id })).resolves.toEqual({
       schoolId: school.id,
-      features: { studentManagement: STUDENTS, cadet: ON, notices: ON, assistant: OFF },
+      tier: 'pro',
+      features: { ...PRO, cadet: ADDED, notices: { ...IN_TIER, adjustment: true } },
       invalidConfigs: ['cadet', 'notices'],
     });
     // The administrator sees which settings need saving, and saving heals that feature.
     await expect(admin.systemAdmin.getSchoolFeatureFlags({ id: school.id })).resolves.toMatchObject({ invalidConfigs: ['cadet', 'notices'] });
     await expect(admin.systemAdmin.updateSchoolFeatureFlag({ id: school.id, feature: 'cadet', enabled: true, config: null })).resolves.toEqual({
       schoolId: school.id,
-      features: { studentManagement: STUDENTS, cadet: ON, notices: ON, assistant: OFF },
+      tier: 'pro',
+      subscribedTier: 'pro',
+      trial: null,
+      features: { ...PRO, cadet: ADDED, notices: { ...IN_TIER, adjustment: true } },
       invalidConfigs: ['notices'],
     });
     await expect(getSchoolFeatureConfig(db, school.id, 'cadet')).resolves.toBeNull();
@@ -152,7 +220,7 @@ describe('migration 0048 backfill', () => {
     .find((statement) => statement.includes('INSERT INTO "school_feature_flag"'))!;
 
   it('enables cadet (and only cadet) for schools that existed before flags, without touching decided ones', async () => {
-    const [untouched, decided] = await Promise.all([createTestSchool(), createTestSchool()]);
+    const [untouched, decided] = await Promise.all([createTestSchool({ tier: 'pro' }), createTestSchool({ tier: 'pro' })]);
     await setTestSchoolFeature(decided.id, 'cadet', false);
 
     // Run inside a transaction that is rolled back: the statement covers
@@ -162,18 +230,18 @@ describe('migration 0048 backfill', () => {
       .transaction(async (transaction) => {
         await transaction.execute(sql.raw(backfill));
         await transaction.execute(sql.raw(backfill));
-        expect(await getSchoolFeatureFlags(transaction, untouched.id)).toEqual({ studentManagement: STUDENTS, cadet: ON, notices: OFF, assistant: OFF });
+        expect(await getSchoolFeatureFlags(transaction, untouched.id)).toEqual({ ...PRO, cadet: ADDED });
         const rows = await transaction.select().from(schoolFeatureFlagTable).where(eqSchool(untouched.id));
         expect(rows).toHaveLength(1);
         expect(rows[0]).toMatchObject({ feature: 'cadet', enabled: true, config: null, updatedBy: null });
         // An existing row is never overwritten.
-        expect(await getSchoolFeatureFlags(transaction, decided.id)).toEqual({ studentManagement: STUDENTS, cadet: OFF, notices: OFF, assistant: OFF });
+        expect(await getSchoolFeatureFlags(transaction, decided.id)).toEqual({ ...PRO, cadet: DECLINED });
         throw new Rollback();
       })
       .catch((error: unknown) => {
         if (!(error instanceof Rollback)) throw error;
       });
-    expect(await getSchoolFeatureFlags(db, untouched.id)).toEqual({ studentManagement: STUDENTS, cadet: OFF, notices: OFF, assistant: OFF });
+    expect(await getSchoolFeatureFlags(db, untouched.id)).toEqual(PRO);
   });
 });
 
@@ -205,7 +273,8 @@ describe('school.getFeatureFlags', () => {
     for (const staff of staffOfEveryKind) {
       expect(await createTestClient(staff.session).school.getFeatureFlags({ schoolId: school.id })).toEqual({
         schoolId: school.id,
-        features: { studentManagement: STUDENTS, cadet: ON, notices: OFF, assistant: OFF },
+        tier: 'plus',
+        features: { ...BASELINE, cadet: ADDED },
         invalidConfigs: [],
       });
     }
@@ -214,11 +283,15 @@ describe('school.getFeatureFlags', () => {
     await setTestSchoolFeature(school.id, 'notices', true);
     await setTestSchoolFeature(school.id, 'cadet', false);
     expect((await createTestClient(teacher.session).school.getFeatureFlags({ schoolId: school.id })).features).toEqual({
-      studentManagement: STUDENTS,
-      cadet: OFF,
-      notices: ON,
-      assistant: OFF,
+      ...BASELINE,
+      cadet: DECLINED,
+      notices: ADDED,
     });
+
+    // Returned to the tier, a feature reads as the tier says, with no adjustment.
+    await setTestSchoolFeature(school.id, 'notices', null);
+    await setTestSchoolFeature(school.id, 'cadet', null);
+    expect((await createTestClient(teacher.session).school.getFeatureFlags({ schoolId: school.id })).features).toEqual(BASELINE);
   });
 });
 
@@ -242,8 +315,29 @@ describe('requireSchoolFeature', () => {
     const staff = await createSchoolStaffSession(school.id, [{ role: 'principal', meta: null }]);
     await expectFeatureDisabled(callProbe(staff.session, school.id), 'notices');
 
-    // An explicitly disabled row behaves like a missing one.
+    // An explicitly disabled row behaves like a missing one on a tier without the feature.
     await setTestSchoolFeature(school.id, 'notices', false);
+    await expectFeatureDisabled(callProbe(staff.session, school.id), 'notices');
+  });
+
+  it('follows the school\'s tier, and an adjustment over it', async () => {
+    const school = await createTestSchool({ tier: 'plus' });
+    const staff = await createSchoolStaffSession(school.id, [{ role: 'principal', meta: null }]);
+    const admin = createTestClient(await createAdminSession());
+    // Plus has no notices (nor the student management they need).
+    await expectFeatureDisabled(callProbe(staff.session, school.id), 'notices');
+    // Pro includes both: the gate opens with the tier change alone.
+    await admin.systemAdmin.updateSchoolTier({ id: school.id, tier: 'pro' });
+    expect(await callProbe(staff.session, school.id)).toBe('reached');
+    // Switched off for this school, whatever its tier.
+    await setTestSchoolFeature(school.id, 'notices', false);
+    await expectFeatureDisabled(callProbe(staff.session, school.id), 'notices');
+    await admin.systemAdmin.updateSchoolTier({ id: school.id, tier: 'enterprise' });
+    await expectFeatureDisabled(callProbe(staff.session, school.id), 'notices');
+    // Back to the tier: on again; and off again on a tier without it.
+    await setTestSchoolFeature(school.id, 'notices', null);
+    expect(await callProbe(staff.session, school.id)).toBe('reached');
+    await admin.systemAdmin.updateSchoolTier({ id: school.id, tier: 'plus' });
     await expectFeatureDisabled(callProbe(staff.session, school.id), 'notices');
   });
 
@@ -269,6 +363,59 @@ describe('requireSchoolFeature', () => {
     await setTestSchoolFeature(school.id, 'notices', true);
     await expectPermissionDenied(callProbe(outsider.session, school.id));
     await expectRpcCode(callProbe(null, school.id), 'UNAUTHORIZED');
+  });
+});
+
+/** The real procedures of each area, on a school of each tier with no adjustment. */
+describe('what a school of each tier can do', () => {
+  async function schoolOn(tier: 'plus' | 'pro' | 'enterprise') {
+    const school = await createTestSchool({ tier });
+    const session = await createTestSession({ schoolId: school.id, sessionStartYear: 2026, sessionEndYear: 2027, isActive: true });
+    const principal = createTestClient((await createSchoolStaffSession(school.id, [{ role: 'principal', meta: null }])).session);
+    return {
+      school,
+      admissions: () => principal.school.listAdmissions({ schoolId: school.id }),
+      notices: () => principal.school.listNotices({ schoolId: school.id, sessionId: session.id }),
+      cadetSettings: () => principal.school.getCadetPortalSettings({ schoolId: school.id }),
+      // Staff, classes and examinations are every school's, whatever its tier.
+      classes: () => principal.school.listClasses({ schoolId: school.id }),
+      assistant: () => principal.school.getAssistantAccess({ schoolId: school.id }),
+    };
+  }
+
+  it('Plus: staff, classes and examinations only', async () => {
+    const plus = await schoolOn('plus');
+    await expect(plus.classes()).resolves.toEqual([]);
+    await expectFeatureDisabled(plus.admissions(), 'studentManagement');
+    await expectFeatureDisabled(plus.notices(), 'notices');
+    await expectFeatureDisabled(plus.cadetSettings(), 'cadet');
+    await expectFeatureDisabled(plus.assistant(), 'assistant');
+  });
+
+  it('Pro: also student management and notices', async () => {
+    const pro = await schoolOn('pro');
+    await expect(pro.classes()).resolves.toEqual([]);
+    await expect(pro.admissions()).resolves.toMatchObject({ items: [] });
+    await expect(pro.notices()).resolves.toMatchObject({ items: [] });
+    await expectFeatureDisabled(pro.cadetSettings(), 'cadet');
+    await expectFeatureDisabled(pro.assistant(), 'assistant');
+  });
+
+  it('Enterprise: also the Cadet Portal', async () => {
+    const enterprise = await schoolOn('enterprise');
+    await expect(enterprise.admissions()).resolves.toMatchObject({ items: [] });
+    await expect(enterprise.notices()).resolves.toMatchObject({ items: [] });
+    await expect(enterprise.cadetSettings()).resolves.toEqual({ schoolId: enterprise.school.id, showClassAverages: false });
+    // The assistant is in no tier: off here too until an administrator switches it on.
+    await expectFeatureDisabled(enterprise.assistant(), 'assistant');
+  });
+
+  it('the assistant can be switched on for a school of any tier, with its limit', async () => {
+    for (const tier of ['plus', 'pro', 'enterprise'] as const) {
+      const school = await schoolOn(tier);
+      await setTestSchoolFeature(school.school.id, 'assistant', true, { monthlyLimitUsd: 12 });
+      await expect(school.assistant()).resolves.toMatchObject({ schoolId: school.school.id, monthlyLimitUsd: 12 });
+    }
   });
 });
 

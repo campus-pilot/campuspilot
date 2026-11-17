@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { FileText, Home, Settings } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { AppShell, type AppShellLinkProps } from './app-shell';
+import { AppShell, AppShellAlert, type AppShellLinkProps } from './app-shell';
 import { installPopupDomStubs } from './documents/combobox-test-setup';
 
 /** Sets the window width the sidebar's `useIsMobile` reads (mobile is below 768px). */
@@ -40,7 +41,7 @@ function renderLink({ href, children, className, ariaCurrent, onClick }: AppShel
   );
 }
 
-function renderShell() {
+function renderShell(children: ReactNode = <p>Page</p>) {
   return render(
     <AppShell
       currentPath="/home"
@@ -69,7 +70,7 @@ function renderShell() {
       user={{ name: 'Test User', secondaryLabel: 'Principal' }}
       renderLink={renderLink}
     >
-      <p>Page</p>
+      {children}
     </AppShell>,
   );
 }
@@ -128,5 +129,22 @@ describe('the app shell sidebar on desktop', () => {
     // The desktop sidebar is part of the page, not a sheet: it is still there after the click.
     expect(sidebarLink('Settings')).toBeTruthy();
     expect(sidebarSheet()).toBeNull();
+  });
+});
+
+describe('page alerts', () => {
+  it('shows a higher priority alert first, even when it registered after the page filled the two places', () => {
+    setViewportWidth(1280);
+    renderShell(
+      <>
+        <AppShellAlert slug="page:one" message="First page alert" />
+        <AppShellAlert slug="page:two" message="Second page alert" />
+        <AppShellAlert slug="school:read-only" message="This school is suspended" priority={1} />
+      </>,
+    );
+    const shown = screen.getAllByRole('alert').map((alert) => alert.textContent);
+    expect(shown).toHaveLength(2);
+    expect(shown[0]).toContain('This school is suspended');
+    expect(shown[1]).toContain('First page alert');
   });
 });

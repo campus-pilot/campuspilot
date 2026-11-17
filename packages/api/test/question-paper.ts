@@ -21,7 +21,6 @@ import type { Context } from '../src/context';
 /** A member of the test school: who they are, their API client and the context of their session for HTTP handlers. */
 export type QuestionPaperPerson = { session: UserSession; userId: string; client: TestClient; context: Context };
 
-const ALL_ROLES: Role[] = ['principal', 'manager', 'teacher', 'accountant', 'exam_coordinator'];
 
 /** Roles the school has switched on for the AI assistant (`school_assistant_access_role`), replacing the previous set. */
 export async function switchAssistantRoles(schoolId: string, roles: Role[]) {
@@ -32,8 +31,8 @@ export async function switchAssistantRoles(schoolId: string, roles: Role[]) {
 /**
  * A school with everything the question paper feature needs, named so tests
  * read like the product:
- * - the `assistant` feature on, every role eligible, all but the accountant
- *   switched on;
+ * - the `assistant` feature on, switched on for every role but the
+ *   accountant (set explicitly, replacing the default roles enabling writes);
  * - an active session with the exam `term-1` and two classes;
  * - plans for both classes: `science` (mode `theory`, 20 marks) and `math`
  *   (modes `theory` 16 marks and `practical` 4 marks);
@@ -45,7 +44,7 @@ export async function createQuestionPaperWorld(options: { template?: boolean; sc
     ...options.school,
     name: 'Question Paper School',
     registrationNo: 'QP-2026',
-    features: [{ feature: 'assistant', config: { monthlyLimitUsd: 100, eligibleRoles: ALL_ROLES } }],
+    features: [{ feature: 'assistant', config: { monthlyLimitUsd: 100 } }],
   });
   const schoolId = school.id;
   await switchAssistantRoles(schoolId, ['principal', 'manager', 'teacher', 'exam_coordinator']);

@@ -1,22 +1,104 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql, type SQL } from "drizzle-orm";
 
 import type { DatabaseExecutor } from "../index";
+import { schoolTable } from "../schema/school";
 import { schoolFeatureFlagTable } from "../schema/school-feature-flag";
+import { schoolTrialTable } from "../schema/school-trial";
 import {
   parseSchoolFeatureConfig,
   resolveSchoolFeatureActivity,
+  resolveSchoolFeatureSwitches,
+  resolveSchoolPlan,
   SCHOOL_FEATURE_KEYS,
-  schoolFeatureCatalogue,
+  schoolTierIncludes,
   type SchoolFeatureFlags,
   type SchoolFeatureKey,
   type SchoolFeatureState,
+  type SchoolPlan,
+  type SchoolTier,
 } from "./catalogue";
 
 /**
- * Reads of `school_feature_flag`, shared by the API and the auth package
- * (Cadet sign-in), so every enforcement point decides from the same query.
- * Writes live in the API (`packages/api/src/feature-flags`).
+ * Reads of a school's plan and features (its subscribed tier on `school`,
+ * its active trial in `school_trial`, its adjustments and settings in
+ * `school_feature_flag`), shared by the API and the auth package (Cadet
+ * sign-in), so every enforcement point decides from the same query. Writes
+ * live in the API (`packages/api/src/feature-flags`, the system admin
+ * trial procedures).
  */
+
+/**
+ * SQL condition: the `school_trial` row is active now, that is
+ * `starts_at <= now() < least(ends_at, coalesce(ended_at, 'infinity'))`.
+ * Compared with the database's `now()` at every read, so a trial switches
+ * itself off at its end without any job (docs/school-trials.md). Inside a
+ * transaction `now()` is the transaction's start, so a trial ended in it
+ * (`ended_at = now()`) is already inactive there. A school has at most one
+ * active trial (the table's EXCLUDE constraint), so a join on this
+ * condition adds at most one row per school.
+ */
+export function activeSchoolTrialCondition(): SQL {
+  return sql`${schoolTrialTable.startsAt} <= now() and now() < least(${schoolTrialTable.endsAt}, coalesce(${schoolTrialTable.endedAt}, 'infinity'::timestamptz))`;
+}
+
+/** The active trial of a school as reads return it. */
+export type ActiveSchoolTrial = {
+  id: string;
+  tier: SchoolTier;
+  startsAt: Date;
+  endsAt: Date;
+};
+
+/** The columns of an active trial for a select joined with {@link activeSchoolTrialCondition}. */
+export const activeSchoolTrialColumns = {
+  trialId: schoolTrialTable.id,
+  trialTier: schoolTrialTable.tier,
+  trialStartsAt: schoolTrialTable.startsAt,
+  trialEndsAt: schoolTrialTable.endsAt,
+};
+
+/** The active trial out of a row selected with {@link activeSchoolTrialColumns} (left joined: null without one). */
+export function activeSchoolTrialOf(row: {
+  trialId: string | null;
+  trialTier: SchoolTier | null;
+  trialStartsAt: Date | null;
+  trialEndsAt: Date | null;
+}): ActiveSchoolTrial | null {
+  if (row.trialId === null || row.trialTier === null || row.trialStartsAt === null || row.trialEndsAt === null) return null;
+  return { id: row.trialId, tier: row.trialTier, startsAt: row.trialStartsAt, endsAt: row.trialEndsAt };
+}
+
+/** A school's plan with the two facts it comes from ({@link readSchoolPlan}). */
+export type SchoolPlanRead = {
+  /** `school.tier`: the subscribed tier, null without a subscription. */
+  subscribedTier: SchoolTier | null;
+  /** The active trial, null without one. */
+  trial: ActiveSchoolTrial | null;
+  /** The plan both give ({@link resolveSchoolPlan}); `tier: null` means the school has no plan. */
+  plan: SchoolPlan;
+};
+
+/**
+ * A school's subscribed tier, its active trial and the plan they give, in
+ * one query. Null for a school that does not exist.
+ */
+export async function readSchoolPlan(
+  db: DatabaseExecutor,
+  schoolId: string,
+): Promise<SchoolPlanRead | null> {
+  const [row] = await db
+    .select({ subscribedTier: schoolTable.tier, ...activeSchoolTrialColumns })
+    .from(schoolTable)
+    .leftJoin(schoolTrialTable, and(eq(schoolTrialTable.schoolId, schoolTable.id), activeSchoolTrialCondition()))
+    .where(eq(schoolTable.id, schoolId))
+    .limit(1);
+  if (!row) return null;
+  return schoolPlanOf(row.subscribedTier, activeSchoolTrialOf(row));
+}
+
+function schoolPlanOf(subscribedTier: SchoolTier | null, trial: ActiveSchoolTrial | null): SchoolPlanRead {
+  return { subscribedTier, trial, plan: resolveSchoolPlan({ subscribedTier, activeTrial: trial }) };
+}
 
 /**
  * A stored config as its feature's schema reads it. `invalid` is its own
@@ -63,31 +145,80 @@ export async function readSchoolFeatureConfig<K extends SchoolFeatureKey>(
   return readStoredConfig(key, row?.config ?? null);
 }
 
-/** Every feature's switch for a school: the stored `enabled`, or the catalogue default without a row. */
+/** What is stored about one feature of one school: its adjustment and its raw config. */
+type StoredFeatureRow = { adjustment: boolean | null; config: unknown };
+
+type SchoolFeatureSwitches = {
+  found: boolean;
+  plan: SchoolPlanRead;
+  switches: Record<SchoolFeatureKey, boolean>;
+  rows: Map<string, StoredFeatureRow>;
+};
+
+/**
+ * A school's plan, every feature's state and its unusable configs
+ * ({@link readSchoolFeatureFlags}).
+ */
+export type SchoolFeatureFlagsRead = {
+  /** The tier of the school's plan, which every feature's `included` follows; null when it has no plan. */
+  tier: SchoolTier | null;
+  /** `school.tier`: the subscribed tier, null without a subscription. */
+  subscribedTier: SchoolTier | null;
+  /** The active trial, null without one. */
+  trial: ActiveSchoolTrial | null;
+  features: SchoolFeatureFlags;
+  invalidConfigs: SchoolFeatureKey[];
+};
+
+/**
+ * A school's plan (subscribed tier and active trial), every feature's
+ * switch (the stored adjustment, or the plan tier's own answer without one)
+ * and the stored rows, in one query. `found` says whether the school
+ * exists. A school that does not exist has no plan and no stored row, so
+ * every switch is off and a gate answers it like a school without the
+ * feature.
+ */
 async function readSchoolFeatureSwitches(
   db: DatabaseExecutor,
   schoolId: string,
-): Promise<{ switches: Record<SchoolFeatureKey, boolean>; rows: Map<string, { enabled: boolean; config: unknown }> }> {
+): Promise<SchoolFeatureSwitches> {
+  // From the school, so a school without any stored row still answers with
+  // its plan. At most one trial is active, so the trial join adds no rows.
   const rows = await db
     .select({
+      subscribedTier: schoolTable.tier,
+      ...activeSchoolTrialColumns,
       feature: schoolFeatureFlagTable.feature,
-      enabled: schoolFeatureFlagTable.enabled,
+      adjustment: schoolFeatureFlagTable.enabled,
       config: schoolFeatureFlagTable.config,
     })
-    .from(schoolFeatureFlagTable)
-    .where(eq(schoolFeatureFlagTable.schoolId, schoolId));
-  const byKey = new Map(rows.map((row) => [row.feature as string, row]));
-  const switches = Object.fromEntries(
-    SCHOOL_FEATURE_KEYS.map((key) => [key, byKey.get(key)?.enabled ?? schoolFeatureCatalogue[key].defaultEnabled]),
-  ) as Record<SchoolFeatureKey, boolean>;
-  return { switches, rows: byKey };
+    .from(schoolTable)
+    .leftJoin(schoolTrialTable, and(eq(schoolTrialTable.schoolId, schoolTable.id), activeSchoolTrialCondition()))
+    .leftJoin(schoolFeatureFlagTable, eq(schoolFeatureFlagTable.schoolId, schoolTable.id))
+    .where(eq(schoolTable.id, schoolId));
+  const first = rows[0];
+  const plan = schoolPlanOf(first?.subscribedTier ?? null, first ? activeSchoolTrialOf(first) : null);
+  const byKey = new Map<string, StoredFeatureRow>();
+  for (const row of rows) {
+    if (row.feature !== null) byKey.set(row.feature, { adjustment: row.adjustment, config: row.config });
+  }
+  const adjustments = Object.fromEntries(
+    SCHOOL_FEATURE_KEYS.map((key) => [key, byKey.get(key)?.adjustment ?? null]),
+  ) as Record<SchoolFeatureKey, boolean | null>;
+  return {
+    found: rows.length > 0,
+    plan,
+    switches: resolveSchoolFeatureSwitches(plan.plan.tier, adjustments),
+    rows: byKey,
+  };
 }
 
 /**
- * Whether a school **has** a feature now: its switch is on (the catalogue's
- * `defaultEnabled` without a stored row) and every feature it `requires` is
+ * Whether a school **has** a feature now: its switch is on (the school's
+ * adjustment, or its plan's tier without one) and every feature it `requires` is
  * active. Every gate asks exactly this, so a feature whose own switch is on
- * still closes when a feature it needs is switched off.
+ * still closes when a feature it needs is switched off. A school that does
+ * not exist has no feature.
  *
  * Reads the switches only and never parses `config`: the two are independent
  * facts, and every gate (Cadet sign-in, `cadetProcedure`, the MCP context,
@@ -108,12 +239,16 @@ export async function isSchoolFeatureEnabled(
 }
 
 /**
- * Every catalogue feature's state for a school, and which features hold a
- * stored config that no longer matches its schema. Rows of retired keys are
- * ignored.
+ * A school's plan, every catalogue feature's state, and which features hold
+ * a stored config that no longer matches its schema. Rows of retired keys
+ * are ignored. Null when the school does not exist. `tier` is the tier of
+ * the school's plan (the higher of `subscribedTier` and the active `trial`'s
+ * tier); it is null for a school without a plan: no tier includes any
+ * feature for it, and its adjustments still apply.
  *
- * `enabled` is the switch (stored, or the catalogue default without a row)
- * and `active` whether the school has the feature (see
+ * Per feature: `included` is the tier's answer, `adjustment` what is stored
+ * for this school (null: it follows the tier), `enabled` the switch that
+ * results and `active` whether the school has the feature (see
  * {@link isSchoolFeatureEnabled}). A feature listed in `invalidConfigs`
  * reads with `config: null` here: the stored value is unusable, which the
  * list states explicitly (null alone would also mean "nothing stored").
@@ -124,8 +259,15 @@ export async function isSchoolFeatureEnabled(
 export async function readSchoolFeatureFlags(
   db: DatabaseExecutor,
   schoolId: string,
-): Promise<{ features: SchoolFeatureFlags; invalidConfigs: SchoolFeatureKey[] }> {
-  const { switches, rows } = await readSchoolFeatureSwitches(db, schoolId);
+): Promise<SchoolFeatureFlagsRead | null> {
+  const read = await readSchoolFeatureSwitches(db, schoolId);
+  if (!read.found) return null;
+  return resolveSchoolFeatureFlags(read);
+}
+
+/** Every feature's state from what {@link readSchoolFeatureSwitches} read. */
+function resolveSchoolFeatureFlags({ plan, switches, rows }: SchoolFeatureSwitches): SchoolFeatureFlagsRead {
+  const tier = plan.plan.tier;
   const active = resolveSchoolFeatureActivity(switches);
   const invalidConfigs: SchoolFeatureKey[] = [];
   const features = Object.fromEntries(
@@ -136,6 +278,8 @@ export async function readSchoolFeatureFlags(
       return [
         key,
         {
+          included: schoolTierIncludes(tier, key),
+          adjustment: row?.adjustment ?? null,
           enabled: switches[key],
           active: active[key],
           config: stored.status === "valid" ? stored.config : null,
@@ -143,13 +287,16 @@ export async function readSchoolFeatureFlags(
       ];
     }),
   ) as SchoolFeatureFlags;
-  return { features, invalidConfigs };
+  return { tier, subscribedTier: plan.subscribedTier, trial: plan.trial, features, invalidConfigs };
 }
 
-/** The `features` of {@link readSchoolFeatureFlags}, for callers that only ask what a school has. */
+/**
+ * The `features` of {@link readSchoolFeatureFlags}, for callers that only ask
+ * what a school has. A school that does not exist has every feature off.
+ */
 export async function getSchoolFeatureFlags(
   db: DatabaseExecutor,
   schoolId: string,
 ): Promise<SchoolFeatureFlags> {
-  return (await readSchoolFeatureFlags(db, schoolId)).features;
+  return resolveSchoolFeatureFlags(await readSchoolFeatureSwitches(db, schoolId)).features;
 }

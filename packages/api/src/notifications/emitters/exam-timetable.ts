@@ -1,13 +1,12 @@
 import type { DatabaseExecutor } from '@campuspilot/db';
 import { admissionTable } from '@campuspilot/db/schema/admission';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
-import { schoolTable } from '@campuspilot/db/schema/school';
 import { studentTable } from '@campuspilot/db/schema/student';
 import { and, asc, eq } from 'drizzle-orm';
 
-import { rpcError } from '../../errors';
 import { isSchoolFeatureEnabled } from '../../feature-flags/feature-flags.service';
 import { forecastDeliveries, resolveAdmissionRecipients, type DeliveryForecast } from '../dispatch';
+import { schoolDeliveryFacts } from '../features';
 import { notifyMany, type AnyNotifyInput, type NotifyInput } from '../notify';
 import { MAX_EVENT_RECIPIENTS } from './notices';
 
@@ -63,12 +62,6 @@ async function timetableStaffRecipients(db: DatabaseExecutor, schoolId: string):
   return members.map((member) => member.userId);
 }
 
-async function isDemoSchool(db: DatabaseExecutor, schoolId: string) {
-  const [school] = await db.select({ isDemo: schoolTable.isDemo }).from(schoolTable).where(eq(schoolTable.id, schoolId)).limit(1);
-  if (!school) throw rpcError.notFound('School');
-  return school.isDemo;
-}
-
 /** Whom publishing would notify now; `cadetForecast` is null while the school has no Cadet Portal. */
 export type TimetablePublishPreview = { staffRecipientCount: number; cadetForecast: DeliveryForecast | null };
 
@@ -80,7 +73,7 @@ export async function previewTimetableDelivery(db: DatabaseExecutor, scope: Time
   const recipients = await resolveAdmissionRecipients(db, scope.schoolId, roster.map((row) => row.admissionId));
   return {
     staffRecipientCount: staff.length,
-    cadetForecast: forecastDeliveries('exam.timetable_published', await isDemoSchool(db, scope.schoolId), recipients),
+    cadetForecast: forecastDeliveries('exam.timetable_published', await schoolDeliveryFacts(db, scope.schoolId), recipients),
   };
 }
 

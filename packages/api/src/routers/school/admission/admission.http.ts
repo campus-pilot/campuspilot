@@ -19,6 +19,7 @@ import { parseDocumentUpload } from '../../../files/document-upload';
 import { parseImageUpload } from '../../../files/image-upload';
 import { assertSchoolFeatureEnabled } from '../../../feature-flags/feature-flags.service';
 import { assertPermission } from '../../../permissions/authorization';
+import { assertSchoolWritableByCaller } from '../../../school-access/school-access.service';
 import {
   ADMISSION_PHOTO_FIELD_NAME,
   MAX_ADMISSION_PHOTO_BYTES,
@@ -52,6 +53,8 @@ export async function handleAdmissionPhotoUpload(
     });
     // Admissions belong to student management; checked after the permission, as every gate is.
     await assertSchoolFeatureEnabled(context.db, input.schoolId, 'studentManagement');
+    // An upload or removal is a change: refused while the school is read-only (suspended, or without an active plan).
+    await assertSchoolWritableByCaller(context, input.schoolId);
     await assertAdmissionRegistered(context.db, input);
     const photo = await parseImageUpload(request, {
       fieldName: ADMISSION_PHOTO_FIELD_NAME,
@@ -139,6 +142,8 @@ export async function handleAdmissionDocumentUpload(
     });
     // Admissions belong to student management; checked after the permission, as every gate is.
     await assertSchoolFeatureEnabled(context.db, input.schoolId, 'studentManagement');
+    // An upload or removal is a change: refused while the school is read-only (suspended, or without an active plan).
+    await assertSchoolWritableByCaller(context, input.schoolId);
     const upload = await parseDocumentUpload(request, {
       fieldName: ADMISSION_DOCUMENT_FIELD_NAME,
       maxBytes: MAX_ADMISSION_DOCUMENT_SIZE_BYTES,
@@ -254,6 +259,8 @@ export async function handleAdmissionDocumentDelete(
     });
     // Admissions belong to student management; checked after the permission, as every gate is.
     await assertSchoolFeatureEnabled(context.db, input.schoolId, 'studentManagement');
+    // An upload or removal is a change: refused while the school is read-only (suspended, or without an active plan).
+    await assertSchoolWritableByCaller(context, input.schoolId);
     const result = await context.db.transaction(async (transaction) => {
       const [existing] = await transaction.select().from(admissionTable)
         .where(and(eq(admissionTable.schoolId, input.schoolId), eq(admissionTable.id, input.admissionId)))

@@ -11,10 +11,12 @@ import { o } from '../../../index';
  * (`resolveAssistantAccess`), never a copy of its rules.
  *
  * Seeing and managing papers needs the facts every use of the assistant
- * needs except the monthly limit: the school has the `assistant` feature,
- * the user is a member, and one of their roles is both eligible and switched
- * on (this mirrors `canSee` in `packages/assistant/src/access.ts`, which this
- * package cannot import). Anything that spends model money, today only
+ * needs except the suspension and the monthly limit: the school has the
+ * `assistant` feature, the user is a member, and the assistant is switched
+ * on for one of their roles (this mirrors `canSee` in
+ * `packages/assistant/src/access.ts`, which this package cannot import). A
+ * suspended school is read-only through `requireAuth`, which refuses every
+ * question paper change before this gate. Anything that spends model money, today only
  * starting a generation, also needs the school to be under its monthly limit
  * (`useModel`), so a school that reached its limit can still read, download
  * and edit papers it already has.

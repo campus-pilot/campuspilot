@@ -22,11 +22,11 @@ export async function loadAssistantAccess(session: AssistantSession, schoolId: s
 
 /**
  * Whether the user may see the assistant in the school at all: the school
- * has the feature, the user is a member, and one of their roles is eligible
- * and switched on by the school. Everything of `resolveAssistantAccess`
- * except the monthly limit: at the limit the history stays visible (the
- * composer says why it cannot send); for anyone else the assistant
- * disappears, history included.
+ * has the feature, the user is a member, and the assistant is switched on
+ * for one of their roles. Everything of `resolveAssistantAccess` except the
+ * suspension and the monthly limit: in a suspended school and at the limit
+ * the history stays visible (the composer says why it cannot send); for
+ * anyone else the assistant disappears, history included.
  */
 export function canSee(decision: AssistantAccessDecision): boolean {
   return decision.featureEnabled && decision.member && decision.allowedRoles.length > 0;
@@ -45,7 +45,19 @@ export function assertCanSee(decision: AssistantAccessDecision): void {
   throw assistantAccessError(decision.refusal ?? { code: 'role_not_enabled', message: 'You cannot use the AI assistant in this school.' });
 }
 
-/** Throws unless the user may start or continue a turn now (feature, role, limit). */
+/**
+ * Throws unless {@link canSee} and the school can be changed: deleting a
+ * conversation or an unsent attachment is a change, refused while the school
+ * is read-only (suspended, or without an active plan). Stopping a run and
+ * declining an approval only stop spending, so they keep {@link assertCanSee}.
+ */
+export function assertCanChange(decision: AssistantAccessDecision): void {
+  assertCanSee(decision);
+  const refusal = decision.refusal;
+  if (refusal && (refusal.code === 'school_suspended' || refusal.code === 'no_plan')) throw assistantAccessError(refusal);
+}
+
+/** Throws unless the user may start or continue a turn now (feature, role, the school not suspended, limit). */
 export function assertCanUse(decision: AssistantAccessDecision): void {
   assertCanSee(decision);
   if (decision.refusal) throw assistantAccessError(decision.refusal);

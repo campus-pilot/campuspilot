@@ -40,6 +40,7 @@ import {
   PurgeDemoSchoolCard,
 } from './demo-school/purge-demo-school-card';
 import { SchoolAvatar } from './school-avatar';
+import { SchoolSuspensionCard } from './school-suspension-card';
 
 const schoolDetailsFormSchema = z.object({
   name: addSchoolInputSchema.shape.name,
@@ -649,10 +650,11 @@ function SchoolSettingsContent({ school }: { school: SchoolDto }) {
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
         <p className="text-sm text-muted-foreground">
-          Manage school information and branding.
+          Manage school information, branding and suspension.
         </p>
       </div>
       <SchoolProfileCard school={school} />
+      <SchoolSuspensionCard school={school} />
       {/* <DeleteSchoolCard school={school} /> — see the note above deleteSchoolFormSchema. */}
       {school.isDemo ? <DemoSchoolCredentialsCard schoolId={school.id} /> : null}
       {school.isDemo ? <PurgeDemoSchoolCard school={school} /> : null}

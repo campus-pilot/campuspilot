@@ -167,6 +167,13 @@ export type AppShellAlertDefinition = {
   actionHref?: string;
   /** The action decides whether and when to close the containing alert dialog. */
   onAction?: (closeDialog: () => void) => void | Promise<void>;
+  /**
+   * Higher shows first; alerts of equal priority keep the order they
+   * registered in. Only the first two are shown (one on a phone), so an alert
+   * that must always be seen, whatever the page registers (a read-only
+   * school), takes a priority above the pages' own (0).
+   */
+  priority?: number;
 };
 
 type RegisteredAppShellAlert = AppShellAlertDefinition & {
@@ -190,9 +197,10 @@ const AppShellAlertRegistryContext = createContext<AppShellAlertRegistry | null>
  * registration wins while present; removing it reveals any older registration.
  */
 function resolveRegisteredAlerts(registrations: RegisteredAppShellAlert[]) {
+  // Array.prototype.sort is stable, so equal priorities keep their registration order.
   return Array.from(
     new Map(registrations.map((alert) => [alert.slug, alert])).values(),
-  );
+  ).sort((first, second) => (second.priority ?? 0) - (first.priority ?? 0));
 }
 
 type AppShellProps = {
@@ -318,6 +326,7 @@ export function AppShellAlert({
   actionLabel,
   actionHref,
   onAction,
+  priority,
 }: AppShellAlertDefinition) {
   const registry = useContext(AppShellAlertRegistryContext);
   const registrationId = useId();
@@ -330,8 +339,9 @@ export function AppShellAlert({
       actionLabel,
       actionHref,
       onAction,
+      priority,
     }),
-    [slug, message, type, icon, actionLabel, actionHref, onAction],
+    [slug, message, type, icon, actionLabel, actionHref, onAction, priority],
   );
   const registerNode = useCallback(
     (node: HTMLSpanElement | null) => {

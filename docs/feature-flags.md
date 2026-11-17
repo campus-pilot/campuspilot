@@ -1,10 +1,72 @@
-# School feature flags
+# School feature flags and subscription tiers
 
-A feature flag says whether one school **has** a product area (student
-management, the Cadet Portal, notices, the AI assistant). Platform administrators switch flags per school in the admin app; a
-school's own staff can only read them. This guide is the canonical reference:
-read it before adding a feature, gating a procedure or screen on one, or
-changing how flags are stored or enforced.
+A feature says whether one school **has** a product area (student
+management, the Cadet Portal, notices, WhatsApp notifications, the AI
+assistant). Which features a school has comes from its **plan**: its
+subscription tier (Plus, Pro or Enterprise), or a higher tier of an active
+trial ([School trials](school-trials.md)); a platform administrator can then
+adjust a single feature for a single school in the admin app. A school's own staff can only
+read them. This guide is the canonical reference: read it before adding a
+feature or a tier, gating a procedure or screen on a feature, or changing
+how tiers and adjustments are stored or enforced.
+
+## Tiers
+
+A school subscribes to at most one tier (`school.tier`, no default; null
+without a subscription) and may be on a trial of one; its features follow
+the higher of the two, the **plan's tier** (`resolveSchoolPlan`, see
+[School trials](school-trials.md)). What a tier includes is stated per
+feature in the catalogue (`tiers`), never derived from the order of the
+tiers:
+
+| Feature | Plus | Pro | Enterprise |
+| --- | --- | --- | --- |
+| Staff, classes, sections, subjects, examinations (not a feature: every school) | yes | yes | yes |
+| `studentManagement` | | yes | yes |
+| `notices` | | yes | yes |
+| `cadet` | | | yes |
+| `whatsapp` | | | yes |
+| `assistant` | add-on | add-on | add-on |
+
+The assistant (and with it question papers) is in no tier: it is an
+**add-on on every tier**, off until an administrator switches it on for the
+school together with its monthly limit, because every request is paid model
+usage. A Plus school is therefore the staff-only school of "The
+`studentManagement` feature" below, typically with the assistant switched on
+for question papers.
+
+**No subscribed tier.** `school.tier` may be null: the school has no
+subscription (`addSchool` without a tier, or `updateSchoolTier` with null).
+It then has the plan of its active trial, or **no plan**: a null plan tier
+includes no feature (`schoolTierIncludes(null, key)` is false), the school's
+adjustments still apply as on any tier, and the school is **read-only** (its
+staff and students read, every change is refused with `SCHOOL_NO_PLAN`).
+The admin app shows it as "No plan". See [School trials](school-trials.md).
+
+**Adjustments.** On top of its tier an administrator can set one feature for
+one school: *always on* (the school has it whatever its tier), *always off*,
+or *follow the tier* (no adjustment). An adjustment is the administrator's
+own decision about that school and is kept when the tier changes: a Pro
+school given WhatsApp keeps it after a move to Plus or Enterprise until the
+adjustment is removed. Requirements still apply (WhatsApp switched on for a
+Plus school is inactive, because it needs student management).
+
+**Changing the tier** (`systemAdmin.updateSchoolTier`) writes `school.tier`
+and nothing else (null removes the subscription). Features the new plan
+lacks stop at once, exactly as if each had been switched off (the tables
+below); their data is kept. A trial changes the plan the same way while it
+runs and when it ends.
+
+**Existing schools** were put on tiers by migration `0073_subscription-tiers.sql`
+so that no school gained or lost a feature on deploy: each got the lowest
+tier that covers what it had (the Cadet Portal in use: Enterprise; student
+management without it: Pro; neither: Plus), and whatever it had that its new
+tier says otherwise became an adjustment (for example `notices` off on an
+Enterprise school that never had notices, or `whatsapp` on for a Pro school,
+since WhatsApp used to go to every school with student management). Stored
+switches that only repeated the tier were removed, so those schools follow
+their tier from then on. `subscription-tiers-migration.integration.test.ts`
+runs the migration's statements against prepared rows.
 
 A flag is not a permission. Permissions (OPA) decide *who* may act; a flag
 decides whether the area exists for the school at all. Gate with both, each in
@@ -16,13 +78,18 @@ its own layer, and never infer one from the other.
 
 | Export | Meaning |
 | --- | --- |
-| `schoolFeatureCatalogue` | One entry per feature: `label`, `description`, `config` (a Zod schema; `z.null()` for a feature without settings), `defaultEnabled` (the switch of a school with no stored row) and `requires` (the features it cannot work without). |
-| `SchoolFeatureKey`, `SCHOOL_FEATURE_KEYS`, `schoolFeatureKeySchema` | The keys (`studentManagement`, `cadet`, `notices`, `assistant`). |
+| `SCHOOL_TIERS`, `SchoolTier`, `schoolTierSchema`, `schoolTierCatalogue` | The tiers (`plus`, `pro`, `enterprise`) with each one's label and description. |
+| `schoolFeatureCatalogue` | One entry per feature: `label`, `description`, `config` (a Zod schema; `z.null()` for a feature without settings), `tiers` (the tiers that include it; empty for an add-on) and `requires` (the features it cannot work without). |
+| `SchoolFeatureKey`, `SCHOOL_FEATURE_KEYS`, `schoolFeatureKeySchema` | The keys (`studentManagement`, `cadet`, `notices`, `whatsapp`, `assistant`). |
+| `schoolTierIncludes(tier, key)`, `schoolTierFeatures(tier)` | Whether a tier includes a feature; the features of a tier. |
+| `schoolTierRank`, `resolveSchoolPlan({ subscribedTier, activeTrial })`, `SchoolPlan`, `SCHOOL_PLAN_SOURCES` | How tiers compare, and the plan a subscription and an active trial give: the higher tier, its `source` (`subscription` or `trial`), or no plan ([School trials](school-trials.md)). |
+| `resolveSchoolFeatureSwitches(tier, adjustments)` | Every feature's switch for a plan's tier: the adjustment where there is one, otherwise the tier's answer. Used by the store and by the admin app to say what a plan change would do. |
 | `resolveSchoolFeatureActivity(switches)`, `missingSchoolFeatureRequirements(key, flags)` | Which features are **active** (switch on and every required feature active), and which requirements of one feature are not. The one implementation of the rule below. |
 | `SchoolFeatureConfig<K>` | The config type of exactly one key. A caller holding key `K` never sees another key's shape. |
-| `SchoolFeatureState<K>` | `{ enabled: boolean; active: boolean; config: SchoolFeatureConfig<K> \| null }`: the switch, whether the school has the feature now, and its settings (see "Switch and activity"). |
+| `SchoolFeatureState<K>` | `{ included, adjustment, enabled, active, config }`: whether the plan's tier includes it, the school's adjustment (`true`, `false` or null), the switch that results, whether the school has the feature now, and its settings (see "Switch and activity"). |
 | `SchoolFeatureFlags` | `{ [K in SchoolFeatureKey]: SchoolFeatureState<K> }`. |
-| `SchoolFeatureEntry`, `schoolFeatureEntries(flags)` | One feature's state **with its key**, a union discriminated on `feature`. Use it whenever the key is not a literal (a loop, a form): a value whose key may be any feature cannot carry one feature's config for another. Build updates by spreading an entry, never by pairing `feature` and `config` by hand. |
+| `SchoolFeatureEntry`, `schoolFeatureEntries(flags)` | What is **stored** about one feature, with its key, a union discriminated on `feature`: `enabled` here is the adjustment (`true`, `false`, or null to follow the tier) and `config` the settings. Use it whenever the key is not a literal (a loop, a form): a value whose key may be any feature cannot carry one feature's config for another. Build updates by spreading an entry, never by pairing `feature` and `config` by hand; an entry written back unchanged changes nothing. |
+| `ASSISTANT_DEFAULT_ROLES` | The roles the assistant is switched on for when it is enabled for a school with no role switched on (see [In-app assistant](assistant.md#access)). |
 | `parseSchoolFeatureConfig(key, raw)` | Validates stored or submitted jsonb against that key's schema; null means "no config". |
 | `schoolFeatureFlagsSchema`, `schoolFeatureUpdateSchema` | API output schema; update input as a discriminated union on `feature`. |
 | `SCHOOL_FEATURE_DISABLED_REASON`, `readSchoolFeatureDisabled(error)` | The disabled-feature error contract (below). |
@@ -30,11 +97,17 @@ its own layer, and never infer one from the other.
 Browser apps do not depend on `@campuspilot/db`; they import the same names from
 `@campuspilot/api/routers/school/feature-flags/feature-flags.dto`.
 
-## Storage and defaults
+## Storage
+
+The subscribed tier is `school.tier` (text with a CHECK; migration 0073) and
+trials are rows of `school_trial` (migration 0074, [School trials](school-trials.md)).
+What is stored per feature is the school's **adjustment** and the feature's
+settings:
 
 Table `school_feature_flag` (`packages/db/src/schema/school-feature-flag.ts`,
 migration `0048_school-feature-flags.sql`): primary key `(school_id, feature)`,
-`enabled`, `config` jsonb, `updated_by`, `updated_at`. `school_id` is
+`enabled` (the adjustment: true, false, or null to follow the tier), `config`
+jsonb, `updated_by`, `updated_at`. `school_id` is
 `ON DELETE CASCADE`: flags are the school's own configuration and go with it,
 so `systemAdmin.deleteSchool` is never blocked by a flag row. (Migrations
 0048 to 0053 were amended in place before their first release. A development
@@ -44,13 +117,12 @@ has them.)
 
 - `feature` is text, not a database enum: adding a feature needs no migration,
   and rows of a retired key are ignored by every read.
-- **A missing row means the feature's `defaultEnabled`, with no config.** That
-  is false for every feature except `studentManagement`: a new school has no
-  rows, so it has student management and nothing else until an administrator
-  enables more. `studentManagement` defaults to on because every school had
-  all of it before it became a feature; a default instead of a backfill also
-  covers schools created later without a special case in school creation.
-- `enabled` and `config` are independent facts. Disabling keeps the config.
+- **A missing row means "follow the tier", with no config.** A new school has
+  no rows, so it has exactly the features of its tier. A school that does
+  not exist has no tier and no feature, so a gate answers an unknown school
+  like a school without the feature.
+- `enabled` and `config` are independent facts. Disabling, or returning a
+  feature to its tier (`enabled: null`), keeps the config.
 - A stored config that no longer matches its schema (after a schema change)
   stops **only the code that uses that config**, with a clear error, and is
   never silently replaced by a default:
@@ -70,33 +142,39 @@ has them.)
     lets the administrator save it, which stores valid settings again.
 - Migration 0048 backfilled `cadet = enabled` for every school that existed,
   because the Cadet Portal was already available to all of them. `notices` was
-  not backfilled.
-- Demo schools: `createDemoSchool` writes the features listed in
-  `DEMO_SCHOOL_FEATURE_DEFAULTS` (`workflows/demo-school/constants.ts`, an
-  exhaustive record) in the school's own transaction. `cadet` and `notices`
-  are on; `assistant` is off (every assistant request is paid model usage, so
+  not backfilled. (So most schools that existed before tiers are Enterprise
+  schools, many with `notices` adjusted off.)
+- Demo schools: `createDemoSchool` creates the school on `DEMO_SCHOOL_TIER`
+  (`workflows/demo-school/constants.ts`: Enterprise) and writes no feature
+  row, so a demo has student management, the Cadet Portal, notices and
+  WhatsApp (which a demo still never sends: `skipped: demo_school`);
+  `assistant` is off (every assistant request is paid model usage, so
   an administrator enables it for a demo deliberately). The demo seed still
   writes question papers and the `question_paper` template, through service
   functions, so they appear when the feature is enabled
   ([Demo schools](demo-school.md#question-papers)).
 - `purge_demo_school` deletes the rows (migration `0049_demo-purge-feature-flags.sql`),
   and the assistant's rows and role list (`0056_demo-purge-assistant.sql`), question papers (`0059_demo-purge-question-papers.sql`) and chat images (`0062_demo-purge-assistant-attachments.sql`).
-- `assistant` was not backfilled: it is off for every school until enabled.
+- `assistant` is in no tier: it is off for every school until enabled.
 
 ## Switch and activity
 
-Each feature has two facts, kept apart:
+Each feature has these facts, kept apart:
 
-- **`enabled`, the switch**: what an administrator set (the default without a
-  row). The admin editor shows and writes it.
+- **`included`**: the school's plan's tier includes it.
+- **`adjustment`**: what an administrator set for this one school (`true`,
+  `false`), or null when the school follows its tier. This is what the admin
+  editor writes.
+- **`enabled`, the switch**: the adjustment when there is one, otherwise
+  `included`.
 - **`active`**: whether the school **has** the feature now: its switch is on
   and every feature it `requires` is active. Every gate (`isSchoolFeatureEnabled`,
   `assertSchoolFeatureEnabled`, `requireSchoolFeature`), every screen
   (`useSchoolFeature` returns `active` as its `enabled`), notification and tool
   list decides from this.
 
-Today `cadet` and `notices` require `studentManagement` (a product decision:
-a school without students has neither). Switching student management off
+Today `cadet`, `notices` and `whatsapp` require `studentManagement` (a product
+decision: a school without students has none of them). Switching student management off
 leaves their switches as they are, so switching it back on restores them;
 their gates refuse with their own key (`feature: 'notices'`), since that is the
 feature the caller asked for. The admin editor says on such a card that the
@@ -107,16 +185,20 @@ cycle (`catalogue.test.ts`).
 
 | Where | What |
 | --- | --- |
-| `@campuspilot/db/feature-flags/store` | `isSchoolFeatureEnabled(db, schoolId, key)` (the gate's question: is it active), `readSchoolFeatureFlags(db, schoolId)` (`{ features, invalidConfigs }`; never throws on a config), `getSchoolFeatureFlags(db, schoolId)` (its `features`), `readSchoolFeatureConfig(db, schoolId, key)` (`valid` with the config, or `invalid`). Shared with `@campuspilot/auth` (Cadet sign-in). |
-| `packages/api/src/feature-flags/feature-flags.service.ts` | Re-exports the reads; `setSchoolFeature(db, { ...entry, schoolId, updatedBy })` (the input is a `SchoolFeatureEntry`); `assertSchoolFeatureEnabled(db, schoolId, key)` (decides from `enabled` only, returns nothing); `getSchoolFeatureConfig(db, schoolId, key)` (the typed config for a handler that uses it; `CONFLICT` when the stored value is invalid); `schoolFeatureDisabledError(key)`, `schoolFeatureConfigInvalidError(key)`. |
+| `@campuspilot/db/feature-flags/store` | `isSchoolFeatureEnabled(db, schoolId, key)` (the gate's question: is it active), `readSchoolFeatureFlags(db, schoolId)` (`{ tier, subscribedTier, trial, features, invalidConfigs }`; never throws on a config; null for a school that does not exist; `tier` is the plan's tier, null for a school without a plan), `getSchoolFeatureFlags(db, schoolId)` (its `features`; every feature off for a school that does not exist), `readSchoolFeatureConfig(db, schoolId, key)` (`valid` with the config, or `invalid`), `readSchoolPlan(db, schoolId)` and `activeSchoolTrialCondition()`. The subscribed tier, the active trial and the rows are read in one query. Shared with `@campuspilot/auth` (Cadet sign-in). |
+| `packages/api/src/feature-flags/feature-flags.service.ts` | Re-exports the reads; `setSchoolFeature(db, { ...entry, schoolId, updatedBy })` (the input is a `SchoolFeatureEntry`: the adjustment and the config; switching the assistant on for a school with no role switched on also writes the default roles); `assertSchoolFeatureEnabled(db, schoolId, key)` (decides from the feature being active, returns nothing); `getSchoolFeatureConfig(db, schoolId, key)` (the typed config for a handler that uses it; `CONFLICT` when the stored value is invalid); `schoolFeatureDisabledError(key)`, `schoolFeatureConfigInvalidError(key)`. |
 | `packages/api/src/permissions/feature.ts` | `requireSchoolFeature(key)` middleware: the gate, from `active` alone; adds nothing to the context. `gateRouterOnSchoolFeature(key, router)` appends it as the last middleware of every procedure of a router (after its permission checks), for areas that belong wholly to a feature. `schoolFeatureGatesOf(middlewares)` reads the gates back for the MCP catalog. |
 | `featuresOfUserSchools(db, userId)` (service) | The features active in at least one of the user's schools, for the MCP tool list. |
-| `school.getFeatureFlags({ schoolId })` | Any member of the school (`requireSchoolMember`), no permission. Returns `{ schoolId, features, invalidConfigs }`. MCP hidden. |
-| `systemAdmin.getSchoolFeatureFlags({ id })` | `system.school.feature_flags.read`. MCP advanced. |
-| `systemAdmin.updateSchoolFeatureFlag({ id, feature, enabled, config })` | `system.school.feature_flags.update`. MCP hidden (a human platform decision; its input is a discriminated union). Returns all flags of the school. |
+| `school.getFeatureFlags({ schoolId })` | Any member of the school (`requireSchoolMember`), no permission. Returns `{ schoolId, tier, features, invalidConfigs }`. MCP hidden. |
+| `systemAdmin.getSchoolFeatureFlags({ id })` | `system.school.feature_flags.read`. Returns the same shape (`tier` is the plan's tier) plus `subscribedTier` and the active `trial`. MCP advanced. |
+| `systemAdmin.updateSchoolFeatureFlag({ id, feature, enabled, config })` | `system.school.feature_flags.update`. `enabled` is the adjustment: `true`, `false`, or null to follow the tier. MCP hidden (a human platform decision; its input is a discriminated union). Returns the tier and all flags of the school. |
+| `systemAdmin.updateSchoolTier({ id, tier })` | `system.school.feature_flags.update`. Writes the subscribed tier only (null removes it); adjustments and trials are kept. MCP hidden. Returns the plan and all flags. |
+| `systemAdmin.addSchool({ ..., tier?, trial? })` | `tier` is optional (none: no subscription), and a trial can start with the school. `systemAdmin.listSchools` filters by `subscribedTier` (null: schools without one), `suspended` and `plan` (`trial`, `none`). Trials have their own procedures ([School trials](school-trials.md#administration)). |
 
 Both system actions are granted to `platform.admin` only
-(`packages/opa/src/policies/system`).
+(`packages/opa/src/policies/system`). Tier changes and the assistant's role
+list use the feature flag actions; suspension is not a feature (see
+[School suspension](school-suspension.md)).
 
 ### Gating a staff procedure
 
@@ -156,9 +238,10 @@ by the message. Tests use `expectFeatureDisabled` / `expectPermissionDenied`
 
 ## The `studentManagement` feature: where it is enforced
 
-On by default (`defaultEnabled: true`); a platform administrator switches it
-off to make a staff-only school (staff, classes, sections, subjects and
-examinations for question papers). Off means:
+Part of Pro and Enterprise. A Plus school does not have it and is a
+staff-only school (staff, classes, sections, subjects and examinations for
+question papers); an administrator can also switch it off for one school of
+a higher tier. Off means:
 
 | Surface | Behaviour when off |
 | --- | --- |
@@ -172,7 +255,7 @@ examinations for question papers). Off means:
 | Delivery log (`listNotificationDeliveries`, `resendNotificationDelivery`) | Disabled-feature error: every delivery there is a student notification. |
 | Notifications `bill.issued`, `payment.received`, `billing.run_posted`, `exam.results_published`, `exam.results_publish_finished`, `exam.timetable_published(_staff)`, `notification.whatsapp_failed`, `notification.whatsapp_batch_failed` | Remote copies `skipped: feature_disabled`, resend refused (`notificationRequiredFeatures`). |
 | `getDashboard` | `admissions` and `billing` are null; `classrooms` stays for a caller who may list classes, with `studentCount` null (school total and per class); `createAdmission`, `recordPayment` and `enterResults` are false. |
-| Cadet Portal and notices | Inactive (they require student management), with their own disabled-feature errors. |
+| Cadet Portal, notices and WhatsApp notifications | Inactive (they require student management), with their own disabled-feature errors. |
 | In-app assistant | The worker drops every tool gated on a feature the conversation's school lacks (read fresh before each model request and tool call). The prompt names only the features that took a tool away, in the assistant's own wording (`unavailableSchoolWork`), also read per request and never stored with the run. The starter prompt about admissions is not offered. |
 | External MCP clients | A tool gated on a feature none of the user's schools has is not listed (nor found through the advanced tools); every gated tool's description ends "Only for schools that have …"; a call for a school without the feature is refused. |
 | Management UI | Sidebar: Admission, Documents and Billing (each on its own feature; the Operations group is left out when none of its items applies). Dashboard: the student tile and Class load; the Classrooms row shows classes and sections. Classroom: Students and Documents sections and Add student (Teachers is the default). Classroom list: the Students column. Examination: Results, Timetable, attendance, the documents menu and result notifications; the exam lands on Question paper, or More without the assistant (an exam with no subject plans shows plan creation and no tabs, as in every school). Settings: Documents (admission documents), every template but Question paper (and Notice), and on the session page co-scholastic areas, grading scale, attendance and financial configuration. ⌘K: the Admission command and the student search; the Templates command opens the first template the school has (`firstSettingsTemplate`, also used by the settings sidebar). Every page of these areas, opened by URL, shows "not enabled" (`FeaturePage` layouts). |
@@ -236,6 +319,26 @@ audience is never rewritten when `cadet` goes off. Notices, their cached PDFs
 and inbox rows are kept while either feature is off; see
 "Nothing new goes out while a feature is off" in [School notices](notices.md).
 
+## The `whatsapp` feature: where it is enforced
+
+Whether the school's notifications also go to guardians on WhatsApp. It is a
+feature of the **channel**, not of a notification type
+(`notificationChannelRequiredFeatures` in the notification catalogue), so it
+takes away the WhatsApp copy alone; the inbox and web push are unaffected.
+The platform switch `WHATSAPP_ENABLED` still applies to every school
+(`skipped: disabled`); a school needs both.
+
+| Surface | Behaviour when off |
+| --- | --- |
+| Fan-out (`planNotificationRows`, `decideDeliveries`) | The WhatsApp copy of every notification is planned `skipped: feature_disabled`. The dispatched event journals which channels lacked their feature (`channelsWithoutFeature`). |
+| Sender (`sendDelivery`) | A WhatsApp copy queued while the school had the feature is recorded `skipped: feature_disabled` instead of being sent (`disabledChannelFeatureOf`). |
+| `resendNotificationDelivery` for a WhatsApp copy | Disabled-feature error (`feature: 'whatsapp'`). |
+| Forecasts before a send (results, notices, timetables; `forecastDeliveries`) | WhatsApp copies are counted as skipped (`feature_disabled`), so staff see that nothing goes out on WhatsApp. |
+| Management UI | The timetable publish dialog does not name WhatsApp; the admission table hides its WhatsApp readiness column and filter. A guardian's WhatsApp number, verification and consent stay on the admission: they are the guardian's contact data and are used again when the school has the feature. |
+
+Numbers, verification, consent, delivery history and provider receipts are
+kept while the feature is off. Nothing is sent for a demo school either way.
+
 ## UI
 
 Management (`apps/management/components`):
@@ -280,15 +383,32 @@ Management (`apps/management/components`):
 - Wrap a permission-protected entry point with `RequireFeature` **and**
   `RequirePermissions`.
 
-Admin: `/school/{id}/usage/feature-flags`
-(`apps/admin/components/school-feature-flags.tsx`), one card per catalogue
-feature. A switch-only feature's card has an Enabled switch and Save. Each card
-works on a `SchoolFeatureEntry` and builds its update by spreading it.
-`DISABLE_WARNINGS` states everything switching a feature off does (keep it
-complete: staff, students, notifications); it is shown under the switch (which
-it describes, `aria-describedby`) and again in the app confirmation dialog that
-saving a switch-off opens. Enabling saves at once. Each switch's accessible name
-includes the feature's label.
+Admin: `/school/{id}/usage/feature-flags`, "Plan and features"
+(`apps/admin/components/school-feature-flags.tsx`).
+
+- **The Plan card** (`school-plan-card.tsx`, `school-trial-section.tsx`)
+  shows and changes the school's subscription (a tier or No subscription)
+  and its trial ([School trials](school-trials.md#what-the-admin-app-shows)).
+  While a change is pending it says which features the resulting plan adds
+  and switches off, computed with the catalogue's own rules
+  (`planChangeEffect` with `resolveSchoolPlan`: the adjustments are kept,
+  requirements apply). A change that takes a feature away, removing the
+  subscription, and ending a trial are confirmed in an app dialog that lists
+  each lost feature with its `DISABLE_WARNINGS` text.
+- **One card per catalogue feature**, with badges for its state (Enabled or
+  Disabled), whether the tier includes it, and "Adjusted for this school"
+  when an adjustment is stored. A switch-only feature's card offers three
+  choices: Follow tier (saying what the tier gives), Always on, Always off,
+  written as the adjustment null, true, false. Each card works on a
+  `SchoolFeatureEntry` and builds its update by spreading it.
+- `DISABLE_WARNINGS` (`school-feature-warnings.ts`) states everything
+  switching a feature off does (keep it complete: staff, students,
+  notifications); it is shown under the choice and again in the app
+  confirmation dialog that a save which turns a live feature off opens.
+  Switching on saves at once.
+- The add-school dialog asks for the subscription (or none) and an optional
+  trial; the schools table, the platform overview and a school's header
+  show the subscription, the trial and "No plan" as badges.
 
 A feature **with settings** is edited on its own page, where its switch and
 its settings are saved together (switching it on needs settings): its card
@@ -301,12 +421,18 @@ same `DISABLE_WARNINGS` entry and confirmation dialog.
 
 ## The `assistant` feature: where it is enforced
 
-Config: `{ monthlyLimitUsd: number | null, eligibleRoles: role[], voice: { enabled: boolean } }`
-(at least one role, each once). `voice.enabled` is a switch inside the feature:
+An add-on on every tier (in no tier's `tiers`), switched on per school on
+its own page with its settings.
+
+Config: `{ monthlyLimitUsd: number | null, voice: { enabled: boolean } }`.
+`voice.enabled` is a switch inside the feature:
 whether the school has [voice mode](assistant.md#voice-mode). It only narrows
-the assistant, and settings saved before it existed read as off. Who may use the assistant is decided by
-`resolveAssistantAccess` (feature, membership, an eligible role the school
-switched on, the IST month spend under the limit); see
+the assistant, and settings saved before it existed read as off. A config
+saved before the role lists were merged still carries `eligibleRoles`; it is
+ignored. Who may use the assistant is decided by
+`resolveAssistantAccess` (feature, membership, a role the assistant is
+switched on for in the school's one role list, the school not suspended, the
+IST month spend under the limit); see
 [In-app assistant](assistant.md#access).
 
 | Surface | Behaviour when off |
@@ -314,7 +440,7 @@ switched on, the IST month spend under the limit); see
 | Every `/model/*` procedure (list, get, subscribe, send, approve, decline, stop, delete, status) | Disabled-feature error (`feature: 'assistant'`); nothing is written. Open streams end at their next recheck. |
 | Delegated token issue (`issueAssistantRunToken`) | Disabled-feature error: no token. |
 | Worker, before every model request | The run fails with `feature_disabled`; changes already approved and made stay made. A run waiting for approval stays paused until the feature is on again. |
-| `systemAdmin.updateSchoolFeatureFlag` | Enabling needs the settings (`monthlyLimitUsd`, `eligibleRoles`); BAD_REQUEST without them. |
+| `systemAdmin.updateSchoolFeatureFlag` | Enabling needs the settings (`monthlyLimitUsd`); BAD_REQUEST without them. Switching it on for a school with no role switched on switches on the default roles. |
 | `school.getAssistantAccess`, `school.updateAssistantRoles`, `school.getAssistantUsage` | Disabled-feature error after the permission check. |
 | Management UI | The navbar panel button, sidebar link and ⌘K entry (`AssistantAccess`), the assistant pages (`FeaturePage`), Settings › AI assistant and Settings › Usage disappear. |
 | Question papers (every `exam_question_paper` procedure and upload route, the chat image upload and the question paper MCP tools) | `assistant` also gates question papers; there is no separate flag (decision D26). After the OPA class permission, `requireQuestionPaperAssistantAccess` refuses with the disabled-feature error or the assistant's own refusal (`role_not_enabled`, `not_member`, `limit_reached` for generation only). The `question_paper` document template (settings, marketplace preview and selection) needs the feature too (`requireDocumentTypePermission`). A running generation job stops with `feature_disabled`. |
@@ -329,12 +455,16 @@ showing past spend.
 ## Adding a feature
 
 1. Add the entry to `schoolFeatureCatalogue` (label, description, `config`).
-   Decide `defaultEnabled` (false unless every school already has the
-   capability) and `requires`. Fix every exhaustive record the build then
-   flags: `DEMO_SCHOOL_FEATURE_DEFAULTS`, the admin editor's `DISABLE_WARNINGS`,
-   `DOCUMENT_TYPE_FEATURE` if it owns document types, and the pinned key lists
-   in tests. If the feature has notifications, name it in
-   `notificationRequiredFeatures` for each of its types.
+   Decide `tiers` (which tiers include it; empty for an add-on that an
+   administrator switches on per school) and `requires`. Fix every exhaustive
+   record the build then flags: the admin editor's `DISABLE_WARNINGS`, the
+   assistant's `UNAVAILABLE_WORK`, `DOCUMENT_TYPE_FEATURE` if it owns
+   document types, and the pinned key lists in tests. If the feature has
+   notifications, name it in `notificationRequiredFeatures` for each of its
+   types; if it is a notification channel's, in
+   `notificationChannelRequiredFeatures`. Update the tier table at the top of
+   this guide. A demo school is on `DEMO_SCHOOL_TIER`: check that the demo
+   should have the feature, and adjust it in `createDemoSchool` if not.
 2. If it has settings, give it a settings page in the admin app and name it
    in `SETTINGS_PAGES` (the guard there fails until you do), and decide the
    demo's config. `setSchoolFeature` refuses to enable it without a config. Read them in
@@ -347,14 +477,29 @@ showing past spend.
 4. Gate the UI: `RequireFeature` around navigation and actions, `FeaturePage`
    around its pages.
 5. No migration is needed unless an existing, already-used capability becomes a
-   feature; then either give it `defaultEnabled: true` (as `studentManagement`)
-   or backfill `enabled = true` for existing schools in the same release, as
-   0048 did for `cadet` (before defaults existed).
-6. Tests: fixtures create schools with no stored feature, so each has only
-   its default (student management). Name what a suite needs:
+   feature, or the feature joins a tier whose existing schools must not get
+   it (or must keep it): then write the adjustments for existing schools in
+   the same release, as 0073 did for `whatsapp` and `notices`.
+6. Tests: `createTestSchool()` without a `tier` makes the baseline school
+   most suites need (student management and WhatsApp on, nothing else: a
+   Plus school with those two adjusted on); `createTestSchool({ tier })`
+   makes a school of exactly that tier. Name what a suite needs:
    `createTestSchool({ features: ['<key>'] })` (a feature with settings as
    `{ feature: '<key>', config }`), `createFinanceScenario({ features })`,
    `createResultsSchool({ features })`, or flip one with
    `setTestSchoolFeature(schoolId, key, enabled, config?)`. Without `config`
    the stored settings are kept, as an administrator's switch keeps them.
 7. Update this guide's tables.
+
+## Adding or changing a tier
+
+1. Add the tier to `SCHOOL_TIERS` and `schoolTierCatalogue`, and name it in
+   the `tiers` of every feature it includes. Nothing is inferred from the
+   position of a tier in the list.
+2. `school.tier` has a CHECK listing the tiers: generate a migration
+   (`pnpm db:generate`), and in it move existing schools if a tier is removed
+   or split.
+3. Moving a feature between tiers changes what existing schools have. Decide
+   for them explicitly in a migration (an adjustment that keeps what they
+   had, or nothing if they should follow the new tier).
+4. Update the tier table at the top of this guide and the admin copy.

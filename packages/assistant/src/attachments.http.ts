@@ -9,7 +9,7 @@ import { assistantAttachmentTable } from '@campuspilot/db/schema/assistant';
 import { env } from '@campuspilot/env/server';
 import { and, eq } from 'drizzle-orm';
 
-import { assertCanSee, assertCanUse, loadAssistantAccess } from './access';
+import { assertCanChange, assertCanSee, assertCanUse, loadAssistantAccess } from './access';
 import { createAttachment, deleteUnsentAttachment, findUnsentAttachmentRef } from './attachments';
 import { mayReachConversation } from './conversation-access';
 import { db } from './db';
@@ -169,7 +169,7 @@ export async function handleAssistantAttachmentDelete(
   try {
     assertAllowedOrigin(request);
     const session = await requireSession(request.headers);
-    assertCanSee(await loadAssistantAccess(session, input.schoolId));
+    assertCanChange(await loadAssistantAccess(session, input.schoolId));
     const result = await deleteUnsentAttachment(db, {
       schoolId: input.schoolId,
       userId: session.user.id,

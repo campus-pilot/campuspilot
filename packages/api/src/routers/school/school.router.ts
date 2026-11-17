@@ -1,13 +1,17 @@
 import { schoolDocumentRouter } from './document/document.router';
 import { schoolDashboardRouter } from './dashboard/dashboard.router';
+import type { DatabaseExecutor } from "@campuspilot/db";
+import { activeSchoolTrialCondition } from "@campuspilot/db/feature-flags/store";
 import { schoolMemberTable } from "@campuspilot/db/schema/school-member";
 import { schoolTable } from "@campuspilot/db/schema/school";
+import { schoolTrialTable } from "@campuspilot/db/schema/school-trial";
 import { SCHOOL_ACTIONS } from "@campuspilot/opa/policies/school";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { rpcError, toRpcError } from "../../errors";
 import { protectedProcedure } from "../../index";
+import { schoolPlanFactsOf } from "../../school-access/school-access.service";
 import { gateRouterOnSchoolFeature } from "../../permissions/feature";
 import { requireSchoolPermission } from "../../permissions/school";
 import { schoolAdmissionSettingsRouter } from "./admission-settings/admission-settings.router";
@@ -33,6 +37,45 @@ import {
 import { schoolSessionFinanceRouter } from "./session-finance/session-finance.router";
 import { schoolSessionRouter } from "./session/session.router";
 import { schoolStudentRouter } from "./student/student.router";
+
+/**
+ * The columns every school-facing school DTO reads, with the active trial
+ * left joined (at most one per school) for {@link withPlanFacts}.
+ */
+const mySchoolColumns = {
+  id: schoolTable.id,
+  slug: schoolTable.slug,
+  name: schoolTable.name,
+  location: schoolTable.location,
+  logoS3Key: schoolTable.logoS3Key,
+  isDemo: schoolTable.isDemo,
+  isSuspended: sql<boolean>`${schoolTable.suspendedAt} is not null`,
+  subscribedTier: schoolTable.tier,
+  trialTier: schoolTrialTable.tier,
+  trialEndsAt: schoolTrialTable.endsAt,
+};
+
+const activeTrialJoin = and(eq(schoolTrialTable.schoolId, schoolTable.id), activeSchoolTrialCondition());
+
+/** A row of {@link mySchoolColumns} with the plan facts the apps show instead of the plan's raw columns. */
+function withPlanFacts<T extends { subscribedTier: SchoolTierValue; trialTier: SchoolTierValue; trialEndsAt: Date | null }>(row: T) {
+  const { subscribedTier, trialTier, trialEndsAt, ...school } = row;
+  const trial = trialTier !== null && trialEndsAt !== null ? { tier: trialTier, endsAt: trialEndsAt } : null;
+  return { ...school, ...schoolPlanFactsOf({ subscribedTier, trial }) };
+}
+
+type SchoolTierValue = (typeof schoolTable.$inferSelect)["tier"];
+
+/** One school's details as the school's own staff read them; null when it does not exist. */
+async function readSchoolDetails(db: DatabaseExecutor, schoolId: string) {
+  const [school] = await db
+    .select({ ...mySchoolColumns, registrationNo: schoolTable.registrationNo })
+    .from(schoolTable)
+    .leftJoin(schoolTrialTable, activeTrialJoin)
+    .where(eq(schoolTable.id, schoolId))
+    .limit(1);
+  return school ? schoolDetailsDtoSchema.parse(withPlanFacts(school)) : null;
+}
 
 export const schoolRouter = {
   ...schoolDashboardRouter,
@@ -72,20 +115,14 @@ export const schoolRouter = {
           ? context.principal.assistantRun.schoolId
           : undefined;
       try {
-        return await context.db
-          .select({
-            id: schoolTable.id,
-            slug: schoolTable.slug,
-            name: schoolTable.name,
-            location: schoolTable.location,
-            logoS3Key: schoolTable.logoS3Key,
-            isDemo: schoolTable.isDemo,
-          })
+        const schools = await context.db
+          .select(mySchoolColumns)
           .from(schoolMemberTable)
           .innerJoin(
             schoolTable,
             eq(schoolMemberTable.schoolId, schoolTable.id),
           )
+          .leftJoin(schoolTrialTable, activeTrialJoin)
           .where(
             and(
               eq(schoolMemberTable.userId, context.session.user.id),
@@ -95,6 +132,7 @@ export const schoolRouter = {
             ),
           )
           .orderBy(asc(schoolTable.name), asc(schoolTable.id));
+        return schools.map(withPlanFacts);
       } catch (error) {
         throw toRpcError(error);
       }
@@ -119,21 +157,9 @@ export const schoolRouter = {
     .output(schoolDetailsDtoSchema)
     .handler(async ({ context, input }) => {
       try {
-        const [school] = await context.db
-          .select({
-            id: schoolTable.id,
-            slug: schoolTable.slug,
-            name: schoolTable.name,
-            location: schoolTable.location,
-            registrationNo: schoolTable.registrationNo,
-            logoS3Key: schoolTable.logoS3Key,
-            isDemo: schoolTable.isDemo,
-          })
-          .from(schoolTable)
-          .where(eq(schoolTable.id, input.schoolId))
-          .limit(1);
+        const school = await readSchoolDetails(context.db, input.schoolId);
         if (!school) throw rpcError.notFound("School");
-        return schoolDetailsDtoSchema.parse(school);
+        return school;
       } catch (error) {
         throw toRpcError(error);
       }
@@ -163,17 +189,11 @@ export const schoolRouter = {
           .update(schoolTable)
           .set({ ...changes, updatedAt: new Date() })
           .where(eq(schoolTable.id, schoolId))
-          .returning({
-            id: schoolTable.id,
-            slug: schoolTable.slug,
-            name: schoolTable.name,
-            location: schoolTable.location,
-            registrationNo: schoolTable.registrationNo,
-            logoS3Key: schoolTable.logoS3Key,
-            isDemo: schoolTable.isDemo,
-          });
+          .returning({ id: schoolTable.id });
         if (!school) throw rpcError.notFound("School");
-        return schoolDetailsDtoSchema.parse(school);
+        const details = await readSchoolDetails(context.db, school.id);
+        if (!details) throw rpcError.notFound("School");
+        return details;
       } catch (error) {
         throw toRpcError(error);
       }

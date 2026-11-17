@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm';
 
 import { rpcError } from '../errors';
 import { assertSchoolFeatureEnabled } from '../feature-flags/feature-flags.service';
+import { assertSchoolWritable } from '../school-access/school-access.service';
 import type { ProcedureMeta } from '../mcp-metadata';
 import type { CadetContext } from './context';
 
@@ -70,8 +71,19 @@ export const cadetLoginProcedure = co.use(async ({ context, next, procedure }) =
  * `data: { reason: 'SCHOOL_FEATURE_DISABLED', feature: 'cadet' }` (never
  * UNAUTHORIZED: the login is still valid), which the portal shows as "Cadet
  * Portal unavailable" instead of sending the student back to sign-in.
+ *
+ * A suspended school, and a school without an active plan, is read-only
+ * for its students too (docs/school-suspension.md, docs/school-trials.md):
+ * after the feature check, every procedure that is not an explicit read is
+ * refused with the read-only school error (`SCHOOL_SUSPENDED` or
+ * `SCHOOL_NO_PLAN`). The actions on {@link cadetLoginProcedure} are not held
+ * by it, for the reason they are not held by the feature: they only undo
+ * something on the student's own device.
  */
-export const cadetProcedure = cadetLoginProcedure.use(async ({ context, next }) => {
+export const cadetProcedure = cadetLoginProcedure.use(async ({ context, next, procedure }) => {
   await assertSchoolFeatureEnabled(context.db, context.cadet.schoolId, 'cadet');
+  if (procedure['~orpc'].meta.mcp?.access !== 'read') {
+    await assertSchoolWritable(context.db, context.cadet.schoolId);
+  }
   return next();
 });

@@ -21,8 +21,11 @@ vi.mock('@/lib/auth-client', () => ({
 
 beforeEach(() => {
   mocks.redirect.mockReset();
-  resetHandlers({ getProfile: () => profile, getUnreadNotificationCount: () => ({ count: 2 }) });
+  resetHandlers({ getProfile: () => profile, getUnreadNotificationCount: () => ({ count: 2 }), getSchool: () => school });
 });
+
+/** The student's school as `getSchool` answers it. */
+const school = { id: 'school_1', name: 'Greenfield Valley School', hasLogo: false, isSuspended: false, hasActivePlan: true, trialEndsAt: null };
 
 describe('AppFrame', () => {
   it('sends a signed-out visitor to sign-in before loading any record', () => {
@@ -41,6 +44,41 @@ describe('AppFrame', () => {
     expect(tabs.getAllByRole('link').map((link) => link.textContent)).toEqual(['Home', 'Fees', 'Results', 'Growth', 'More']);
     expect(screen.getByRole('link', { name: 'Fees' }).getAttribute('aria-current')).toBe('page');
     expect((await screen.findByRole('link', { name: /Notifications/ })).getAttribute('href')).toBe('/notifications');
+  });
+
+  it('shows no suspension notice for a school that is not suspended', async () => {
+    mocks.session = { user: { id: 'cadet' } };
+    renderWithQuery(<AppFrame>content</AppFrame>);
+    expect(await screen.findByText('Meera Singh')).toBeTruthy();
+    expect(screen.queryByText('School suspended')).toBeNull();
+  });
+
+  it('keeps the whole portal and adds a permanent notice above the screen when the school is suspended', async () => {
+    mocks.session = { user: { id: 'cadet' } };
+    resetHandlers({
+      getProfile: () => profile,
+      getUnreadNotificationCount: () => ({ count: 2 }),
+      getSchool: () => ({ ...school, isSuspended: true }),
+    });
+    renderWithQuery(<AppFrame>content</AppFrame>);
+    expect(await screen.findByText('School suspended')).toBeTruthy();
+    expect(screen.getByText('Your school is suspended. You can still view everything, but nothing can be changed. Contact your school.')).toBeTruthy();
+    // Read-only, not closed: the screen and the tabs are still there.
+    expect(screen.getByText('content')).toBeTruthy();
+    expect(within(screen.getByRole('navigation', { name: 'Main' })).getAllByRole('link')).toHaveLength(5);
+  });
+
+  it('keeps the whole portal and says the plan has ended when the school has no plan', async () => {
+    mocks.session = { user: { id: 'cadet' } };
+    resetHandlers({
+      getProfile: () => profile,
+      getUnreadNotificationCount: () => ({ count: 2 }),
+      getSchool: () => ({ ...school, hasActivePlan: false }),
+    });
+    renderWithQuery(<AppFrame>content</AppFrame>);
+    expect(await screen.findByText('School plan ended')).toBeTruthy();
+    expect(screen.getByText("Your school's plan has ended, so the portal is blocked. Contact your school.")).toBeTruthy();
+    expect(screen.getByText('content')).toBeTruthy();
   });
 
   it('shows "Cadet Portal unavailable" with sign out, and no tabs or records, when the school has the portal switched off', async () => {

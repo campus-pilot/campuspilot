@@ -569,7 +569,7 @@ describe('question paper pages', () => {
     it('refuses generation, and only generation, once the school reached its monthly AI limit', async () => {
       // A school of its own: the month's spend is cached per school for ten minutes.
       const limited = await createQuestionPaperWorld();
-      await setTestSchoolFeature(limited.schoolId, 'assistant', true, { monthlyLimitUsd: 0.01, eligibleRoles: ['principal', 'manager', 'teacher', 'accountant', 'exam_coordinator'] });
+      await setTestSchoolFeature(limited.schoolId, 'assistant', true, { monthlyLimitUsd: 0.01 });
       const [conversation] = await db.insert(assistantConversationTable).values({ schoolId: limited.schoolId, userId: limited.people.manager.userId, provider: 'gemini', model: 'm' }).returning();
       const [run] = await db
         .insert(assistantRunTable)

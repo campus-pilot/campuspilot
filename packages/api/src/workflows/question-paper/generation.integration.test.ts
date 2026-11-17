@@ -456,7 +456,7 @@ describe('question paper generation job', () => {
     expect(await requestsOf(second.job.id)).toHaveLength(1);
 
     const limited = await createQuestionPaperWorld();
-    await setTestSchoolFeature(limited.schoolId, 'assistant', true, { monthlyLimitUsd: 0.01, eligibleRoles: ['principal', 'manager', 'teacher', 'accountant', 'exam_coordinator'] });
+    await setTestSchoolFeature(limited.schoolId, 'assistant', true, { monthlyLimitUsd: 0.01 });
     await db.insert(assistantModelRequestTable).values({
       source: 'question_paper', questionPaperJobId: 'qpj_somethingelse', schoolId: limited.schoolId, userId: limited.people.manager.userId, requestKey: `qp:earlier:${limited.schoolId}:model:1`,
       provider: 'gemini', requestedModel: 'm', answeredModel: 'm', usageComplete: true, inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 0, cacheCreationInputTokens: 0,
@@ -472,6 +472,43 @@ describe('question paper generation job', () => {
     const disabled = await queueJob(limited, { subjectSlug: 'math' });
     await setTestSchoolFeature(limited.schoolId, 'assistant', false);
     expect(await runQuestionPaperGeneration({ jobId: disabled.job.id, attempt: 1 }, direct, depsFor(none.model))).toEqual({ status: 'failed', code: 'feature_disabled' });
+  });
+
+  it('fails without asking the model when the school became read-only: no plan, or suspended (which wins)', async () => {
+    const world = await createQuestionPaperWorld();
+    const queued = await queueJob(world);
+    const other = await queueJob(world, { subjectSlug: 'math' });
+    // The school's plan ran out (no subscription, no active trial) after the job was queued.
+    await db.update(schoolTable).set({ tier: null }).where(eq(schoolTable.id, world.schoolId));
+    const none = scriptedModel([answer(ENGLISH_SCIENCE)]);
+    expect(await runQuestionPaperGeneration({ jobId: queued.job.id, attempt: 1 }, direct, depsFor(none.model))).toEqual({ status: 'failed', code: 'no_plan' });
+    expect(none.requests).toHaveLength(0);
+    expect(await jobOf(queued.job.id)).toMatchObject({ errorCode: 'no_plan', errorMessage: QUESTION_PAPER_JOB_FAILURES.no_plan });
+
+    await db.update(schoolTable).set({ suspendedAt: new Date(), suspendedReason: 'Misuse' }).where(eq(schoolTable.id, world.schoolId));
+    expect(await runQuestionPaperGeneration({ jobId: other.job.id, attempt: 1 }, direct, depsFor(none.model))).toEqual({ status: 'failed', code: 'school_suspended' });
+    expect(none.requests).toHaveLength(0);
+  });
+
+  it('stops a job already running when its school becomes read-only: no retry after a suspension, no save after a trial ended', async () => {
+    const world = await createQuestionPaperWorld();
+    const suspend = () => db.update(schoolTable).set({ suspendedAt: new Date(), suspendedReason: 'Misuse' }).where(eq(schoolTable.id, world.schoolId));
+    const lift = () => db.update(schoolTable).set({ suspendedAt: null, suspendedReason: null }).where(eq(schoolTable.id, world.schoolId));
+
+    // Suspended while the first request was busy: the retry is not sent.
+    const retried = await queueJob(world);
+    const busy = new Error('429');
+    const flaky = scriptedModel([async () => { await suspend(); throw busy; }, answer(ENGLISH_SCIENCE)], { kind: () => 'busy' });
+    expect(await runQuestionPaperGeneration({ jobId: retried.job.id, attempt: 1 }, direct, depsFor(flaky.model, { retryDelaysMs: [1], sleep: async () => {} }))).toEqual({ status: 'failed', code: 'school_suspended' });
+    expect(flaky.requests).toHaveLength(1);
+    await lift();
+
+    // The plan ran out while the answer was being written: the request is paid for, but no version is saved.
+    const saved = await queueJob(world, { subjectSlug: 'math' });
+    const answered = scriptedModel([async () => { await db.update(schoolTable).set({ tier: null }).where(eq(schoolTable.id, world.schoolId)); return answer(ENGLISH_SCIENCE); }]);
+    expect(await runQuestionPaperGeneration({ jobId: saved.job.id, attempt: 1 }, direct, depsFor(answered.model))).toEqual({ status: 'failed', code: 'no_plan' });
+    expect(await db.select().from(examQuestionPaperVersionTable).where(eq(examQuestionPaperVersionTable.paperId, saved.paper.id))).toHaveLength(0);
+    expect(await requestsOf(saved.job.id)).toHaveLength(1);
   });
 
   it('stops quietly, saving nothing, when the sweep ended the job while the model was working', async () => {

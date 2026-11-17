@@ -5,17 +5,19 @@ import { user } from "./auth";
 import { schoolTable } from "./school";
 
 /**
- * Per-school platform feature flags, one row per (school, feature). The keys
- * and each key's config shape come from the code catalogue
- * (`@campuspilot/db/feature-flags/catalogue`). `feature` is stored as text,
- * so adding a feature needs no migration and a retired key never breaks a
- * read (reads ignore unknown keys).
+ * What is stored about one platform feature for one school, one row per
+ * (school, feature): the school's **adjustment** to its tier and the
+ * feature's settings. The keys and each key's config shape come from the
+ * code catalogue (`@campuspilot/db/feature-flags/catalogue`). `feature` is
+ * stored as text, so adding a feature needs no migration and a retired key
+ * never breaks a read (reads ignore unknown keys).
  *
- * A missing row means the feature's catalogue default (`defaultEnabled`: on
- * only for student management) with no config. `enabled` and
- * `config` are independent: disabling keeps the stored config. Only platform
- * administrators write these rows (`systemAdmin.updateSchoolFeatureFlag`),
- * plus demo school creation, which enables every demo feature.
+ * Which features a school has comes from its tier (`school.tier` and the
+ * catalogue's `tiers`); a row only changes that for this one school. A
+ * missing row means "follow the tier, no config". `enabled` and `config`
+ * are independent: disabling, or returning a feature to its tier, keeps the
+ * stored config. Only platform administrators write these rows
+ * (`systemAdmin.updateSchoolFeatureFlag`).
  */
 export const schoolFeatureFlagTable = pgTable(
   "school_feature_flag",
@@ -29,7 +31,12 @@ export const schoolFeatureFlagTable = pgTable(
       .notNull()
       .references(() => schoolTable.id, { onDelete: "cascade" }),
     feature: text("feature", { enum: SCHOOL_FEATURE_KEYS }).notNull(),
-    enabled: boolean("enabled").notNull(),
+    /**
+     * The adjustment: true switches the feature on for this school whatever
+     * its tier, false switches it off, null follows the tier (the row then
+     * only holds the feature's config).
+     */
+    enabled: boolean("enabled"),
     /** Validated against the catalogue schema of `feature` on write and read. */
     config: jsonb("config"),
     /** Who last changed the flag; null for migration backfills and after the account is deleted. */

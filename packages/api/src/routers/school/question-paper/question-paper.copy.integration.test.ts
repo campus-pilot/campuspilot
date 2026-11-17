@@ -398,7 +398,7 @@ describe('copying across schools and at the AI limit', () => {
   it('copies for a school that reached its monthly AI limit (a copy calls no model)', async () => {
     const limited = await createQuestionPaperWorld();
     await addTermTwo(limited);
-    await setTestSchoolFeature(limited.schoolId, 'assistant', true, { monthlyLimitUsd: 0.01, eligibleRoles: ['principal', 'manager', 'teacher', 'accountant', 'exam_coordinator'] });
+    await setTestSchoolFeature(limited.schoolId, 'assistant', true, { monthlyLimitUsd: 0.01 });
     const manager = limited.people.manager;
     const [conversation] = await db.insert(assistantConversationTable).values({ schoolId: limited.schoolId, userId: manager.userId, provider: 'gemini', model: 'm' }).returning();
     const [run] = await db

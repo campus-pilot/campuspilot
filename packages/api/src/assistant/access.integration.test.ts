@@ -10,7 +10,7 @@ import { schoolFeatureFlagTable } from '@campuspilot/db/schema/school-feature-fl
 import { getRedisClient } from '@campuspilot/redis/client';
 import { verifyAssistantToken } from '@campuspilot/auth/assistant-token';
 import { randomUUID } from 'node:crypto';
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 
 import { createHandlerContext, createSchoolStaffSession, createTestSchool, setTestSchoolFeature } from '../../test/fixtures';
@@ -24,13 +24,31 @@ import { issueAssistantRunToken } from './token';
  * real tables, and the in-process token issue that relies on it.
  */
 
-/** Turns the assistant on for a school with the given settings. */
-const enableAssistant = (schoolId: string, config: { monthlyLimitUsd: number | null; eligibleRoles: Role[]; voice?: { enabled: boolean } }) =>
+/**
+ * Turns the assistant on for a school with the given settings. A school with
+ * no role switched on gets the default roles with it (principal, manager,
+ * exam coordinator, accountant; never the teacher these tests use).
+ */
+const enableAssistant = (schoolId: string, config: { monthlyLimitUsd: number | null; voice?: { enabled: boolean } }) =>
   setTestSchoolFeature(schoolId, 'assistant', true, { voice: { enabled: false }, ...config });
+
+/** Switches the assistant off for the school; its settings and role list are kept. */
+const disableAssistant = (schoolId: string) => setTestSchoolFeature(schoolId, 'assistant', false);
 
 async function switchOn(schoolId: string, ...roles: Role[]) {
   await db.insert(schoolAssistantAccessRoleTable).values(roles.map((role) => ({ schoolId, role })));
 }
+
+async function switchOff(schoolId: string, ...roles: Role[]) {
+  await db
+    .delete(schoolAssistantAccessRoleTable)
+    .where(and(eq(schoolAssistantAccessRoleTable.schoolId, schoolId), inArray(schoolAssistantAccessRoleTable.role, roles)));
+}
+
+const switchedOnRoles = async (schoolId: string) =>
+  (await db.select().from(schoolAssistantAccessRoleTable).where(eq(schoolAssistantAccessRoleTable.schoolId, schoolId)))
+    .map((row) => row.role)
+    .sort();
 
 /** A teacher of the school, with the API context of their session. */
 async function teacherOf(schoolId: string) {
@@ -80,15 +98,15 @@ describe('resolveAssistantAccess', () => {
     expect(decision).toMatchObject({ featureEnabled: false, allowed: false, refusal: { code: 'feature_disabled' } });
 
     // A disabled flag keeps its settings and still refuses.
-    await enableAssistant(school.id, { monthlyLimitUsd: null, eligibleRoles: ['teacher'] });
-    await db.update(schoolFeatureFlagTable).set({ enabled: false }).where(eq(schoolFeatureFlagTable.schoolId, school.id));
+    await enableAssistant(school.id, { monthlyLimitUsd: null });
+    await disableAssistant(school.id);
     expect((await resolveAssistantAccess(db, { schoolId: school.id, userId: teacher.user.id })).refusal?.code).toBe('feature_disabled');
   });
 
-  it('allows a role that is eligible and switched on, and refuses it once the school switches it off', async () => {
+  it('allows a role once it is switched on in the school’s role list, and refuses it once it is switched off', async () => {
     const school = await createTestSchool();
     const teacher = await teacherOf(school.id);
-    await enableAssistant(school.id, { monthlyLimitUsd: null, eligibleRoles: ['principal', 'teacher'] });
+    await enableAssistant(school.id, { monthlyLimitUsd: null });
     expect(await resolveAssistantAccess(db, { schoolId: school.id, userId: teacher.user.id })).toMatchObject({
       featureEnabled: true,
       member: true,
@@ -103,43 +121,80 @@ describe('resolveAssistantAccess', () => {
       allowed: true,
       refusal: null,
     });
+
+    await switchOff(school.id, 'teacher');
+    expect(await resolveAssistantAccess(db, { schoolId: school.id, userId: teacher.user.id })).toMatchObject({
+      allowedRoles: [],
+      allowed: false,
+      refusal: { code: 'role_not_enabled' },
+    });
   });
 
   it('reports the school’s voice switch as its own fact, which never grants use by itself', async () => {
     const school = await createTestSchool();
     const teacher = await teacherOf(school.id);
-    await enableAssistant(school.id, { monthlyLimitUsd: null, eligibleRoles: ['teacher'], voice: { enabled: true } });
-    // Voice is on, but the school has not switched the teacher's role on: no use, and the voice fact is not read yet.
+    await enableAssistant(school.id, { monthlyLimitUsd: null, voice: { enabled: true } });
+    // Voice is on, but the teacher's role is not switched on: no use, and the voice fact is still reported.
     expect(await resolveAssistantAccess(db, { schoolId: school.id, userId: teacher.user.id })).toMatchObject({ allowed: false, voiceEnabled: true, refusal: { code: 'role_not_enabled' } });
 
     await switchOn(school.id, 'teacher');
     expect(await resolveAssistantAccess(db, { schoolId: school.id, userId: teacher.user.id })).toMatchObject({ allowed: true, voiceEnabled: true });
 
-    await enableAssistant(school.id, { monthlyLimitUsd: null, eligibleRoles: ['teacher'] });
+    await enableAssistant(school.id, { monthlyLimitUsd: null });
     expect(await resolveAssistantAccess(db, { schoolId: school.id, userId: teacher.user.id })).toMatchObject({ allowed: true, voiceEnabled: false });
 
     // A switched-off assistant has no voice, whatever its kept settings say.
-    await enableAssistant(school.id, { monthlyLimitUsd: null, eligibleRoles: ['teacher'], voice: { enabled: true } });
-    await db.update(schoolFeatureFlagTable).set({ enabled: false }).where(eq(schoolFeatureFlagTable.schoolId, school.id));
+    await enableAssistant(school.id, { monthlyLimitUsd: null, voice: { enabled: true } });
+    await disableAssistant(school.id);
     expect(await resolveAssistantAccess(db, { schoolId: school.id, userId: teacher.user.id })).toMatchObject({ allowed: false, voiceEnabled: false });
   });
 
-  it('refuses a role the school switched on but the platform no longer makes eligible', async () => {
+  it('decides from the school’s one role list alone: the default roles on enabling, and whatever is saved after', async () => {
     const school = await createTestSchool();
     const teacher = await teacherOf(school.id);
-    await enableAssistant(school.id, { monthlyLimitUsd: null, eligibleRoles: ['principal'] });
+    const principal = await createSchoolStaffSession(school.id, [{ role: 'principal' }]);
+    const accountant = await createSchoolStaffSession(school.id, [{ role: 'accountant' }]);
+    // Enabling the assistant for a school with no role switched on switches the default roles on.
+    await enableAssistant(school.id, { monthlyLimitUsd: null });
+    expect(await switchedOnRoles(school.id)).toEqual(['accountant', 'exam_coordinator', 'manager', 'principal']);
+    expect(await resolveAssistantAccess(db, { schoolId: school.id, userId: principal.user.id })).toMatchObject({ allowedRoles: ['principal'], allowed: true });
+    expect(await resolveAssistantAccess(db, { schoolId: school.id, userId: accountant.user.id })).toMatchObject({ allowedRoles: ['accountant'], allowed: true });
+    expect((await resolveAssistantAccess(db, { schoolId: school.id, userId: teacher.user.id })).refusal?.code).toBe('role_not_enabled');
+
+    // There is no second "eligible" list: a role switched on grants use, a role switched off does not.
     await switchOn(school.id, 'teacher');
-    expect(await resolveAssistantAccess(db, { schoolId: school.id, userId: teacher.user.id })).toMatchObject({
-      allowed: false,
-      refusal: { code: 'role_not_enabled' },
-    });
+    await switchOff(school.id, 'principal');
+    expect((await resolveAssistantAccess(db, { schoolId: school.id, userId: teacher.user.id })).allowed).toBe(true);
+    expect((await resolveAssistantAccess(db, { schoolId: school.id, userId: principal.user.id })).refusal?.code).toBe('role_not_enabled');
+  });
+
+  it('keeps the school’s role list across switching the assistant off and on, and writes the defaults only for an empty list', async () => {
+    const school = await createTestSchool();
+    await switchOn(school.id, 'teacher');
+    // A list that exists is kept as it is: no default role is added to it.
+    await enableAssistant(school.id, { monthlyLimitUsd: null });
+    expect(await switchedOnRoles(school.id)).toEqual(['teacher']);
+    await disableAssistant(school.id);
+    expect(await switchedOnRoles(school.id)).toEqual(['teacher']);
+    await enableAssistant(school.id, { monthlyLimitUsd: null });
+    expect(await switchedOnRoles(school.id)).toEqual(['teacher']);
+
+    // Saving the settings of an assistant that is already on never touches the list, even an empty one.
+    await switchOff(school.id, 'teacher');
+    await enableAssistant(school.id, { monthlyLimitUsd: 5 });
+    expect(await switchedOnRoles(school.id)).toEqual([]);
+
+    // Switching it on again for a school whose every role was switched off writes the defaults again.
+    await disableAssistant(school.id);
+    await enableAssistant(school.id, { monthlyLimitUsd: 5 });
+    expect(await switchedOnRoles(school.id)).toEqual(['accountant', 'exam_coordinator', 'manager', 'principal']);
   });
 
   it('refuses someone who is not a member of the school', async () => {
     const school = await createTestSchool();
     const other = await createTestSchool();
     const outsider = await teacherOf(other.id);
-    await enableAssistant(school.id, { monthlyLimitUsd: null, eligibleRoles: ['teacher'] });
+    await enableAssistant(school.id, { monthlyLimitUsd: null });
     await switchOn(school.id, 'teacher');
     expect(await resolveAssistantAccess(db, { schoolId: school.id, userId: outsider.user.id })).toMatchObject({
       member: false,
@@ -150,7 +205,7 @@ describe('resolveAssistantAccess', () => {
   it('refuses once the school’s saved spend this IST month reaches its limit, and not before', async () => {
     const school = await createTestSchool();
     const teacher = await teacherOf(school.id);
-    await enableAssistant(school.id, { monthlyLimitUsd: 1, eligibleRoles: ['teacher'] });
+    await enableAssistant(school.id, { monthlyLimitUsd: 1 });
     await switchOn(school.id, 'teacher');
     const redis = getRedisClient();
     const cacheKey = `assistant:spend:${school.id}:${istMonthOf(new Date()).month}`;
@@ -177,7 +232,7 @@ describe('resolveAssistantAccess', () => {
   it('counts spend by IST month: 18:29 UTC on the last day is still that month, 18:31 UTC is the next', async () => {
     const school = await createTestSchool();
     const teacher = await teacherOf(school.id);
-    await enableAssistant(school.id, { monthlyLimitUsd: 1, eligibleRoles: ['teacher'] });
+    await enableAssistant(school.id, { monthlyLimitUsd: 1 });
     await switchOn(school.id, 'teacher');
     const redis = getRedisClient();
     await redis.del(`assistant:spend:${school.id}:2033-01`, `assistant:spend:${school.id}:2033-02`);
@@ -207,7 +262,7 @@ describe('issueAssistantRunToken', () => {
   it('signs a token for exactly that user, school, conversation and run when the user may use the assistant', async () => {
     const school = await createTestSchool();
     const teacher = await teacherOf(school.id);
-    await enableAssistant(school.id, { monthlyLimitUsd: null, eligibleRoles: ['teacher'] });
+    await enableAssistant(school.id, { monthlyLimitUsd: null });
     await switchOn(school.id, 'teacher');
     const { token } = await issueAssistantRunToken(teacher.context, scope(school.id));
     expect(await verifyAssistantToken(token)).toMatchObject({
@@ -228,7 +283,7 @@ describe('issueAssistantRunToken', () => {
   it('refuses a role the school did not switch on, and a school at its limit', async () => {
     const school = await createTestSchool();
     const teacher = await teacherOf(school.id);
-    await enableAssistant(school.id, { monthlyLimitUsd: 0.5, eligibleRoles: ['teacher'] });
+    await enableAssistant(school.id, { monthlyLimitUsd: 0.5 });
     await expect(issueAssistantRunToken(teacher.context, scope(school.id))).rejects.toMatchObject({
       code: 'FORBIDDEN',
       data: { reason: 'role_not_enabled' },
@@ -245,7 +300,7 @@ describe('issueAssistantRunToken', () => {
   it('refuses an impersonated session and anything but a browser session', async () => {
     const school = await createTestSchool();
     const teacher = await teacherOf(school.id);
-    await enableAssistant(school.id, { monthlyLimitUsd: null, eligibleRoles: ['teacher'] });
+    await enableAssistant(school.id, { monthlyLimitUsd: null });
     await switchOn(school.id, 'teacher');
     const impersonated = createHandlerContext({
       ...teacher.session,

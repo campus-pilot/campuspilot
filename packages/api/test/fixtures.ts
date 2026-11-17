@@ -3,6 +3,7 @@ import type {
   SchoolFeatureConfigInput,
   SchoolFeatureEntry,
   SchoolFeatureKey,
+  SchoolTier,
 } from '@campuspilot/db/feature-flags/catalogue';
 import { readSchoolFeatureConfig } from '@campuspilot/db/feature-flags/store';
 import { admissionTable } from '@campuspilot/db/schema/admission';
@@ -12,6 +13,7 @@ import { classTable, sectionTable } from '@campuspilot/db/schema/class';
 import type { Role, RoleMeta } from '@campuspilot/db/schema/jsonb/role';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
+import { schoolTrialTable } from '@campuspilot/db/schema/school-trial';
 import { schoolUserRoleTable } from '@campuspilot/db/schema/school-user-role';
 import { schoolSessionTable } from '@campuspilot/db/schema/session';
 import { eq, max } from 'drizzle-orm';
@@ -205,13 +207,27 @@ export async function createRegularUserSession(): Promise<UserSession> {
 }
 
 /**
- * Inserts a test school directly into the database. Like a school created in
- * production, it stores **no** feature row, so it has only the features that
- * are on by default (student management; see the catalogue's
- * `defaultEnabled`) and no other; a suite that
+ * The features of a test school created without a `tier`: student
+ * management and WhatsApp notifications, and nothing else. No tier is
+ * exactly that, so such a school is stored as a Plus school with these two
+ * switched on for it (adjustments, written like an administrator's). It is
+ * the smallest school most suites need: students exist and their guardians
+ * can be messaged, while the Cadet Portal, notices and the assistant stay
+ * off until a suite names them.
+ */
+const TEST_SCHOOL_BASELINE_FEATURES = ['studentManagement', 'whatsapp'] as const satisfies readonly SchoolFeatureKey[];
+
+/**
+ * Inserts a test school directly into the database.
+ *
+ * Without `tier` it has the baseline features
+ * ({@link TEST_SCHOOL_BASELINE_FEATURES}) and no other; a suite that
  * exercises a feature-gated area names it in `features` (for example
  * `features: ['cadet']` for anything touching the Cadet Portal), so the
  * feature gate is exercised for real instead of being bypassed.
+ *
+ * With `tier` it is a school of exactly that tier, with no adjustment but
+ * the ones named in `features`: what a suite about tiers needs.
  */
 export async function createTestSchool(overrides: {
   id?: string;
@@ -224,9 +240,14 @@ export async function createTestSchool(overrides: {
   /** Fixed at insert: a database trigger makes `is_demo` immutable afterwards. */
   isDemo?: boolean;
   /**
-   * Platform features to enable for the school (default: none): a key for a
-   * feature without settings, or `{ feature, config }` for one with settings
-   * (enabling such a feature needs them).
+   * The school's subscription tier (null: none), with no baseline
+   * adjustments. Omit it for the baseline school described above.
+   */
+  tier?: SchoolTier | null;
+  /**
+   * Platform features to switch on for the school on top of that (default:
+   * none): a key for a feature without settings, or `{ feature, config }`
+   * for one with settings (enabling such a feature needs them).
    */
   features?: readonly (SchoolFeatureKey | TestSchoolFeature)[];
 } = {}) {
@@ -246,10 +267,14 @@ export async function createTestSchool(overrides: {
       logoS3Key: overrides.logoS3Key ?? null,
       hasCompletedOnboarding: overrides.hasCompletedOnboarding ?? false,
       isDemo: overrides.isDemo ?? false,
+      tier: overrides.tier === undefined ? 'plus' : overrides.tier,
       createdAt: new Date(),
       updatedAt: new Date(),
     })
     .returning();
+  if (overrides.tier === undefined) {
+    for (const feature of TEST_SCHOOL_BASELINE_FEATURES) await setTestSchoolFeature(id, feature, true);
+  }
   for (const feature of overrides.features ?? []) {
     if (typeof feature === 'string') await setTestSchoolFeature(id, feature, true);
     else await setTestSchoolFeature(id, feature.feature, true, feature.config as never);
@@ -258,16 +283,47 @@ export async function createTestSchool(overrides: {
   return school!;
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Inserts a trial for a test school directly, as the admin procedures store
+ * one. By default it started a day ago and ends in 30 days, so it is active;
+ * pass an `endsAt` in the past (and an earlier `startsAt`) for a trial that
+ * has run out, or `endedAt` for one an administrator ended early. Time is
+ * never waited for: a trial's state follows from these timestamps alone.
+ */
+export async function createTestSchoolTrial(options: {
+  schoolId: string;
+  tier: SchoolTier;
+  startsAt?: Date;
+  endsAt?: Date;
+  endedAt?: Date | null;
+}) {
+  const startsAt = options.startsAt ?? new Date(Date.now() - DAY_MS);
+  const [trial] = await db
+    .insert(schoolTrialTable)
+    .values({
+      schoolId: options.schoolId,
+      tier: options.tier,
+      startsAt,
+      endsAt: options.endsAt ?? new Date(Date.now() + 30 * DAY_MS),
+      endedAt: options.endedAt ?? null,
+    })
+    .returning();
+  return trial!;
+}
+
 /** A feature with its settings, for `createTestSchool({ features })`. */
 export type TestSchoolFeature = {
   [K in SchoolFeatureKey]: { feature: K; config: SchoolFeatureConfigInput<K> };
 }[SchoolFeatureKey];
 
 /**
- * Enables or disables one platform feature for a test school, writing the
- * same row an administrator's change writes (`setSchoolFeature`). Use it to
- * flip a feature mid-test, for example to prove that disabling the Cadet
- * Portal stops an existing session.
+ * Switches one platform feature on or off for a test school, writing the
+ * same adjustment an administrator's change writes (`setSchoolFeature`);
+ * null returns the feature to the school's tier. Use it to flip a feature
+ * mid-test, for example to prove that disabling the Cadet Portal stops an
+ * existing session.
  *
  * `config` sets the feature's settings; when it is omitted the stored
  * settings are kept (as an administrator's switch keeps them), so disabling
@@ -276,7 +332,7 @@ export type TestSchoolFeature = {
 export async function setTestSchoolFeature<K extends SchoolFeatureKey>(
   schoolId: string,
   feature: K,
-  enabled: boolean,
+  enabled: boolean | null,
   config?: SchoolFeatureConfigInput<K> | null,
 ) {
   const stored = config === undefined ? await readSchoolFeatureConfig(db, schoolId, feature) : null;

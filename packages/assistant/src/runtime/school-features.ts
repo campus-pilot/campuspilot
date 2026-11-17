@@ -1,5 +1,5 @@
 import { SCHOOL_FEATURE_KEYS, type SchoolFeatureKey } from '@campuspilot/db/feature-flags/catalogue';
-import { readSchoolFeatureFlags } from '@campuspilot/db/feature-flags/store';
+import { getSchoolFeatureFlags } from '@campuspilot/db/feature-flags/store';
 
 import { db } from '../db';
 
@@ -11,6 +11,6 @@ import { db } from '../db';
  * switches it off. The API refuses such a call anyway.
  */
 export async function readActiveSchoolFeatures(schoolId: string): Promise<ReadonlySet<SchoolFeatureKey>> {
-  const { features } = await readSchoolFeatureFlags(db, schoolId);
+  const features = await getSchoolFeatureFlags(db, schoolId);
   return new Set(SCHOOL_FEATURE_KEYS.filter((key) => features[key].active));
 }

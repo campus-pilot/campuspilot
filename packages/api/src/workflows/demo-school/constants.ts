@@ -1,4 +1,4 @@
-import type { SchoolFeatureKey } from "@campuspilot/db/feature-flags/catalogue";
+import type { SchoolTier } from "@campuspilot/db/feature-flags/catalogue";
 /**
  * Restate service names and the ordered product steps. Kept free of runtime
  * imports so the API router can reference the workflows by name and type
@@ -36,18 +36,12 @@ export function demoCredentialsS3Key(schoolId: string): string {
 }
 
 /**
- * Which platform features a new demo school starts with. One explicit
- * decision per catalogue feature (the record is exhaustive, so adding a
- * feature fails the build until it is decided here); real schools start with
- * none. `createDemoSchool` writes them in the school's own transaction.
+ * The subscription tier a new demo school is created on. A demo shows the
+ * whole school (its seed is admissions, results, fees, notices and the
+ * Cadet Portal), so it is on the tier that includes all of it. The
+ * assistant is in no tier and stays off: every assistant request is paid
+ * model usage, so a platform admin enables it for a demo deliberately (with
+ * its limit and roles) on the school's AI page. WhatsApp is part of the
+ * tier, and a demo still never sends any (`skipped: demo_school`).
  */
-export const DEMO_SCHOOL_FEATURE_DEFAULTS: Record<SchoolFeatureKey, boolean> = {
-  // A demo shows the whole school: its seed is admissions, results and fees.
-  studentManagement: true,
-  cadet: true,
-  notices: true,
-  // Off: every assistant request is paid model usage, so a platform admin
-  // enables it for a demo deliberately (with its limit and roles) on the
-  // school's AI page.
-  assistant: false,
-};
+export const DEMO_SCHOOL_TIER = 'enterprise' as const satisfies SchoolTier;

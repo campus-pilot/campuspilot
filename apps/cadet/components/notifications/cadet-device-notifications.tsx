@@ -3,6 +3,7 @@
 import { DeviceNotificationsCard } from '@campuspilot/components/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
+import { readOnlyOr } from '@/lib/read-only-school';
 import {
   DevicePushError,
   readDeviceNotificationStatus,
@@ -14,9 +15,14 @@ import {
 /** Browser and server state of this device; read in a query, never an effect. */
 export const DEVICE_NOTIFICATIONS_QUERY_KEY = ['cadet', 'device-notifications'] as const;
 
+/**
+ * Why notifications could not be changed. A suspended school, and one
+ * without an active plan, is read-only, so turning them on is refused by
+ * the server: the student is told that, not to try again.
+ */
 function errorText(error: unknown) {
   if (error instanceof DevicePushError) return error.message;
-  return 'Could not change notifications on this device. Try again.';
+  return readOnlyOr(error, 'Could not change notifications on this device. Try again.');
 }
 
 /** Device state plus the on/off mutations; both refresh the state when done. */

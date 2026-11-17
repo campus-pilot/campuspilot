@@ -8,6 +8,8 @@ import { extractQuestionPaperFragment, hasPaperContent, questionPaperFragmentSha
 import { and, eq, inArray, sql } from 'drizzle-orm';
 
 import { resolveAssistantAccess } from '../../assistant/access';
+import { SCHOOL_SUSPENDED_REASON } from '../../school-access/school-access.contract';
+import { readSchoolWriteFacts, resolveSchoolWriteRefusal } from '../../school-access/school-access.service';
 import type { PaperKey, TemplatePrints } from '../../routers/school/question-paper/question-paper.dto';
 import { hasSelectedQuestionPaperTemplate } from '../../routers/school/question-paper/question-paper.render';
 import { readTemplatePrints } from '../../routers/school/question-paper/question-paper.template-prints';
@@ -139,7 +141,23 @@ type Validation =
 function accessFailure(code: string): QuestionPaperJobErrorCode {
   if (code === 'limit_reached') return 'limit_reached';
   if (code === 'feature_disabled') return 'feature_disabled';
+  if (code === 'school_suspended') return 'school_suspended';
+  if (code === 'no_plan') return 'no_plan';
   return 'role_not_enabled';
+}
+
+/**
+ * Fails the job when its school became read-only while it ran (suspended, or
+ * a trial ended without a subscription). Asked before every model request
+ * and before the save, next to the job's own liveness, so a job already
+ * running neither spends more nor saves a version. Only the school's write
+ * facts, not the whole assistant decision: a school that reached its AI limit
+ * with the last request still saves the paper it paid for.
+ */
+async function assertSchoolStillWritable(db: Database, schoolId: string): Promise<void> {
+  const facts = await readSchoolWriteFacts(db, schoolId);
+  const refusal = facts ? resolveSchoolWriteRefusal(facts) : null;
+  if (refusal) throw new QuestionPaperJobFailure(refusal === SCHOOL_SUSPENDED_REASON ? 'school_suspended' : 'no_plan');
 }
 
 /** The failure for a model request that failed for good, by what the provider said about it. */
@@ -448,6 +466,7 @@ async function callModel({
     );
 
   for (let attempt = 1; ; attempt += 1) {
+    await assertSchoolStillWritable(deps.db, begun.schoolId);
     let result: TextResult;
     try {
       result = await model.generate({
@@ -534,6 +553,7 @@ async function validateAnswer(deps: GenerationDeps, plan: Plan, text: string): P
 /** Saves the version through the one function chat uses; idempotent per job id. */
 async function savePaper(deps: GenerationDeps, input: QuestionPaperJobInput, begun: BegunJob, plan: Plan, html: string) {
   if (!(await jobIsLive(deps.db, input))) throw new JobStopped();
+  await assertSchoolStillWritable(deps.db, begun.schoolId);
   try {
     // No HTTP request opens a timing scope in the worker; this one logs where the save's render and print time went.
     const saved = await withTimingScope(log, 'question-paper.save.timing', { jobId: input.jobId }, () =>

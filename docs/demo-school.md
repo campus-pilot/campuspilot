@@ -9,10 +9,12 @@ the slug, the staff email domain or the existence of a job.
 
 1. `systemAdmin.createDemoSchool` creates, in one transaction, the school
    (`is_demo = true`, `demo_created_by = admin`), the admin's membership with
-   the `principal` role, the school's platform feature flags
-   (`DEMO_SCHOOL_FEATURE_DEFAULTS`: the Cadet Portal and notices on, unlike a
-   real school, which starts with none; the AI assistant off, since its use is
-   paid per request: an administrator enables it on the demo's AI page; see [School feature flags](feature-flags.md)), and a
+   the `principal` role, on the subscription tier that includes every
+   product area (`DEMO_SCHOOL_TIER`: Enterprise, so student management, the
+   Cadet Portal, notices and WhatsApp, which a demo never actually sends; the
+   AI assistant is in no tier and stays off, since its use is paid per
+   request: an administrator enables it on the demo's AI page; see
+   [School feature flags](feature-flags.md)), and a
    `demo_school_job` row (`queued`). The dialog
    closes at once and a persistent toast follows the job.
 2. The client uploads the optional logo through the normal logo endpoint,
@@ -356,9 +358,9 @@ ingress.
 
 - New user-visible feature: extend the seed JSON and a step so a new demo shows it.
 - New school-owned table: add it to `purge_demo_school` in a migration.
-- New platform feature: decide it in `DEMO_SCHOOL_FEATURE_DEFAULTS` (the build
-  fails until you do); a seed step that calls a feature-gated procedure relies
-  on the flag written at creation.
+- New platform feature: a demo is on `DEMO_SCHOOL_TIER`, so it has the
+  feature when that tier includes it. Check that this is what a demo should
+  show; a seed step that calls a feature-gated procedure relies on it.
 - A question paper table or object is covered like any other: rows by
   `purge_demo_school` (0059, 0062), objects because they live under
   `schools/{schoolId}/` (`demo-purge-question-papers.integration.test.ts`).

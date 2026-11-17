@@ -105,8 +105,9 @@ describe('purge_demo_school and the demo-only finance exception', () => {
   let real: FinanceScenario;
 
   beforeEach(async () => {
-    // Both schools have the Cadet Portal; the demo also has notices, like a
-    // school made by createDemoSchool, so the purge has flag rows to delete.
+    // Both schools have the Cadet Portal and the demo also has notices. They
+    // are stored as adjustments (besides the two every test school has:
+    // student management and WhatsApp), so the purge has flag rows to delete.
     [demo, real] = await Promise.all([
       createFinanceScenario({ isDemo: true, features: ['cadet', 'notices'] }),
       createFinanceScenario({ features: ['cadet'] }),
@@ -146,7 +147,7 @@ describe('purge_demo_school and the demo-only finance exception', () => {
       sql`SELECT purge_demo_school(${demo.school.id}) AS counts`,
     );
     // Events: the two emitted above plus the bill's and the payment's own (Phase 5); only the two above were fanned out.
-    expect(result.rows[0]!.counts).toMatchObject({ finance_payment: 1, finance_bill: 1, exam_student_remark: 1, user: 1, school_member: expect.any(Number), notification_event: 4, notification: 2, notification_delivery: 2, exam_result_publication: 1, school_feature_flag: 2 });
+    expect(result.rows[0]!.counts).toMatchObject({ finance_payment: 1, finance_bill: 1, exam_student_remark: 1, user: 1, school_member: expect.any(Number), notification_event: 4, notification: 2, notification_delivery: 2, exam_result_publication: 1, school_feature_flag: 4 });
 
     const remaining = await rowsReferencingSchool(demo.school.id);
     expect(Object.values(remaining).every((count) => count === 0)).toBe(true);
@@ -157,7 +158,7 @@ describe('purge_demo_school and the demo-only finance exception', () => {
     // The real school is untouched.
     const realRows = await rowsReferencingSchool(real.school.id);
     expect(realRows.finance_payment).toBe(1);
-    expect(realRows.school_feature_flag).toBe(1);
+    expect(realRows.school_feature_flag).toBe(3);
   });
 
   it('removes the notices of a demo school with their class rows, before the template revisions and accounts they reference', async () => {

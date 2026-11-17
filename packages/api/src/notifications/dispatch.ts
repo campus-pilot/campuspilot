@@ -28,7 +28,7 @@ import {
   type ResolvedRecipient,
 } from './channels';
 import { activePushSubscriptionIdsByAdmission } from './channels/web-push/subscriptions';
-import { disabledFeatureOf } from './features';
+import { channelsWithoutFeature, disabledFeatureOf, type SchoolDeliveryFacts } from './features';
 import { notificationDeliveryId, notificationRedeliveryId, notificationRowId } from './ids';
 import type { NotificationSendPriority } from './notify';
 import { senderLaneFor, uniqueSenderTargets, type SenderTarget } from './sender/lanes';
@@ -60,6 +60,14 @@ export type DispatchableEvent = {
    * planned `skipped: feature_disabled`. Null otherwise.
    */
   disabledFeature: SchoolFeatureKey | null;
+  /**
+   * The remote channels the school lacked the feature for when the event
+   * was loaded (`channelsWithoutFeature`: WhatsApp without the `whatsapp`
+   * feature); copies on them are planned `skipped: feature_disabled` while
+   * the other channels go out. An event journaled before this field existed
+   * has none; read it through {@link channelsWithoutFeatureOf}.
+   */
+  channelsWithoutFeature?: RemoteNotificationChannel[];
   type: NotificationType;
   data: Record<string, unknown>;
   recipients: ReturnType<typeof notificationRecipientSpecSchema.parse>;
@@ -127,6 +135,7 @@ export async function loadDispatchableEvent(db: DatabaseExecutor, eventId: strin
     schoolId: event.schoolId,
     isDemoSchool: event.isDemoSchool,
     disabledFeature: await disabledFeatureOf(db, event.schoolId, event.type),
+    channelsWithoutFeature: await channelsWithoutFeature(db, event.schoolId),
     type: event.type,
     data: event.data,
     recipients: recipients.data,
@@ -187,6 +196,23 @@ export async function resolveAdmissionRecipients(
   });
 }
 
+/** The event's channels without their feature (none for an event journaled before the field existed). */
+function channelsWithoutFeatureOf(event: Pick<DispatchableEvent, 'channelsWithoutFeature'>): readonly RemoteNotificationChannel[] {
+  return event.channelsWithoutFeature ?? [];
+}
+
+/**
+ * Whether the school lacks a feature a copy on `channel` needs: one the
+ * notification's type belongs to (every channel), or one the channel itself
+ * needs (that channel only).
+ */
+function featureDisabledOn(
+  event: Pick<DispatchableEvent, 'disabledFeature' | 'channelsWithoutFeature'>,
+  channel: RemoteNotificationChannel,
+): boolean {
+  return event.disabledFeature !== null || channelsWithoutFeatureOf(event).includes(channel);
+}
+
 /** Per remote channel: copies that would be owed, and skips by reason. */
 export type DeliveryForecast = {
   recipientCount: number;
@@ -203,15 +229,17 @@ export type DeliveryForecast = {
  */
 export function forecastDeliveries(
   type: NotificationType,
-  isDemoSchool: boolean,
+  school: SchoolDeliveryFacts,
   recipients: readonly ResolvedRecipient[],
   adapters: Record<RemoteNotificationChannel, NotificationChannelAdapter> = notificationChannelAdapters,
 ): DeliveryForecast {
   const channels = Object.fromEntries(
     REMOTE_NOTIFICATION_CHANNELS.map((channel) => [channel, { owed: 0, skipped: {} }]),
   ) as DeliveryForecast['channels'];
-  // A forecast is asked for by a procedure that already required the type's features.
-  const planned = planNotificationRows({ id: 'forecast', type, isDemoSchool, disabledFeature: null }, recipients, adapters);
+  // A forecast is asked for by a procedure that already required the type's
+  // features. A channel's own feature is not required by any procedure, so
+  // it is decided here as the fan-out will decide it.
+  const planned = planNotificationRows({ id: 'forecast', type, ...school, disabledFeature: null }, recipients, adapters);
   for (const notification of planned) {
     for (const delivery of notification.deliveries) {
       const bucket = channels[delivery.channel];
@@ -262,7 +290,7 @@ function toPlannedDelivery(notificationId: string, channel: RemoteNotificationCh
  * insert's `RETURNING` (a replay inserts nothing and would send nothing).
  */
 export function planNotificationRows(
-  event: Pick<DispatchableEvent, 'id' | 'type' | 'isDemoSchool' | 'disabledFeature'>,
+  event: Pick<DispatchableEvent, 'id' | 'type' | 'isDemoSchool' | 'disabledFeature' | 'channelsWithoutFeature'>,
   recipients: readonly ResolvedRecipient[],
   adapters: Record<RemoteNotificationChannel, NotificationChannelAdapter> = notificationChannelAdapters,
 ): PlannedNotification[] {
@@ -271,7 +299,7 @@ export function planNotificationRows(
   return recipients.map((recipient) => {
     const id = notificationRowId(event.id, { kind: recipient.kind, id: recipient.id });
     const deliveries = channels.flatMap((channel) =>
-      decideDeliveries(adapters[channel], { isDemoSchool: event.isDemoSchool, featureDisabled: event.disabledFeature !== null, recipient }).map((decision) =>
+      decideDeliveries(adapters[channel], { isDemoSchool: event.isDemoSchool, featureDisabled: featureDisabledOn(event, channel), recipient }).map((decision) =>
         toPlannedDelivery(id, channel, decision),
       ),
     );
@@ -360,14 +388,14 @@ export async function insertNotificationChunk(
  * derived from the redelivery event, never colliding with the original.
  */
 export function planRedeliveryRows(
-  event: Pick<DispatchableEvent, 'id' | 'isDemoSchool' | 'disabledFeature'> & { redeliveryOf: NonNullable<DispatchableEvent['redeliveryOf']> },
+  event: Pick<DispatchableEvent, 'id' | 'isDemoSchool' | 'disabledFeature' | 'channelsWithoutFeature'> & { redeliveryOf: NonNullable<DispatchableEvent['redeliveryOf']> },
   recipients: readonly ResolvedRecipient[],
   adapters: Record<RemoteNotificationChannel, NotificationChannelAdapter> = notificationChannelAdapters,
 ): PlannedDelivery[] {
   const recipient = recipients[0];
   if (!recipient) return [];
   const { notificationId, channel, deliveryId } = event.redeliveryOf;
-  let decisions = decideDeliveries(adapters[channel], { isDemoSchool: event.isDemoSchool, featureDisabled: event.disabledFeature !== null, recipient });
+  let decisions = decideDeliveries(adapters[channel], { isDemoSchool: event.isDemoSchool, featureDisabled: featureDisabledOn(event, channel), recipient });
   if (channel === 'web_push') {
     // D-40: a push resend goes to the device that missed it, never to every
     // device the student has now. Gone since the resend was asked for: skipped.

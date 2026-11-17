@@ -12,7 +12,7 @@ export async function createTestSchool(): Promise<string> {
   const suffix = randomUUID();
   const [school] = await db
     .insert(schoolTable)
-    .values({ slug: `assistant-test-${suffix}`, name: `Assistant Test School ${suffix.slice(0, 8)}`, location: 'Test City' })
+    .values({ slug: `assistant-test-${suffix}`, name: `Assistant Test School ${suffix.slice(0, 8)}`, location: 'Test City', tier: 'plus' })
     .returning({ id: schoolTable.id });
   return school!.id;
 }

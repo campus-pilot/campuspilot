@@ -26,7 +26,9 @@ export const notificationChannelAdapters: Record<RemoteNotificationChannel, Noti
  * Decides a recipient's copies on one channel. Precedence, first match wins:
  * 1. the channel is unavailable on this platform → `skipped: disabled`;
  * 2. the school does not have a feature the notification type belongs to
- *    (`disabledFeatureOf`) → `skipped: feature_disabled`;
+ *    (`disabledFeatureOf`) or one this channel needs
+ *    (`disabledChannelFeatureOf`: WhatsApp without the `whatsapp` feature)
+ *    → `skipped: feature_disabled`;
  * 3. the school is a demo school → `skipped: demo_school` (demos never send
  *    outside the inbox);
  * 4. the channel's own decision for the recipient (number, verification,

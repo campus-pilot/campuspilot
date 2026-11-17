@@ -8,6 +8,29 @@ export const mySchoolDtoSchema = z.object({
   logoS3Key: z.string().nullable(),
   /** Demo schools show a permanent sample-data banner in management. */
   isDemo: z.boolean(),
+  /**
+   * The school is suspended, so it is read-only: every change is refused
+   * (docs/school-suspension.md). Management shows a permanent warning. The
+   * administrator's reason is deliberately not part of this.
+   */
+  isSuspended: z.boolean(),
+  /**
+   * The school has an active plan: a subscription or an active trial
+   * (docs/school-trials.md). Without one it is read-only and management
+   * shows a permanent warning.
+   */
+  hasActivePlan: z.boolean(),
+  /**
+   * The school subscribes to a tier. Without one, the end of the trial that
+   * gives its plan leaves it blocked, which the trial's notice says.
+   */
+  hasSubscription: z.boolean(),
+  /**
+   * When the trial that gives the school its plan ends (ISO date-time);
+   * null when no trial gives the plan. Management warns in the trial's last
+   * days.
+   */
+  trialEndsAt: z.iso.datetime().nullable(),
 });
 
 export type MySchoolDto = z.infer<typeof mySchoolDtoSchema>;
