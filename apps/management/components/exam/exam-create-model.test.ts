@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  EXAM_SLUG_TAKEN_REASON,
+  isExamSlugTakenError,
+} from '@campuspilot/api/routers/school/exam/exam-definition.contract';
+import {
   createExamFormSchema,
   EXAM_SLUG_TAKEN_MESSAGE,
   emptyCreateExamForm,
   followNameSlug,
-  isExamSlugTaken,
   toCreateExamInput,
 } from './exam-create-model';
 
@@ -108,8 +111,17 @@ test('the request trims the values and leaves the order to the server', () => {
   assert.equal('order' in input, false);
 });
 
-test('only a CONFLICT answer means the slug is taken', () => {
-  assert.equal(isExamSlugTaken({ code: 'CONFLICT' }), true);
-  assert.equal(isExamSlugTaken({ code: 'BAD_REQUEST' }), false);
-  assert.equal(isExamSlugTaken(new Error('offline')), false);
+test('only the CONFLICT with the taken-slug reason means the slug is taken', () => {
+  assert.equal(
+    isExamSlugTakenError({ code: 'CONFLICT', data: { reason: EXAM_SLUG_TAKEN_REASON } }),
+    true,
+  );
+  // A database conflict (unique violation, deadlock, serialization failure) is not a taken slug.
+  assert.equal(isExamSlugTakenError({ code: 'CONFLICT' }), false);
+  assert.equal(isExamSlugTakenError({ code: 'CONFLICT', data: { reason: 'OTHER' } }), false);
+  assert.equal(
+    isExamSlugTakenError({ code: 'BAD_REQUEST', data: { reason: EXAM_SLUG_TAKEN_REASON } }),
+    false,
+  );
+  assert.equal(isExamSlugTakenError(new Error('offline')), false);
 });

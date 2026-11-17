@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { createExamInputSchema } from '@campuspilot/api/routers/school/exam/exam.dto';
 import { slugify } from '@campuspilot/components/session/types';
-import { errorCode, type SessionScope } from './exam-model';
+import type { SessionScope } from './exam-model';
 
 /** Shown next to the slug when the session already has an exam with it. */
 export const EXAM_SLUG_TAKEN_MESSAGE =
@@ -67,12 +67,4 @@ export function toCreateExamInput(
     examSlug: values.slug.trim(),
     name: values.name.trim(),
   };
-}
-
-/**
- * `school.createExam` answers CONFLICT for one reason only: the session
- * already has an exam with that slug.
- */
-export function isExamSlugTaken(error: unknown) {
-  return errorCode(error) === 'CONFLICT';
 }

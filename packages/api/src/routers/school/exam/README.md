@@ -28,7 +28,10 @@ exam-governance boundary, including full-config replacements.
    `createExam` (the management Examinations list does). `createExam` takes a
    slug in the settings format (`examSlugSchema`: lowercase letters, digits and
    underscores, up to 100 characters; older stored slugs are not re-checked) and a
-   name, refuses a slug the session already has with `CONFLICT`, and lists the exam
+   name, refuses a slug the session already has with `CONFLICT` carrying
+   `data.reason: 'EXAM_SLUG_TAKEN'` (`exam-definition.contract.ts`; clients check
+   `isExamSlugTakenError`, never the bare code, which database conflicts share),
+   and lists the exam
    after the highest existing order (`nextExamOrder`) unless `order` is given. It
    reads and writes the configuration under the session row lock that the
    full-config `updateSession` save also takes, so a creation never drops another

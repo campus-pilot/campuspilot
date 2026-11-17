@@ -9,7 +9,9 @@ Exams come from session settings. The Examinations list's single Create examinat
 action (`exam-create.tsx`; navbar and empty state) adds one to the session's
 settings through `school.createExam`: a name, and a slug that follows the name with
 the settings rule until the user types their own (`exam-create-model.ts`). The server
-lists it last and refuses a taken slug, shown beside the slug field. It is offered
+lists it last and refuses a taken slug with an explicit reason
+(`isExamSlugTakenError`), shown beside the slug field; any other refusal is shown
+above the buttons and never blocks trying again. It is offered
 with `CREATE_EXAM` while the session is known to be active, and refreshes the list,
 the session (settings) and the sessions list on success. A dashed empty state opens a concise plan-review
 dialog with classes, student counts, subjects and modes. Each class row expands

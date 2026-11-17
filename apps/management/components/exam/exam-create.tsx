@@ -4,6 +4,7 @@ import { useForm } from '@tanstack/react-form';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
+import { isExamSlugTakenError } from '@campuspilot/api/routers/school/exam/exam-definition.contract';
 import { Button } from '@campuspilot/ui/components/button';
 import {
   Dialog,
@@ -21,7 +22,6 @@ import {
   createExamFormSchema,
   emptyCreateExamForm,
   followNameSlug,
-  isExamSlugTaken,
   toCreateExamInput,
 } from './exam-create-model';
 import {
@@ -115,8 +115,9 @@ function useRefreshSessionExams(scope: SessionScope) {
 }
 
 /**
- * The form behind the dialog. A duplicate slug is shown beside the slug
- * field; any other refusal above the buttons. When the outcome is unknown (a
+ * The form behind the dialog. The server's taken-slug refusal (identified by
+ * its explicit reason, not by CONFLICT, which also covers database conflicts)
+ * is shown beside the slug field; any other refusal above the buttons. When the outcome is unknown (a
  * network or server failure after the request left), the list is refreshed
  * and the message says to check it before trying again: a retry of a
  * committed creation is refused as a duplicate, never created twice.
@@ -137,7 +138,7 @@ function useCreateExamForm(scope: SessionScope, onClose: () => void) {
         toast.success(`${exam.name} created.`);
         onClose();
       } catch (error) {
-        if (isExamSlugTaken(error)) {
+        if (isExamSlugTakenError(error)) {
           // Validates the form, which puts the refusal beside the slug field.
           form.setFieldValue('takenSlugs', [
             ...value.takenSlugs,
@@ -243,7 +244,10 @@ function CreateExamFooter({
   return (
     <form.Subscribe
       selector={(state) => ({
-        canSubmit: state.canSubmit,
+        // Fields, not the whole form: the form-level message of a refused or
+        // uncertain attempt must not block trying again with the same values.
+        // The next submission clears that message before it runs.
+        canSubmit: state.isFieldsValid && !state.isValidating,
         isSubmitting: state.isSubmitting,
         errors: state.errors,
       })}

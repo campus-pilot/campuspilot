@@ -4,6 +4,14 @@ import {
   sessionConfigSchema,
 } from '@campuspilot/db/schema/jsonb/session-config';
 import { describe, expect, it } from 'vitest';
+import { ORPCError } from '@orpc/server';
+
+import { toRpcError } from '../../../errors';
+import {
+  EXAM_SLUG_TAKEN_MESSAGE,
+  EXAM_SLUG_TAKEN_REASON,
+  isExamSlugTakenError,
+} from './exam-definition.contract';
 
 import type { resultValuesSchema } from './exam.dto';
 import {
@@ -304,5 +312,29 @@ describe('new exam order and slug rules', () => {
     expect(empty.error?.issues.map((issue) => issue.message)).toEqual([
       'Exam slug is required',
     ]);
+  });
+});
+
+describe('isExamSlugTakenError', () => {
+  it('is false for the CONFLICTs the shared error mapping makes from database failures', () => {
+    for (const code of ['23505', '40001', '40P01']) {
+      const mapped = toRpcError({ message: 'database', cause: { code } });
+      expect(mapped.code).toBe('CONFLICT');
+      expect(isExamSlugTakenError(mapped)).toBe(false);
+    }
+  });
+
+  it('is true only for CONFLICT carrying the taken-slug reason', () => {
+    const taken = new ORPCError('CONFLICT', {
+      message: EXAM_SLUG_TAKEN_MESSAGE,
+      data: { reason: EXAM_SLUG_TAKEN_REASON },
+    });
+    expect(isExamSlugTakenError(taken)).toBe(true);
+    expect(isExamSlugTakenError(toRpcError(taken))).toBe(true);
+    expect(
+      isExamSlugTakenError(
+        new ORPCError('FORBIDDEN', { data: { reason: EXAM_SLUG_TAKEN_REASON } }),
+      ),
+    ).toBe(false);
   });
 });

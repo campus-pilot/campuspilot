@@ -8,6 +8,11 @@ import {
   isSchoolSuspendedError,
 } from '../../../school-access/school-access.contract';
 import {
+  EXAM_SLUG_TAKEN_MESSAGE,
+  EXAM_SLUG_TAKEN_REASON,
+  isExamSlugTakenError,
+} from './exam-definition.contract';
+import {
   createAdminSession,
   createSchoolStaffSession,
   createTestClient,
@@ -160,12 +165,18 @@ describe('school.createExam', () => {
     });
     const before = await storedExamConfig(scope.sessionId);
     // The dialog derives the slug from the name, so a repeated name arrives with the taken slug.
-    await expect(
-      manager.school.createExam({ ...scope, examSlug: 'unit_test_1', name: 'Unit Test 1' }),
-    ).rejects.toMatchObject({ code: 'CONFLICT' });
-    await expect(
-      manager.school.createExam({ ...scope, examSlug: 'unit_test_1', name: 'Another name' }),
-    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    // The refusal carries its explicit reason, which the dialog reads to put it beside the slug field.
+    for (const name of ['Unit Test 1', 'Another name']) {
+      const error = await manager.school
+        .createExam({ ...scope, examSlug: 'unit_test_1', name })
+        .then(() => undefined, (caught: unknown) => caught);
+      expect(error).toMatchObject({
+        code: 'CONFLICT',
+        message: EXAM_SLUG_TAKEN_MESSAGE,
+        data: { reason: EXAM_SLUG_TAKEN_REASON },
+      });
+      expect(isExamSlugTakenError(error)).toBe(true);
+    }
     expect(await storedExamConfig(scope.sessionId)).toEqual(before);
   });
 

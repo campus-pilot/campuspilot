@@ -10,7 +10,13 @@ import { getExam, getExamSession } from './exam.service';
 import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
 import { protectedProcedure } from '../../../index';
 import { requireSchoolPermission } from '../../../permissions/school';
+import { ORPCError } from '@orpc/server';
 import { rpcError, toRpcError } from '../../../errors';
+import {
+  EXAM_SLUG_TAKEN_MESSAGE,
+  EXAM_SLUG_TAKEN_REASON,
+  type ExamSlugTakenData,
+} from './exam-definition.contract';
 import * as dto from './exam.dto';
 
 export const schoolExamDefinitionRouter = {
@@ -177,9 +183,10 @@ export const schoolExamDefinitionRouter = {
         return await context.db.transaction(async (tx) => {
           const session = await getExamSession(tx, input, 'update');
           if (Object.hasOwn(session.config.examConfig, input.examSlug))
-            throw rpcError.conflict(
-              'An exam with this slug already exists in the session.',
-            );
+            throw new ORPCError('CONFLICT', {
+              message: EXAM_SLUG_TAKEN_MESSAGE,
+              data: { reason: EXAM_SLUG_TAKEN_REASON } satisfies ExamSlugTakenData,
+            });
           // Read and written under the session row lock (FOR UPDATE), which the
           // full-config `updateSession` save takes too: concurrent creations and
           // saves run one after the other, each on the configuration the previous

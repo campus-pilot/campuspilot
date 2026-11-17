@@ -158,8 +158,7 @@ function NoExamsYet({ scope }: { scope: SessionScope }) {
         </EmptyMedia>
         <EmptyTitle>No examinations yet</EmptyTitle>
         <EmptyDescription>
-          This session has no examinations configured. A new examination is
-          added to the session&apos;s settings.
+          This session has no examinations configured.
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
