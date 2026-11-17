@@ -24,7 +24,7 @@ export type SchoolPlanFlags = z.infer<typeof adminSchoolFeatureFlagsDtoSchema>;
  * Decided with the catalogue's own rules (the school's adjustments are
  * kept across a plan change, and a feature also needs the features it
  * requires), so this says exactly what the server will do. Callers work out
- * the plan tier with `resolveSchoolPlan` from the subscription and trial the
+ * the plan tier with `resolveSchoolPlan` from the standing tier and period the
  * change leaves.
  */
 export function planChangeEffect(features: SchoolFeatureFlags, planTier: SchoolTier | null) {
@@ -84,7 +84,7 @@ export function useRefreshSchoolPlan(schoolId: string) {
     void queryClient.invalidateQueries({ queryKey: orpc.systemAdmin.getSchoolFeatureFlags.queryKey({ input: { id: schoolId } }) });
     void queryClient.invalidateQueries({ queryKey: orpc.systemAdmin.getSchool.queryKey({ input: { id: schoolId } }) });
     void queryClient.invalidateQueries({ queryKey: orpc.systemAdmin.listSchools.key() });
-    void queryClient.invalidateQueries({ queryKey: orpc.systemAdmin.listSchoolTrials.queryKey({ input: { id: schoolId } }) });
+    void queryClient.invalidateQueries({ queryKey: orpc.systemAdmin.getSchoolBilling.queryKey({ input: { id: schoolId } }) });
   };
 }
 

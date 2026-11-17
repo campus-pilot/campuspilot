@@ -1,7 +1,7 @@
 'use client';
 
 import { useForm } from '@tanstack/react-form';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { z } from 'zod';
 import {
@@ -18,8 +18,9 @@ import { Label } from '@campuspilot/ui/components/label';
 import { toast } from '@campuspilot/ui/lib/toast';
 import { LoaderCircle } from 'lucide-react';
 import { client, orpc } from '@/lib/orpc';
+import { BILLING_PERIOD_DAYS } from '@campuspilot/api/billing/billing.contract';
 import {
-  addCalendarMonths,
+  addDays,
   defaultTrialEndDay,
   endOfIstDay,
   formatDaysUntil,
@@ -38,7 +39,7 @@ import {
   useRefreshSchoolPlan,
 } from './school-plan-effect';
 
-type ActiveTrial = NonNullable<SchoolPlanFlags['trial']>;
+type ActivePeriod = NonNullable<SchoolPlanFlags['period']>;
 
 const TIER_OPTIONS: OptionSelectOption<SchoolTier>[] = SCHOOL_TIERS.map((tier) => ({
   value: tier,
@@ -56,7 +57,7 @@ const trialFormSchema = z.object({
 
 type TrialFormValues = z.infer<typeof trialFormSchema>;
 
-/** The tier a new trial proposes: the one above the subscription, so the trial gives the school something. */
+/** The tier a new trial proposes: the one above the standing tier, so the trial gives the school something. */
 const SUGGESTED_TRIAL_TIER: Record<SchoolTier | 'none', SchoolTier> = {
   none: 'pro',
   plus: 'pro',
@@ -64,9 +65,9 @@ const SUGGESTED_TRIAL_TIER: Record<SchoolTier | 'none', SchoolTier> = {
   enterprise: 'enterprise',
 };
 
-/** The plan tier the school would have on a trial of `tier` (null: no trial) next to its subscription. */
+/** The plan tier the school would have on a trial of `tier` (null: no period) next to its standing tier. */
 function planTierWithTrial(subscribedTier: SchoolTier | null, tier: SchoolTier | null): SchoolTier | null {
-  return resolveSchoolPlan({ subscribedTier, activeTrial: tier === null ? null : { tier } }).tier;
+  return resolveSchoolPlan({ subscribedTier, activePeriod: tier === null ? null : { tier, kind: 'trial' } }).tier;
 }
 
 function fieldErrorMessages(errors: unknown[]): string[] {
@@ -110,7 +111,7 @@ function TrialTierField({ form, idPrefix, autoFocus = false }: { form: TrialForm
   );
 }
 
-/** The end day, with a quick "+1 month" that moves it one calendar month later. */
+/** The end day, with a quick "+28 days" that moves it one billing period later. */
 function TrialEndField({ form, idPrefix }: { form: TrialForm; idPrefix: string }) {
   return (
     <form.Field name="endDay">
@@ -132,9 +133,9 @@ function TrialEndField({ form, idPrefix }: { form: TrialForm; idPrefix: string }
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => field.handleChange(addCalendarMonths(trialEndDayProblem(field.state.value) ? istDay(new Date()) : field.state.value, 1))}
+              onClick={() => field.handleChange(addDays(trialEndDayProblem(field.state.value) ? istDay(new Date()) : field.state.value, BILLING_PERIOD_DAYS))}
             >
-              +1 month
+              +28 days
             </Button>
           </div>
           <div id={`${idPrefix}-end-error`} role="alert" className="flex flex-col gap-1 empty:hidden">
@@ -194,7 +195,7 @@ function TrialFormFooter({
   );
 }
 
-/** Starting a trial now: a tier and the day it ends, one calendar month ahead by default. */
+/** Starting a trial now: a tier and the day it ends, one 28-day period ahead by default. */
 function StartTrialForm({ schoolId, plan }: { schoolId: string; plan: SchoolPlanFlags }) {
   const refresh = useRefreshSchoolPlan(schoolId);
   const form = useTrialForm(
@@ -214,7 +215,7 @@ function StartTrialForm({ schoolId, plan }: { schoolId: string; plan: SchoolPlan
         void form.handleSubmit();
       }}
     >
-      <p className="text-sm text-muted-foreground">No trial is running. A trial starts now and ends by itself on the day you choose.</p>
+      <p className="text-sm text-muted-foreground">No billing period is running. Start a free trial (it ends by itself on the day you choose), or add paid periods below.</p>
       <TrialFields form={form} idPrefix="start-trial" />
       <TrialFormFooter form={form} plan={plan} submitLabel="Start trial" pendingLabel="Starting…" />
     </form>
@@ -222,7 +223,7 @@ function StartTrialForm({ schoolId, plan }: { schoolId: string; plan: SchoolPlan
 }
 
 /** Changing the active trial's tier or end. Only what changed is sent. */
-function ChangeTrialForm({ schoolId, plan, trial, onDone }: { schoolId: string; plan: SchoolPlanFlags; trial: ActiveTrial; onDone: () => void }) {
+function ChangeTrialForm({ schoolId, plan, trial, onDone }: { schoolId: string; plan: SchoolPlanFlags; trial: ActivePeriod; onDone: () => void }) {
   const refresh = useRefreshSchoolPlan(schoolId);
   const savedEndDay = istDay(trial.endsAt);
   const form = useTrialForm(
@@ -230,7 +231,7 @@ function ChangeTrialForm({ schoolId, plan, trial, onDone }: { schoolId: string; 
     async (value) => {
       await client.systemAdmin.updateSchoolTrial({
         id: schoolId,
-        trialId: trial.id,
+        periodId: trial.id,
         tier: value.tier === trial.tier ? undefined : value.tier,
         endsAt: value.endDay === savedEndDay ? undefined : endOfIstDay(value.endDay),
       });
@@ -262,39 +263,43 @@ function ChangeTrialForm({ schoolId, plan, trial, onDone }: { schoolId: string; 
   );
 }
 
-/** What ending the trial leaves: the subscription, or no plan. */
-function endTrialDescription(subscribedTier: SchoolTier | null): string {
-  if (subscribedTier) return `The school goes back to its ${schoolTierCatalogue[subscribedTier].label} subscription at once.`;
-  return `The school will have no plan at once. ${NO_PLAN_CONSEQUENCE}`;
+/** What each kind of period is called. */
+const PERIOD_KIND_LABELS = { trial: 'trial', paid: 'paid period', complimentary: 'free period' } as const;
+
+/** What ending the period leaves: the standing tier, or no plan (a period lined up next would follow later). */
+function endPeriodDescription(subscribedTier: SchoolTier | null): string {
+  if (subscribedTier) return `The school goes back to its ${schoolTierCatalogue[subscribedTier].label} standing tier at once.`;
+  return `The school will have no plan at once, unless another period starts right away. ${NO_PLAN_CONSEQUENCE} Its invoice stays as it is; void it to record a refund.`;
 }
 
-/** Ending the active trial now, confirmed with what the school keeps and loses. */
-function EndTrialButton({ schoolId, plan, trial }: { schoolId: string; plan: SchoolPlanFlags; trial: ActiveTrial }) {
+/** Ending the active period now, confirmed with what the school keeps and loses. */
+function EndPeriodButton({ schoolId, plan, period }: { schoolId: string; plan: SchoolPlanFlags; period: ActivePeriod }) {
   const refresh = useRefreshSchoolPlan(schoolId);
   const [confirming, setConfirming] = useState(false);
+  const label = PERIOD_KIND_LABELS[period.kind];
   const end = useMutation(
-    orpc.systemAdmin.endSchoolTrial.mutationOptions({
+    orpc.systemAdmin.endSchoolBillingPeriod.mutationOptions({
       onSuccess: () => {
         refresh();
-        toast.success('Trial ended.');
+        toast.success(`The ${label} ended.`);
       },
-      onError: (error) => toast.error(saveErrorMessage(error, 'Unable to end the trial.')),
+      onError: (error) => toast.error(saveErrorMessage(error, `Unable to end the ${label}.`)),
       onSettled: () => setConfirming(false),
     }),
   );
   return (
     <>
       <Button type="button" variant="outline" disabled={end.isPending} onClick={() => setConfirming(true)}>
-        End trial
+        End {label}
       </Button>
       <ConfirmationDialog
         open={confirming}
-        title={`End the ${schoolTierCatalogue[trial.tier].label} trial now?`}
-        description={endTrialDescription(plan.subscribedTier)}
-        confirmLabel={end.isPending ? 'Ending…' : 'End trial'}
+        title={`End the ${schoolTierCatalogue[period.tier].label} ${label} now?`}
+        description={endPeriodDescription(plan.subscribedTier)}
+        confirmLabel={end.isPending ? 'Ending…' : `End ${label}`}
         pending={end.isPending}
         onOpenChange={setConfirming}
-        onConfirm={() => end.mutate({ id: schoolId, trialId: trial.id })}
+        onConfirm={() => end.mutate({ id: schoolId, periodId: period.id })}
       >
         <LostFeatureWarnings lost={planChangeEffect(plan.features, planTierWithTrial(plan.subscribedTier, null)).lost} />
       </ConfirmationDialog>
@@ -302,18 +307,21 @@ function EndTrialButton({ schoolId, plan, trial }: { schoolId: string; plan: Sch
   );
 }
 
-/** Said when the trial is not above the subscription: it runs, but gives the school nothing more. */
-function TrialBelowSubscriptionNote({ trial, subscribedTier }: { trial: ActiveTrial; subscribedTier: SchoolTier | null }) {
-  if (subscribedTier === null || resolveSchoolPlan({ subscribedTier, activeTrial: trial }).source === 'trial') return null;
+/** Said when the period is not above the standing tier: it runs, but gives the school nothing more. */
+function PeriodBelowStandingNote({ period, subscribedTier }: { period: ActivePeriod; subscribedTier: SchoolTier | null }) {
+  if (subscribedTier === null || resolveSchoolPlan({ subscribedTier, activePeriod: period }).source === period.kind) return null;
   return (
     <p className="text-xs text-muted-foreground">
-      The school subscribes to {schoolTierCatalogue[subscribedTier].label}, so this trial changes nothing while it runs.
+      The school has the {schoolTierCatalogue[subscribedTier].label} standing tier, so this period changes nothing while it runs.
     </p>
   );
 }
 
-/** The active trial: its tier and end, with Change and End trial. Editing is UI state, not form state. */
-function ActiveTrialPanel({ schoolId, plan, trial }: { schoolId: string; plan: SchoolPlanFlags; trial: ActiveTrial }) {
+/**
+ * The active period: its kind, tier and end, with End and (for a trial)
+ * Change. Editing is UI state, not form state.
+ */
+function ActivePeriodPanel({ schoolId, plan, period }: { schoolId: string; plan: SchoolPlanFlags; period: ActivePeriod }) {
   const [editing, setEditing] = useState(false);
   // Closing the form unmounts what had focus (Cancel, Save): focus goes back to Change, not to the top of the page.
   const changeButton = useRef<HTMLButtonElement>(null);
@@ -325,75 +333,52 @@ function ActiveTrialPanel({ schoolId, plan, trial }: { schoolId: string; plan: S
     <div className="flex flex-col gap-3 rounded-lg border p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-col gap-0.5">
-          <p className="text-sm font-medium">{schoolTierCatalogue[trial.tier].label} trial</p>
+          <p className="text-sm font-medium">
+            {schoolTierCatalogue[period.tier].label} {PERIOD_KIND_LABELS[period.kind]}
+          </p>
           <p className="text-sm text-muted-foreground">
-            Ends {formatIstDate(trial.endsAt)} ({formatDaysUntil(trial.endsAt)}). Started {formatIstDate(trial.startsAt)}.
+            Ends {formatIstDate(period.endsAt)} ({formatDaysUntil(period.endsAt)}). Started {formatIstDate(period.startsAt)}.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           {/* Not disabled while the form is open: a focused button that becomes disabled drops keyboard focus. */}
-          <Button ref={changeButton} type="button" variant="outline" aria-expanded={editing} onClick={() => setEditing(true)}>
-            Change
-          </Button>
-          <EndTrialButton schoolId={schoolId} plan={plan} trial={trial} />
+          {period.kind === 'trial' ? (
+            <Button ref={changeButton} type="button" variant="outline" aria-expanded={editing} onClick={() => setEditing(true)}>
+              Change
+            </Button>
+          ) : null}
+          <EndPeriodButton schoolId={schoolId} plan={plan} period={period} />
         </div>
       </div>
-      <TrialBelowSubscriptionNote trial={trial} subscribedTier={plan.subscribedTier} />
-      {editing ? <ChangeTrialForm schoolId={schoolId} plan={plan} trial={trial} onDone={closeForm} /> : null}
-    </div>
-  );
-}
-
-/** One past trial: its tier, its dates and whether an administrator ended it early. */
-function pastTrialLine(trial: { tier: SchoolTier; startsAt: Date; endsAt: Date; endedAt: Date | null }): string {
-  const label = schoolTierCatalogue[trial.tier].label;
-  if (trial.endedAt) return `${label}: ${formatIstDate(trial.startsAt)} to ${formatIstDate(trial.endedAt)}, ended early (was to end ${formatIstDate(trial.endsAt)})`;
-  return `${label}: ${formatIstDate(trial.startsAt)} to ${formatIstDate(trial.endsAt)}`;
-}
-
-const HISTORY_LENGTH = 5;
-
-/** The school's past trials, newest first; the active one is shown above. */
-function TrialHistory({ schoolId }: { schoolId: string }) {
-  const trialsQuery = useQuery(orpc.systemAdmin.listSchoolTrials.queryOptions({ input: { id: schoolId } }));
-  const past = (trialsQuery.data ?? []).filter((trial) => !trial.active);
-  if (past.length === 0) return null;
-  return (
-    <div className="flex flex-col gap-2">
-      <p className="text-xs font-medium text-muted-foreground">Earlier trials</p>
-      <ul className="flex flex-col gap-1 text-xs text-muted-foreground">
-        {past.slice(0, HISTORY_LENGTH).map((trial) => (
-          <li key={trial.id}>{pastTrialLine(trial)}</li>
-        ))}
-      </ul>
-      {past.length > HISTORY_LENGTH ? <p className="text-xs text-muted-foreground">And {past.length - HISTORY_LENGTH} more.</p> : null}
+      <PeriodBelowStandingNote period={period} subscribedTier={plan.subscribedTier} />
+      {editing ? <ChangeTrialForm schoolId={schoolId} plan={plan} trial={period} onDone={closeForm} /> : null}
     </div>
   );
 }
 
 /**
- * The trial half of the Plan card (docs/school-trials.md): the active trial
- * with Change and End trial, or a form to start one, then earlier trials.
- * A trial never takes away what the school subscribes to: the school has
- * the higher of the two. Each form is keyed by what is stored, so it
+ * The current-period half of the Plan card (docs/school-billing.md): the
+ * active billing period with End (and Change for a trial), or a form to
+ * start a trial. A period never takes away the school's standing tier: the
+ * school has the higher of the two. Paid periods are added and their history
+ * shown on the Billing card. Each form is keyed by what is stored, so it
  * restarts from the saved state after every change.
  */
-export function SchoolTrialSection({ schoolId, plan }: { schoolId: string; plan: SchoolPlanFlags }) {
-  const trial = plan.trial;
+export function SchoolPeriodSection({ schoolId, plan }: { schoolId: string; plan: SchoolPlanFlags }) {
+  const period = plan.period;
   return (
-    <section className="flex flex-col gap-4" aria-labelledby="school-trial-heading">
+    <section className="flex flex-col gap-4" aria-labelledby="school-period-heading">
       <div className="flex flex-col gap-1">
-        <h3 id="school-trial-heading" className="text-sm font-medium">Trial</h3>
+        <h3 id="school-period-heading" className="text-sm font-medium">Current period</h3>
         <p className="text-xs text-muted-foreground">
-          Lets the school use a higher tier for a while. It ends by itself; you can change or end it at any time.
+          A trial, paid or free period of 28 days gives the school a tier while it runs and ends by itself.
         </p>
       </div>
-      {trial ? (
-        <ActiveTrialPanel key={`${trial.id}:${trial.tier}:${trial.endsAt.getTime()}`} schoolId={schoolId} plan={plan} trial={trial} />
+      {period ? (
+        <ActivePeriodPanel key={`${period.id}:${period.tier}:${period.endsAt.getTime()}`} schoolId={schoolId} plan={plan} period={period} />
       ) : (
         <StartTrialForm key={`start:${plan.subscribedTier ?? 'none'}`} schoolId={schoolId} plan={plan} />
       )}
-      <TrialHistory schoolId={schoolId} />
     </section>
   );
 }

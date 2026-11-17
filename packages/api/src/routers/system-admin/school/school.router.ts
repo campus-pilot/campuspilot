@@ -1,6 +1,7 @@
-import { activeSchoolTrialCondition } from "@campuspilot/db/feature-flags/store";
+import { joinActiveBillingPeriod } from "@campuspilot/db/feature-flags/store";
 import { schoolTable } from "@campuspilot/db/schema/school";
-import { schoolTrialTable } from "@campuspilot/db/schema/school-trial";
+import { schoolBillingPeriodTable } from "@campuspilot/db/schema/school-billing";
+import { schoolUserRoleTable } from "@campuspilot/db/schema/school-user-role";
 import { SYSTEM_ACTIONS } from "@campuspilot/opa/policies/system";
 import { and, asc, count, desc, eq, ilike, isNotNull, isNull, or } from "drizzle-orm";
 
@@ -20,9 +21,10 @@ import {
   schoolIdInputSchema,
   suspendSchoolInputSchema,
   updateSchoolInputSchema,
+  updateSchoolOwnerInputSchema,
 } from "./school.dto";
-import { readSchoolDto, schoolRowToDto, selectSchoolsWithActiveTrial } from "./school.read";
-import { parseTrialEnd, startSchoolTrial } from "../school-trial/school-trial.service";
+import { readSchoolDto, schoolRowToDto, selectSchoolsWithActivePeriod } from "./school.read";
+import { parseTrialEnd, startTrialPeriod } from "../../../billing/billing.service";
 
 /** The school as the admin DTO after a change; NOT_FOUND when it does not exist. */
 async function requireSchoolDto(db: Parameters<typeof readSchoolDto>[0], schoolId: string) {
@@ -36,7 +38,7 @@ export const schoolRouter = {
     .route({
       summary: "List schools",
       description:
-        "List schools across the platform with pagination, text search, filtering by onboarding status, subscribed tier (null: schools without a subscription), suspension and plan state (an active trial, or no plan at all), and deterministic sorting. Each school carries its subscribed tier, its active trial and the plan they give. Requires system-administrator permission.",
+        "List schools across the platform with pagination, text search, filtering by onboarding status, standing tier (null: schools without one), suspension and plan state (in a trial or a paid period, or no plan at all), and deterministic sorting. Each school carries its standing tier, its active billing period and the plan they give. Requires system-administrator permission.",
       tags: ["System Admin", "Schools"],
     })
     .meta({
@@ -80,13 +82,13 @@ export const schoolRouter = {
             : input.filters.suspended
               ? isNotNull(schoolTable.suspendedAt)
               : isNull(schoolTable.suspendedAt);
-        // `school_trial` is joined with the active-trial condition: a null id means no active trial.
+        // `school_billing_period` is joined with the active-period condition: a null id means no active period.
         const planCondition =
           input.filters?.plan === undefined
             ? undefined
-            : input.filters.plan === "trial"
-              ? isNotNull(schoolTrialTable.id)
-              : and(isNull(schoolTable.tier), isNull(schoolTrialTable.id));
+            : input.filters.plan === "none"
+              ? and(isNull(schoolTable.tier), isNull(schoolBillingPeriodTable.id))
+              : eq(schoolBillingPeriodTable.kind, input.filters.plan);
         const where = and(searchCondition, onboardingCondition, tierCondition, suspendedCondition, planCondition);
         const orderByColumn = {
           name: schoolTable.name,
@@ -97,7 +99,7 @@ export const schoolRouter = {
         const orderDirection = input.orderBy.direction === "asc" ? asc : desc;
 
         const [schools, totalRows] = await Promise.all([
-          selectSchoolsWithActiveTrial(context.db)
+          selectSchoolsWithActivePeriod(context.db)
             .where(where)
             .orderBy(orderDirection(orderByColumn), orderDirection(schoolTable.id))
             .limit(pageSize)
@@ -105,7 +107,7 @@ export const schoolRouter = {
           context.db
             .select({ totalItems: count() })
             .from(schoolTable)
-            .leftJoin(schoolTrialTable, and(eq(schoolTrialTable.schoolId, schoolTable.id), activeSchoolTrialCondition()))
+            .leftJoin(schoolBillingPeriodTable, joinActiveBillingPeriod())
             .where(where),
         ]);
         const totalItems = totalRows[0]?.totalItems ?? 0;
@@ -180,7 +182,7 @@ export const schoolRouter = {
             .returning({ id: schoolTable.id });
           if (!school) throw rpcError.internal();
           if (trial && trialEndsAt) {
-            await startSchoolTrial(transaction, {
+            await startTrialPeriod(transaction, {
               schoolId: school.id,
               tier: trial.tier,
               endsAt: trialEndsAt,
@@ -304,6 +306,56 @@ export const schoolRouter = {
           .returning({ id: schoolTable.id });
         if (!school) throw rpcError.notFound("School");
         return await requireSchoolDto(context.db, school.id);
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
+  updateSchoolOwner: protectedProcedure
+    .route({
+      summary: "Change a school's owner",
+      description:
+        "Name the school's owner, who must be a member holding the principal role, or clear it with null. The owner cannot be removed from the school or lose the principal role through school procedures. It does not change anyone's school creation allowance. Requires system-administrator permission.",
+      tags: ["System Admin", "Schools"],
+    })
+    .meta({
+      mcp: {
+        exposure: "hidden",
+        access: "write",
+        destructive: true,
+        module: "platform",
+      },
+    })
+    .input(updateSchoolOwnerInputSchema)
+    .use(requireSystemPermission(SYSTEM_ACTIONS.UPDATE_SCHOOL))
+    .output(schoolDtoSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        return await context.db.transaction(async (transaction) => {
+          if (input.ownerUserId !== null) {
+            const [principal] = await transaction
+              .select({ userId: schoolUserRoleTable.userId })
+              .from(schoolUserRoleTable)
+              .where(
+                and(
+                  eq(schoolUserRoleTable.schoolId, input.id),
+                  eq(schoolUserRoleTable.userId, input.ownerUserId),
+                  eq(schoolUserRoleTable.role, "principal"),
+                ),
+              )
+              .limit(1);
+            if (!principal) {
+              throw rpcError.badRequest("The owner must be a member of this school with the principal role.");
+            }
+          }
+          const [school] = await transaction
+            .update(schoolTable)
+            .set({ ownerUserId: input.ownerUserId, updatedAt: new Date() })
+            .where(eq(schoolTable.id, input.id))
+            .returning({ id: schoolTable.id });
+          if (!school) throw rpcError.notFound("School");
+          return await requireSchoolDto(transaction, school.id);
+        });
       } catch (error) {
         throw toRpcError(error);
       }

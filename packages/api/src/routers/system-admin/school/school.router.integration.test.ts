@@ -41,7 +41,7 @@ describe('systemAdmin.school Router Integration', () => {
       expect(created.location).toBe('New York, NY');
       expect(created.registrationNo).toBe('REG-12345');
       expect(created.hasCompletedOnboarding).toBe(false);
-      expect(created).toMatchObject({ subscribedTier: 'pro', planTier: 'pro', planSource: 'subscription', trial: null });
+      expect(created).toMatchObject({ subscribedTier: 'pro', planTier: 'pro', planSource: 'standing', period: null });
       // A new school is not suspended.
       expect(created.suspendedAt).toBeNull();
       expect(created.suspendedReason).toBeNull();

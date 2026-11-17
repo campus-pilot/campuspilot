@@ -11,9 +11,9 @@ does not go through an oRPC procedure.
 Suspension is not a feature flag and not a tier. It is its own fact about a
 school, and a suspended school keeps its tier and its features.
 
-A school without an active plan (no subscription and no active trial) is
+A school without an active plan (no standing tier and no active billing period) is
 read-only in exactly the same way, through the same gate with its own reason;
-see [School trials](school-trials.md). The two are separate facts: lifting a
+see [School billing](school-billing.md). The two are separate facts: lifting a
 suspension does not give a school a plan.
 
 ## The fact
@@ -91,7 +91,7 @@ ORPCError('FORBIDDEN', {
 ```
 
 A school without a plan gets the same error with `SCHOOL_NO_PLAN` and its
-own message ([School trials](school-trials.md#a-school-without-a-plan-is-read-only)).
+own message ([School billing](school-billing.md#a-school-without-a-plan-is-read-only)).
 A permission denial is FORBIDDEN without that data, and a disabled feature
 carries `SCHOOL_FEATURE_DISABLED`. Clients tell them apart with
 `schoolWriteRefusalOf(error)`, `isSchoolSuspendedError(error)` or

@@ -11,7 +11,7 @@ import { readSchoolWriteFacts, resolveSchoolWriteRefusal, schoolNoPlanError, sch
 import { SCHOOL_NO_PLAN_MESSAGE, SCHOOL_SUSPENDED_MESSAGE } from '../school-access/school-access.contract';
 import { spendReachedLimit } from './money';
 import { readAssistantEnabledRoles } from './roles';
-import { schoolMonthSpendUsd } from './spend';
+import { schoolWindowSpendUsd } from './spend';
 
 /**
  * Why a user may not use the assistant in a school now, each its own fact:
@@ -24,7 +24,7 @@ import { schoolMonthSpendUsd } from './spend';
  *   user still sees the assistant and their conversations, and cannot start
  *   or continue a turn (docs/school-suspension.md);
  * - `no_plan`: the school has no active plan (no subscription and no active
- *   trial), so it is read-only in the same way (docs/school-trials.md). A
+ *   trial), so it is read-only in the same way (docs/school-billing.md). A
  *   suspension wins when both apply;
  * - `limit_reached`: the school's saved spend this IST month reached its
  *   monthly limit.
@@ -119,7 +119,8 @@ function refused(
  *
  * The flag is read here directly (enabled and config together) rather than
  * through the gate helper, because use needs the config anyway. The limit
- * check reads the cached month spend (`schoolMonthSpendUsd`, up to 10
+ * check reads the cached spend of the school's billing period
+ * (`schoolWindowSpendUsd`, up to 10
  * minutes old) and only when everything else allows use.
  */
 export async function resolveAssistantAccess(
@@ -184,7 +185,7 @@ export async function resolveAssistantAccess(
   if (writeRefusal === 'SCHOOL_NO_PLAN') return refused(withSuspension, 'no_plan');
 
   const limitReached =
-    monthlyLimitUsd !== null && spendReachedLimit(await schoolMonthSpendUsd(db, schoolId, input.now), monthlyLimitUsd);
+    monthlyLimitUsd !== null && spendReachedLimit(await schoolWindowSpendUsd(db, schoolId, input.now), monthlyLimitUsd);
   const decided = { ...withSuspension, limitReached };
   if (limitReached) return refused(decided, 'limit_reached');
   return { ...decided, allowed: true, refusal: null };

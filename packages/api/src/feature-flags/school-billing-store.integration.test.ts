@@ -1,14 +1,14 @@
 import { db } from '@campuspilot/db';
 import { getSchoolFeatureFlags, isSchoolFeatureEnabled, readSchoolFeatureFlags, readSchoolPlan } from '@campuspilot/db/feature-flags/store';
 import { schoolTable } from '@campuspilot/db/schema/school';
-import { schoolTrialTable } from '@campuspilot/db/schema/school-trial';
+import { schoolBillingPeriodTable } from '@campuspilot/db/schema/school-billing';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 
 import { createTestSchool, createTestSchoolTrial, setTestSchoolFeature } from '../../test/fixtures';
 
 /**
- * School trials as the feature store reads them (docs/school-trials.md): a
+ * School trials as the feature store reads them (docs/school-billing.md): a
  * school's plan is the higher of its subscribed tier and its active trial's
  * tier, and a trial is active while `starts_at <= now() < least(ends_at,
  * coalesce(ended_at, 'infinity'))`. Expiry is tested with timestamps in the
@@ -40,11 +40,11 @@ describe('the plan the feature store reads', () => {
     const plan = await readSchoolPlan(db, school.id);
     expect(plan).toEqual({
       subscribedTier: null,
-      trial: { id: trial.id, tier: 'pro', startsAt: trial.startsAt, endsAt: trial.endsAt },
+      period: { id: trial.id, kind: 'trial', tier: 'pro', startsAt: trial.startsAt, endsAt: trial.endsAt },
       plan: { tier: 'pro', source: 'trial' },
     });
     const flags = await readSchoolFeatureFlags(db, school.id);
-    expect(flags).toMatchObject({ tier: 'pro', subscribedTier: null, trial: { id: trial.id, tier: 'pro' }, invalidConfigs: [] });
+    expect(flags).toMatchObject({ tier: 'pro', subscribedTier: null, period: { id: trial.id, tier: 'pro' }, invalidConfigs: [] });
     expect(flags!.features.studentManagement).toEqual({ included: true, adjustment: null, enabled: true, active: true, config: null });
     expect(flags!.features.cadet.included).toBe(false);
     expect(await isSchoolFeatureEnabled(db, school.id, 'notices')).toBe(true);
@@ -60,28 +60,28 @@ describe('the plan the feature store reads', () => {
     // A trial below the subscription changes nothing while it runs, and is still reported.
     const enterprise = await createTestSchool({ tier: 'enterprise' });
     const lower = await createTestSchoolTrial({ schoolId: enterprise.id, tier: 'plus' });
-    expect(await readSchoolFeatureFlags(db, enterprise.id)).toMatchObject({ tier: 'enterprise', subscribedTier: 'enterprise', trial: { id: lower.id, tier: 'plus' } });
-    expect((await readSchoolPlan(db, enterprise.id))!.plan).toEqual({ tier: 'enterprise', source: 'subscription' });
+    expect(await readSchoolFeatureFlags(db, enterprise.id)).toMatchObject({ tier: 'enterprise', subscribedTier: 'enterprise', period: { id: lower.id, tier: 'plus' } });
+    expect((await readSchoolPlan(db, enterprise.id))!.plan).toEqual({ tier: 'enterprise', source: 'standing' });
     expect(await isSchoolFeatureEnabled(db, enterprise.id, 'whatsapp')).toBe(true);
   });
 
   it('ignores a trial that ran out, was ended early or has not started, and then follows the subscription or nothing', async () => {
     const pro = await createTestSchool({ tier: 'pro' });
     await createTestSchoolTrial({ schoolId: pro.id, tier: 'enterprise', startsAt: daysFromNow(-40), endsAt: daysFromNow(-10) });
-    expect(await readSchoolFeatureFlags(db, pro.id)).toMatchObject({ tier: 'pro', subscribedTier: 'pro', trial: null });
+    expect(await readSchoolFeatureFlags(db, pro.id)).toMatchObject({ tier: 'pro', subscribedTier: 'pro', period: null });
     expect(await isSchoolFeatureEnabled(db, pro.id, 'cadet')).toBe(false);
 
     const none = await createTestSchool({ tier: null });
     await createTestSchoolTrial({ schoolId: none.id, tier: 'enterprise', startsAt: daysFromNow(-40), endsAt: daysFromNow(-10) });
     // Ended early: its end is still ahead, but an administrator ended it.
     await createTestSchoolTrial({ schoolId: none.id, tier: 'pro', startsAt: daysFromNow(-5), endsAt: daysFromNow(20), endedAt: daysFromNow(-1) });
-    expect(await readSchoolPlan(db, none.id)).toEqual({ subscribedTier: null, trial: null, plan: { tier: null, source: null } });
-    expect(await readSchoolFeatureFlags(db, none.id)).toMatchObject({ tier: null, subscribedTier: null, trial: null });
+    expect(await readSchoolPlan(db, none.id)).toEqual({ subscribedTier: null, period: null, plan: { tier: null, source: null } });
+    expect(await readSchoolFeatureFlags(db, none.id)).toMatchObject({ tier: null, subscribedTier: null, period: null });
     expect(await isSchoolFeatureEnabled(db, none.id, 'studentManagement')).toBe(false);
 
     const later = await createTestSchool({ tier: null });
     await createTestSchoolTrial({ schoolId: later.id, tier: 'pro', startsAt: daysFromNow(2), endsAt: daysFromNow(30) });
-    expect((await readSchoolPlan(db, later.id))!.trial).toBeNull();
+    expect((await readSchoolPlan(db, later.id))!.period).toBeNull();
   });
 
   it('turns a trial off at its end: the same row is active before and not after', async () => {
@@ -89,7 +89,7 @@ describe('the plan the feature store reads', () => {
     const trial = await createTestSchoolTrial({ schoolId: school.id, tier: 'enterprise' });
     expect(await isSchoolFeatureEnabled(db, school.id, 'cadet')).toBe(true);
     // Its end moves into the past, as time passing would do.
-    await db.update(schoolTrialTable).set({ endsAt: new Date(Date.now() - 1000) }).where(eq(schoolTrialTable.id, trial.id));
+    await db.update(schoolBillingPeriodTable).set({ endsAt: new Date(Date.now() - 1000) }).where(eq(schoolBillingPeriodTable.id, trial.id));
     expect(await isSchoolFeatureEnabled(db, school.id, 'cadet')).toBe(false);
     expect((await readSchoolPlan(db, school.id))!.plan.tier).toBeNull();
   });
@@ -111,7 +111,7 @@ describe('the plan the feature store reads', () => {
   });
 });
 
-describe('the school_trial table', () => {
+describe('the school_billing_period table', () => {
   it('refuses two trials of one school that overlap in time, and allows one after another', async () => {
     const school = await createTestSchool({ tier: null });
     const first = await createTestSchoolTrial({ schoolId: school.id, tier: 'pro', startsAt: daysFromNow(-20), endsAt: daysFromNow(10) });
@@ -122,7 +122,7 @@ describe('the school_trial table', () => {
     await createTestSchoolTrial({ schoolId: other.id, tier: 'enterprise', startsAt: daysFromNow(-1), endsAt: daysFromNow(30) });
 
     // Once the first is ended, its time ends at `ended_at`, and a new trial may start after it.
-    await db.update(schoolTrialTable).set({ endedAt: daysFromNow(-2) }).where(eq(schoolTrialTable.id, first.id));
+    await db.update(schoolBillingPeriodTable).set({ endedAt: daysFromNow(-2) }).where(eq(schoolBillingPeriodTable.id, first.id));
     await createTestSchoolTrial({ schoolId: school.id, tier: 'enterprise', startsAt: daysFromNow(-1), endsAt: daysFromNow(30) });
     expect((await readSchoolPlan(db, school.id))!.plan).toEqual({ tier: 'enterprise', source: 'trial' });
     // A trial that ran out does not block a later one either, ending exactly where the next starts.
@@ -139,21 +139,21 @@ describe('the school_trial table', () => {
     expect(await databaseErrorCode(createTestSchoolTrial({ schoolId: school.id, tier: 'pro', startsAt: start, endsAt: daysFromNow(5), endedAt: daysFromNow(-2) }))).toBe('23514');
     expect(
       await databaseErrorCode(
-        db.execute(sql`insert into school_trial (id, school_id, tier, ends_at) values ('trial_gold', ${school.id}, 'gold', now() + interval '5 days')`),
+        db.execute(sql`insert into school_billing_period (id, school_id, kind, tier, ends_at) values ('trial_gold', ${school.id}, 'trial', 'gold', now() + interval '5 days')`),
       ),
     ).toBe('23514');
-    expect(await db.select().from(schoolTrialTable).where(eq(schoolTrialTable.schoolId, school.id))).toEqual([]);
+    expect(await db.select().from(schoolBillingPeriodTable).where(eq(schoolBillingPeriodTable.schoolId, school.id))).toEqual([]);
   });
 
   it('starts a trial now by default and goes with its school', async () => {
     const school = await createTestSchool({ tier: null });
     const before = Date.now();
-    const [trial] = await db.insert(schoolTrialTable).values({ schoolId: school.id, tier: 'plus', endsAt: daysFromNow(30) }).returning();
-    expect(trial!.id).toMatch(/^trial_[a-z0-9]{21}$/);
+    const [trial] = await db.insert(schoolBillingPeriodTable).values({ schoolId: school.id, kind: 'trial', tier: 'plus', endsAt: daysFromNow(30) }).returning();
+    expect(trial!.id).toMatch(/^bper_[a-z0-9]{21}$/);
     expect(Math.abs(trial!.startsAt.getTime() - before)).toBeLessThan(60_000);
     expect(trial).toMatchObject({ endedAt: null, createdBy: null, endedBy: null });
 
     await db.delete(schoolTable).where(eq(schoolTable.id, school.id));
-    expect(await db.select().from(schoolTrialTable).where(eq(schoolTrialTable.schoolId, school.id))).toEqual([]);
+    expect(await db.select().from(schoolBillingPeriodTable).where(eq(schoolBillingPeriodTable.schoolId, school.id))).toEqual([]);
   });
 });

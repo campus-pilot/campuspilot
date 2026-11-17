@@ -40,6 +40,7 @@ import {
   PurgeDemoSchoolCard,
 } from './demo-school/purge-demo-school-card';
 import { SchoolAvatar } from './school-avatar';
+import { SchoolOwnerCard } from './school-owner-card';
 import { SchoolSuspensionCard } from './school-suspension-card';
 
 const schoolDetailsFormSchema = z.object({
@@ -654,6 +655,7 @@ function SchoolSettingsContent({ school }: { school: SchoolDto }) {
         </p>
       </div>
       <SchoolProfileCard school={school} />
+      {school.isDemo ? null : <SchoolOwnerCard school={school} />}
       <SchoolSuspensionCard school={school} />
       {/* <DeleteSchoolCard school={school} /> — see the note above deleteSchoolFormSchema. */}
       {school.isDemo ? <DemoSchoolCredentialsCard schoolId={school.id} /> : null}
