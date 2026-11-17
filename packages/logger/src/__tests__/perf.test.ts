@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import type { Logger } from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { logger as rootLogger } from "../index.node";
+import { logger as rootLogger } from "../node";
 import { pinoLogger } from "../hono";
 import {
   annotateTiming,
