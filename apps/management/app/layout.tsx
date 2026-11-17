@@ -47,7 +47,7 @@ export default function RootLayout({
       suppressHydrationWarning
       className={`${inter.variable} font-sans`}
     >
-      <body className="min-h-screen bg-background antialiased">
+      <body className="min-h-svh bg-background antialiased">
         <QueryProvider>
           <ThemeProvider
             attribute="class"
