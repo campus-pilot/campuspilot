@@ -7,6 +7,7 @@ import {
   openClassOf,
   paperClassSummary,
   paperClassSummaryLabel,
+  paperClassTriggerLabel,
   paperModeOptions,
   visibleModeSelection,
   editBlockedReason,
@@ -223,6 +224,15 @@ describe('class accordion', () => {
     expect(paperClassSummaryLabel(paperClassSummary(classes[0]!))).toBe('1 of 3 ready · 1 generating');
     expect(paperClassSummaryLabel(paperClassSummary(classes[1]!))).toBe('0 of 2 ready · 1 failed');
     expect(paperClassSummaryLabel(paperClassSummary(classes[2]!))).toBe('0 of 0 ready');
+  });
+
+  it('names why a class with no rows is empty instead of "0 of 0 ready"', () => {
+    const [emptied, , noSubjects] = applyModeFilter(classes, ['viva']);
+    expect(paperClassSummary(emptied!).total).toBe(0);
+    expect(paperClassTriggerLabel(emptied!)).toBe('No matching papers');
+    expect(paperClassTriggerLabel(noSubjects!)).toBe('No subjects');
+    const [shown] = applyModeFilter(classes, []);
+    expect(paperClassTriggerLabel(shown!)).toBe('1 of 3 ready · 1 generating');
   });
 
   it('counts the filtered rows, not the whole class', () => {

@@ -43,7 +43,7 @@ export function QuestionPaperPage({ scope }: { scope: ExamScope }) {
 
 function PaperList({ scope }: { scope: ExamScope }) {
   const storedModes = useStoredModeFilter(scope.schoolId);
-  const externalRevision = useModeFilterExternalRevision();
+  const externalRevision = useModeFilterExternalRevision(scope.schoolId);
   const query = useQuery(
     orpc.school.listQuestionPapers.queryOptions({
       input: scope,

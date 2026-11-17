@@ -49,11 +49,33 @@ export const modeFilterStorageKey = (schoolId: string) => `${MODE_FILTER_KEY_PRE
 
 
 /**
- * Whether a `storage` event from another tab may have changed a stored mode
- * filter: a change of any school's entry, or `localStorage.clear()` (the
- * event then has no key, and every entry is gone).
+ * How many times another tab changed each school's stored mode filter.
+ * `cleared` counts `localStorage.clear()` in another tab, which removes every
+ * school's entry at once; `bySchool` counts changes of one school's entry.
  */
-export const isModeFilterStorageChange = (key: string | null) => key === null || key.startsWith(MODE_FILTER_KEY_PREFIX);
+export type ModeFilterRevisions = { cleared: number; bySchool: ReadonlyMap<string, number> };
+
+export const initialModeFilterRevisions: ModeFilterRevisions = { cleared: 0, bySchool: new Map() };
+
+/**
+ * The revisions after a `storage` event from another tab with `key`. A
+ * school's entry bumps that school only, so a change to another school's
+ * filter never reseeds (and closes) this school's open filter. A null key is
+ * `localStorage.clear()` and bumps every school. Any other key returns the
+ * same object, so readers see no change.
+ */
+export function nextModeFilterRevisions(revisions: ModeFilterRevisions, key: string | null): ModeFilterRevisions {
+  if (key === null) return { ...revisions, cleared: revisions.cleared + 1 };
+  if (!key.startsWith(MODE_FILTER_KEY_PREFIX)) return revisions;
+  const schoolId = key.slice(MODE_FILTER_KEY_PREFIX.length);
+  const bySchool = new Map(revisions.bySchool);
+  bySchool.set(schoolId, (bySchool.get(schoolId) ?? 0) + 1);
+  return { ...revisions, bySchool };
+}
+
+/** One school's revision: it grows exactly when that school's entry changed in another tab, or storage was cleared. */
+export const modeFilterRevisionOf = (revisions: ModeFilterRevisions, schoolId: string) =>
+  revisions.cleared + (revisions.bySchool.get(schoolId) ?? 0);
 
 /**
  * The slugs a stored entry holds. A missing, unreadable or malformed entry

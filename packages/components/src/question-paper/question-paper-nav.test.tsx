@@ -159,6 +159,34 @@ describe('QuestionPaperClassAccordion', () => {
     expect(screen.getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(['/p/c1/english/written', '/p/c1/english/oral']);
   });
 
+  it('says why an empty class is empty instead of counting nothing', () => {
+    renderAccordion(null);
+    expect(screen.getByRole('button', { name: /Class 2/ }).textContent).toContain('No matching papers');
+    expect(screen.getByRole('button', { name: /Class 3/ }).textContent).toContain('No subjects');
+    expect(screen.getByRole('button', { name: /Class 2/ }).textContent).not.toContain('0 of 0');
+  });
+
+  it('names the open class once: one region, holding a labelled table', () => {
+    renderAccordion('c1');
+    expect(screen.getAllByRole('region')).toHaveLength(1);
+    expect(screen.getByRole('table', { name: 'Class 1 question papers' })).toBeTruthy();
+  });
+
+  it('lets the open panel size itself, so rows the filter adds while it is open are not clipped', () => {
+    const { container, rerender } = renderAccordion('c1');
+    const grown = classes.map((classView) =>
+      classView.classId === 'c1'
+        ? { ...classView, subjects: [...classView.subjects, { subjectSlug: 'maths', subjectName: 'Maths', modes: [paperRow('written'), paperRow('oral')] }] }
+        : classView,
+    );
+    rerender(<QuestionPaperClassAccordion classes={grown} openClassId="c1" onOpenClassChange={() => undefined} hrefOf={hrefOf} onOpen={() => undefined} />);
+    expect(screen.getAllByRole('link')).toHaveLength(4);
+    const panel = container.querySelector('[data-slot="accordion-content"] > div');
+    expect(panel).not.toBeNull();
+    // Radix measures the height only when the item opens; a wrapper pinned to that measure would clip the new rows.
+    expect(panel!.className).not.toContain('--radix-accordion-content-height');
+  });
+
   it('opens nothing, without an error, for an unknown class', () => {
     renderAccordion('someone-else');
     expect(screen.getAllByRole('button', { expanded: false })).toHaveLength(3);

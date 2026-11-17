@@ -1,7 +1,13 @@
 'use client';
 
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
-import { isModeFilterStorageChange, modeFilterStorageKey, parseStoredModeFilter } from './question-paper-list-model';
+import {
+  initialModeFilterRevisions,
+  modeFilterRevisionOf,
+  modeFilterStorageKey,
+  nextModeFilterRevisions,
+  parseStoredModeFilter,
+} from './question-paper-list-model';
 
 /**
  * The Question paper tab's mode filter, kept in local storage per school
@@ -12,19 +18,22 @@ import { isModeFilterStorageChange, modeFilterStorageKey, parseStoredModeFilter 
  *
  * Two kinds of change reach readers. A write from this tab (`storeModeFilter`)
  * only notifies them. A change from another tab arrives as a `storage` event
- * (which the writing tab never receives) and also bumps `externalRevision`,
- * which the page uses as part of its filter form's key: the form then
- * remounts seeded from the new entry. Without that, a form this tab already
- * changed would keep its own values and overwrite the other tab's choice on
- * its next change. A `storage` event with no key is `localStorage.clear()`
- * in another tab, which removes the entry too, so it counts as a change.
+ * (which the writing tab never receives) and also bumps that school's
+ * external revision (`nextModeFilterRevisions`), which the page uses as part
+ * of its filter form's key: the form then remounts seeded from the new entry.
+ * Without that, a form this tab already changed would keep its own values and
+ * overwrite the other tab's choice on its next change. Revisions are per
+ * school, so another school's change leaves this school's form (and its open
+ * popover) alone. A `storage` event with no key is `localStorage.clear()` in
+ * another tab, which removes every entry, so it bumps every school.
  */
 const listeners = new Set<() => void>();
-let externalRevision = 0;
+let externalRevisions = initialModeFilterRevisions;
 
 function onStorage(event: StorageEvent) {
-  if (!isModeFilterStorageChange(event.key)) return;
-  externalRevision += 1;
+  const next = nextModeFilterRevisions(externalRevisions, event.key);
+  if (next === externalRevisions) return;
+  externalRevisions = next;
   listeners.forEach((listener) => listener());
 }
 
@@ -70,14 +79,12 @@ export function useStoredModeFilter(schoolId: string): string[] | undefined {
 }
 
 /**
- * How many times another tab changed (or cleared) a stored mode filter since
- * this page loaded; 0 on the server and at hydration. Part of the filter
- * form's key, so the form reseeds from the store only on such a change.
+ * How many times another tab changed (or cleared) this school's stored mode
+ * filter since this page loaded; 0 on the server and at hydration. Part of
+ * the filter form's key, so the form reseeds from the store only on such a
+ * change, never on a change to another school's entry.
  */
-export function useModeFilterExternalRevision(): number {
-  return useSyncExternalStore(
-    subscribe,
-    () => externalRevision,
-    () => 0,
-  );
+export function useModeFilterExternalRevision(schoolId: string): number {
+  const getSnapshot = useCallback(() => modeFilterRevisionOf(externalRevisions, schoolId), [schoolId]);
+  return useSyncExternalStore(subscribe, getSnapshot, () => 0);
 }

@@ -441,6 +441,12 @@ accordion, and three ways lead straight to one class.
   The trigger shows the class name and a summary of the rows it shows, "3 of 8 ready"
   plus the generating and failed counts when there are any (`paperClassSummary`,
   `paperClassSummaryLabel`, counted with `cellStatus`, so it never disagrees with the table).
+  A class that shows no rows says why instead of "0 of 0 ready": "No subjects" or "No
+  matching papers" (`paperClassTriggerLabel`, from `emptyReason`). The open panel sizes
+  itself to its rows: the shared `AccordionContent` does not pin its wrapper to the height
+  Radix measured on opening, because the filter and polling change the open class's rows in
+  place. The open panel is the one region for the class (labelled by its trigger); the table
+  inside it is named, not another region.
 - **The mode filter.** A multi-select `TableFilterBar` of every distinct mode of the
   loaded classes (`paperModeOptions`: keyed by `modeSlug`, labelled with `modeName`, sorted
   by name then slug). It is purely client-side; the query input does not change. An empty
@@ -457,8 +463,10 @@ accordion, and three ways lead straight to one class.
   the stored slugs and a store callback). Stored slugs the examination does not
   have are not shown and not deleted (`visibleModeSelection`, `mergeModeSelection`), so they
   still apply on another examination that has them. A malformed entry is no filter. The
-  form is keyed by the school and by how many times another tab changed (or cleared) a
-  stored filter (`useModeFilterExternalRevision`): this tab's own writes keep the form
+  form is keyed by the school and by how many times another tab changed this school's stored
+  filter or cleared storage (`useModeFilterExternalRevision(schoolId)`, counted per school by
+  `nextModeFilterRevisions`, so another school's change never closes this school's open
+  filter): this tab's own writes keep the form
   mounted, so an open filter stays open, while a change from another tab reseeds it instead
   of being overwritten by this tab's next change. The filter is left out when the
   examination has no modes at all.

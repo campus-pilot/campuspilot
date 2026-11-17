@@ -97,7 +97,9 @@ function ModeRow({
  * The subjects and assessment modes of one class with the state of each paper.
  * The first column stays in view while the table scrolls sideways on a phone.
  * The class's name is not repeated here: the accordion trigger above it
- * (`QuestionPaperClassAccordion`) names the class.
+ * (`QuestionPaperClassAccordion`) names the class. The wrapper is not a
+ * landmark of its own: the accordion's content is already a region labelled
+ * by that trigger, so only the table itself carries a name.
  */
 export function QuestionPaperClassTable({
   classView,
@@ -115,8 +117,8 @@ export function QuestionPaperClassTable({
 }) {
   const rows = classView.subjects.flatMap((subject) => subject.modes.map((mode) => ({ subject, mode })));
   return (
-    <div className="min-w-0 rounded-lg border" aria-label={`${classView.className} question papers`} role="region">
-      <Table>
+    <div className="min-w-0 rounded-lg border">
+      <Table aria-label={`${classView.className} question papers`}>
         <TableHeader>
           <TableRow>
             <TableHead className="sticky left-0 z-10 bg-background">Subject</TableHead>

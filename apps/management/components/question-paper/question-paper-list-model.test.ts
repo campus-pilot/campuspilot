@@ -2,8 +2,10 @@ import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { isQuestionPaperSectionPath, questionPaperClassHref, questionPaperReturnHref } from '@/components/exam/exam-model';
 import {
-  isModeFilterStorageChange,
+  initialModeFilterRevisions,
+  modeFilterRevisionOf,
   modeFilterStorageKey,
+  nextModeFilterRevisions,
   parseStoredModeFilter,
   pickerEmptyMessage,
   rankByQuery,
@@ -49,11 +51,25 @@ test('opening and collapsing a class rewrites only the class parameter', () => {
   assert.equal(withClassParam('foo=1', 'a b'), '?foo=1&class=a+b');
 });
 
-test("another tab's change to any school's mode filter, or clearing storage, reseeds the filter", () => {
-  assert.equal(isModeFilterStorageChange('question-paper-mode-filter:sch_1'), true);
-  assert.equal(isModeFilterStorageChange('question-paper-mode-filter:sch_2'), true);
-  assert.equal(isModeFilterStorageChange(null), true);
-  assert.equal(isModeFilterStorageChange('campuspilot:selected-session:sch_1'), false);
+test("another tab's change reseeds only that school's filter; clearing storage reseeds every school", () => {
+  const start = initialModeFilterRevisions;
+  const otherSchool = nextModeFilterRevisions(start, 'question-paper-mode-filter:sch_2');
+  assert.equal(modeFilterRevisionOf(otherSchool, 'sch_1'), 0);
+  assert.equal(modeFilterRevisionOf(otherSchool, 'sch_2'), 1);
+
+  const sameSchool = nextModeFilterRevisions(otherSchool, modeFilterStorageKey('sch_1'));
+  assert.equal(modeFilterRevisionOf(sameSchool, 'sch_1'), 1);
+  assert.equal(modeFilterRevisionOf(sameSchool, 'sch_2'), 1);
+
+  const cleared = nextModeFilterRevisions(sameSchool, null);
+  assert.equal(modeFilterRevisionOf(cleared, 'sch_1'), 2);
+  assert.equal(modeFilterRevisionOf(cleared, 'sch_2'), 2);
+  assert.equal(modeFilterRevisionOf(cleared, 'sch_3'), 1);
+
+  // An unrelated key returns the same revisions, so readers are not told of a change.
+  assert.equal(nextModeFilterRevisions(cleared, 'campuspilot:selected-session:sch_1'), cleared);
+  assert.equal(start.cleared, 0);
+  assert.equal(start.bySchool.size, 0);
 });
 
 test('toggling a class replaces the address without scrolling, and collapsing drops the parameter', () => {

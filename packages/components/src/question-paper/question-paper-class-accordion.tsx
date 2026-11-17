@@ -4,7 +4,7 @@ import {
   type QuestionPaperCellRef,
   type QuestionPaperClassView,
 } from './question-paper-class-table';
-import { paperClassSummary, paperClassSummaryLabel, type PaperClassEmptyReason } from './question-paper-model';
+import { paperClassTriggerLabel, type PaperClassEmptyReason } from './question-paper-model';
 
 /** A class as the accordion shows it: its (filtered) rows and why it has none, if it has none. */
 export type QuestionPaperAccordionClass = QuestionPaperClassView & { emptyReason: PaperClassEmptyReason };
@@ -64,12 +64,12 @@ export function QuestionPaperClassAccordion({ classes, openClassId, onOpenClassC
   );
 }
 
-/** The class's name with what its shown rows hold ("3 of 8 ready · 1 generating"). */
+/** The class's name with what its shown rows hold ("3 of 8 ready · 1 generating"), or why it has none. */
 function ClassTriggerLabel({ classView }: { classView: QuestionPaperAccordionClass }) {
   return (
     <span className="flex min-w-0 flex-col items-start gap-0.5 sm:flex-row sm:items-baseline sm:gap-2">
       <span className="text-sm font-semibold">{classView.className}</span>
-      <span className="text-xs font-normal text-muted-foreground">{paperClassSummaryLabel(paperClassSummary(classView))}</span>
+      <span className="text-xs font-normal text-muted-foreground">{paperClassTriggerLabel(classView)}</span>
     </span>
   );
 }

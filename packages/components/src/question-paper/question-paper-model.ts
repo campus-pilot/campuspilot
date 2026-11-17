@@ -361,6 +361,23 @@ export function paperClassSummaryLabel(summary: PaperClassSummary): string {
   return parts.join(' · ');
 }
 
+/** What a class's trigger says instead of counts when it shows no rows, by why (`applyModeFilter`). */
+const EMPTY_CLASS_LABEL: Record<Exclude<PaperClassEmptyReason, null>, string> = {
+  'no-subjects': 'No subjects',
+  'no-matching-modes': 'No matching papers',
+};
+
+/**
+ * What a class's accordion trigger says: why it is empty when it shows no
+ * rows (so a class without subjects and a class the mode filter emptied read
+ * differently, instead of both saying "0 of 0 ready"), otherwise the counts
+ * of the rows it shows (`paperClassSummaryLabel`).
+ */
+export function paperClassTriggerLabel(classView: PaperListClass & { emptyReason: PaperClassEmptyReason }): string {
+  if (classView.emptyReason) return EMPTY_CLASS_LABEL[classView.emptyReason];
+  return paperClassSummaryLabel(paperClassSummary(classView));
+}
+
 /**
  * The class the `class` query parameter opens: the id when it names a class
  * of the list, otherwise null (no parameter, a class the person may not open,
