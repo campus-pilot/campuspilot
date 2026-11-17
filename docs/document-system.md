@@ -321,6 +321,12 @@ fields to a common base merely because two types happen to use the same value to
   within a class. Each card combines identity with that student's class schedule.
 - Timetables are examination-wide. Their source contains only school/session,
   document type, and examination slug. It never accepts `classId`.
+  "Examination-wide" means every class **taking part** in the examination
+  (`exam_class`); a class excluded from it (CAM-14) is in no timetable column.
+- Examination documents (report cards, admit cards, timetables) cover only the
+  classes taking part. A `classId` of a class that does not take part is refused
+  ("This class does not take part in this examination."); exam-wide report and
+  admit cards follow the subject plans, which exist only for classes taking part.
 - Bills identify immutable posted bill facts. Receipts identify an explicit payment
   or refund and use the identity/session snapshot captured when the payment posted.
 - Statements accept a session, admissions, and a real local through-date. The
@@ -341,7 +347,10 @@ The timetable rule is enforced in all three layers:
 - the UI does not render a classroom selector and does not serialize `classId`;
 - the strict DTO rejects stale or handcrafted class-scoped input;
 - context construction uses every timetable grid column and preserves every
-  subject/mode in a shared slot.
+  subject/mode in a shared slot;
+- every column is a class taking part: `saveExamTimetable` and class removal
+  (`updateExamClasses`) keep it so, and context construction refuses a column of
+  a class that does not take part instead of printing or silently dropping it.
 
 Keep those checks independent. UI omission alone is not an API invariant.
 

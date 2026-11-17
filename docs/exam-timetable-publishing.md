@@ -19,7 +19,15 @@ its own fact, never derived from the exam's lifecycle `status`.
 | Withdraw | `withdrawExamTimetable` | Back to a draft; hides it from students; notifies nobody. Exam not ended. |
 | Preview | `previewExamTimetablePublish` | Counts staff and the students' per-channel forecast. |
 
-A published timetable is frozen: withdraw it first to change it. Once the exam
+A published timetable is frozen: withdraw it first to change it.
+
+Columns are limited to the **classes taking part** in the examination
+(`exam_class`, see the exam backend README): `saveExamTimetable` refuses any
+other class, and the management editor only offers those classes
+(`getExamContext`). Excluding a class later (`updateExamClasses`) is refused
+while the published timetable includes it or a draft schedules papers for it;
+an empty draft column is dropped with the class. So "examination-wide" means
+every class taking part, never an excluded class. Once the exam
 is completed (`requireExamNotEnded`) nothing can be drafted, published or
 withdrawn; a timetable published before then stays published. Permission:
 `school.exam.timetable.publish` (principal, manager, exam coordinator); editing
@@ -34,7 +42,10 @@ published.
 - `exam.timetable_published_staff` (in-app): every school member.
 - `exam.timetable_published` (in-app, web push, WhatsApp text): one event per
   registered student enrolled in the timetable's session, whatever their class
-  (every student may read every class). **Only while the school has the `cadet`
+  (every student may read every class). This includes students of a class
+  that does not take part in the examination: the audience and the Cadet
+  visibility rule below are unchanged by class exclusion; only the excluded
+  class's column is absent. **Only while the school has the `cadet`
   feature**; with it off only the staff event is emitted, and switching it on
   later notifies nobody retroactively.
 
@@ -48,7 +59,9 @@ failure topic.
 
 `cadet-timetables.router.ts`: `listTimetables`, `getTimetable`,
 `getTimetableDownload`. A student sees a timetable only when it is published and
-they are enrolled in its session, then sees **every** class. Visibility is
+they are enrolled in its session, then sees **every** class taking part (the
+columns are also filtered by `exam_class` on read, so an excluded class never
+shows). Visibility is
 evaluated on each read, so a withdrawn timetable answers NOT_FOUND even from an
 old notification link. The PDF uses the school's selected Timetable template
 and is cached in S3 under `schools/{id}/exam-timetables/{timetable}-{publication}-{template}.pdf`.
