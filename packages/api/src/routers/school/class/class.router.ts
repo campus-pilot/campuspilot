@@ -5,6 +5,8 @@ import { schoolUserRoleTable } from "@campuspilot/db/schema/school-user-role";
 import { schoolSessionTable } from "@campuspilot/db/schema/session";
 import { SCHOOL_ACTIONS } from "@campuspilot/opa/policies/school";
 import { and, asc, eq, max, sql, count } from "drizzle-orm";
+import type { DatabaseExecutor } from "@campuspilot/db";
+import type { z } from "zod";
 
 import { rpcError, toRpcError } from "../../../errors";
 import { isSchoolFeatureEnabled } from "../../../feature-flags/feature-flags.service";
@@ -25,6 +27,51 @@ import {
   updateClassConfigurationInputSchema,
   updateClassInputSchema,
 } from "./class.dto";
+
+/**
+ * Creates a class with its initial sections in the caller's transaction, as
+ * `school.createClass` does after its permission check (the school's guided
+ * setup calls it too, after the same check). The school is locked so classes
+ * created at the same time take consecutive display orders.
+ */
+export async function createClassRecord(
+  transaction: DatabaseExecutor,
+  input: z.infer<typeof createClassInputSchema>,
+) {
+  const [school] = await transaction
+    .select({ id: schoolTable.id })
+    .from(schoolTable)
+    .where(eq(schoolTable.id, input.schoolId))
+    .for("update")
+    .limit(1);
+  if (!school) throw rpcError.notFound("School");
+
+  const { sections, schoolId, ...values } = input;
+  const [lastClass] = await transaction
+    .select({ displayOrder: max(classTable.displayOrder) })
+    .from(classTable)
+    .where(eq(classTable.schoolId, schoolId));
+  const [schoolClass] = await transaction
+    .insert(classTable)
+    .values({
+      schoolId,
+      ...values,
+      displayOrder: (lastClass?.displayOrder ?? 0) + 1,
+    })
+    .returning();
+  if (!schoolClass) throw rpcError.internal();
+
+  await transaction.insert(sectionTable).values(
+    sections.map((section, sectionIndex) => ({
+      ...section,
+      schoolId,
+      classId: schoolClass.id,
+      displayOrder: sectionIndex + 1,
+    })),
+  );
+
+  return toClassDto(schoolClass);
+}
 
 /** A session is an independent input, never inferred from the active session.
  * Scoped counts require the session read grant in addition to class listing.
@@ -214,41 +261,9 @@ export const schoolClassRouter = {
     .output(classDtoSchema)
     .handler(async ({ context, input }) => {
       try {
-        return await context.db.transaction(async (transaction) => {
-          const [school] = await transaction
-            .select({ id: schoolTable.id })
-            .from(schoolTable)
-            .where(eq(schoolTable.id, input.schoolId))
-            .for("update")
-            .limit(1);
-          if (!school) throw rpcError.notFound("School");
-
-          const { sections, schoolId, ...values } = input;
-          const [lastClass] = await transaction
-            .select({ displayOrder: max(classTable.displayOrder) })
-            .from(classTable)
-            .where(eq(classTable.schoolId, schoolId));
-          const [schoolClass] = await transaction
-            .insert(classTable)
-            .values({
-              schoolId,
-              ...values,
-              displayOrder: (lastClass?.displayOrder ?? 0) + 1,
-            })
-            .returning();
-          if (!schoolClass) throw rpcError.internal();
-
-          await transaction.insert(sectionTable).values(
-            sections.map((section, sectionIndex) => ({
-              ...section,
-              schoolId,
-              classId: schoolClass.id,
-              displayOrder: sectionIndex + 1,
-            })),
-          );
-
-          return toClassDto(schoolClass);
-        });
+        return await context.db.transaction((transaction) =>
+          createClassRecord(transaction, input),
+        );
       } catch (error) {
         throw toRpcError(error);
       }

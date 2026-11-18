@@ -62,7 +62,7 @@ These were done in `fix/first-session-setup` (PR #79, merged), which offers Crea
 | Session switcher (no sessions) | `apps/management/components/session-switcher.tsx:96,115` | handled in fix/first-session-setup |
 | Sessions table | `apps/management/components/session/sessions-table.tsx:286` | handled in fix/first-session-setup |
 | Statement "No academic session is available" | `apps/management/components/billing/finance-document-action.tsx:175` | handled in fix/first-session-setup |
-| New school welcome | `apps/management/components/school-creation/new-school-welcome.tsx` | handled in fix/first-session-setup |
+| New school | `apps/management/components/school-onboarding` | the guided setup creates the session, classes, subjects and plans (docs/school-creation.md) |
 
 ## No action
 

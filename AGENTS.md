@@ -225,8 +225,9 @@ or store the plan.
 
 Before changing who may create a school, the `school_creation` ledger or
 `user.school_creation_limit`, requests for more schools, the school owner
-(`school.owner_user_id`) and its member guards, or what a self-created school
-starts with, read [Self-service school creation](docs/school-creation.md). The
+(`school.owner_user_id`) and its member guards, what a self-created school
+starts with, or its guided setup (`school_onboarding`, `school.completeOnboarding`,
+the Get started screens), read [Self-service school creation](docs/school-creation.md). The
 allowance counts every school a person ever created (deleted or handed over
 ones included), and the owner can never be removed or lose the principal role
 through school procedures.

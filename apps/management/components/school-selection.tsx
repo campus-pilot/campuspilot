@@ -2,10 +2,13 @@
 
 import { useCallback, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { Button } from '@campuspilot/ui/components/button';
 import { AuthLoading } from '@/components/auth-loading';
 import { orpc } from '@/lib/orpc';
 import { schoolHref, schoolSessionHref } from './school-route';
+import { onboardingHref } from './school-onboarding/onboarding-route';
 import { CreateSessionButton } from './session/create-session-button';
 import { storeSchoolSessionId } from './session-selection';
 
@@ -139,6 +142,11 @@ export function SchoolEntryRedirect({ schoolId }: { schoolId: string }) {
  * active becomes active, and the refreshed session query then opens it.
  */
 function NoActiveSession({ schoolId }: { schoolId: string }) {
+  const onboarding = useQuery(orpc.school.getOnboarding.queryOptions({ input: { schoolId } }));
+  if (onboarding.isPending) return <AuthLoading label="Opening your school…" />;
+  const onboardingState = onboarding.data?.state;
+  // A guide not yet finished or set aside opens on its own; one set aside is offered beside Create a session.
+  if (onboardingState === 'pending') return <RouteAfterCommit href={onboardingHref(schoolId)} schoolId={schoolId} />;
   return (
     <main className="grid min-h-[50vh] place-items-center px-6">
       <section className="flex max-w-md flex-col items-center gap-4 text-center">
@@ -149,7 +157,14 @@ function NoActiveSession({ schoolId }: { schoolId: string }) {
             school.
           </p>
         </div>
-        <CreateSessionButton schoolId={schoolId} />
+        <div className="flex flex-wrap justify-center gap-2">
+          {onboardingState === 'skipped' ? (
+            <Button asChild variant="outline">
+              <Link href={onboardingHref(schoolId)}>Use the guided setup</Link>
+            </Button>
+          ) : null}
+          <CreateSessionButton schoolId={schoolId} />
+        </div>
       </section>
     </main>
   );

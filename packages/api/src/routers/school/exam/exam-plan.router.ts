@@ -25,6 +25,8 @@ import { rpcError, toRpcError } from '../../../errors';
 import * as dto from './exam.dto';
 import { deleteQuestionPapersOfPlan } from '../question-paper/question-paper.service';
 import { deleteObjectsBestEffort } from '../question-paper/question-paper.storage';
+import type { DatabaseTransaction } from '@campuspilot/db';
+import type { z } from 'zod';
 
 import {
   prepareExamPlan,
@@ -36,6 +38,53 @@ import {
   recordGeneratedExamClasses,
   updateExamClasses,
 } from './exam-class.service';
+
+/**
+ * Generates an examination's initial plan in the caller's transaction, as
+ * `school.generateExamPlan` does after its permission check (the school's
+ * guided setup calls it too, after the same check): it records the chosen
+ * classes as taking part, creates a plan for each of their subjects and opens
+ * the examination's lifecycle as `ready`. A stale `configurationVersion` or
+ * existing plans are refused.
+ */
+export async function generateExamPlanRecords(
+  tx: DatabaseTransaction,
+  input: z.infer<typeof dto.generateExamPlanInputSchema>,
+) {
+  const prepared = await prepareExamPlan(tx, input, true);
+  const plans = assertCreatableExamPlan(
+    prepared,
+    input.configurationVersion,
+    input.classIds,
+  );
+  // Participation is recorded first: every plan references its class's row.
+  await recordGeneratedExamClasses(
+    tx,
+    input,
+    resolveExamPlanClassIds(prepared, input.classIds),
+    new Map(
+      prepared.preview.classes.map((entry) => [entry.classId, entry.label]),
+    ),
+  );
+  // Chunk within the same transaction to stay below PostgreSQL's bind
+  // parameter limit even for a large school. Any failure rolls back all rows.
+  for (let offset = 0; offset < plans.length; offset += 100) {
+    await tx.insert(examPlanTable).values(plans.slice(offset, offset + 100));
+  }
+  await tx
+    .insert(examLifecycleTable)
+    .values({
+      schoolId: input.schoolId,
+      sessionId: input.sessionId,
+      examSlug: input.examSlug,
+      status: 'ready',
+    })
+    .onConflictDoUpdate({
+      target: [examLifecycleTable.sessionId, examLifecycleTable.examSlug],
+      set: { status: 'ready', startedAt: null, completedAt: null },
+    });
+  return { createdCount: plans.length };
+}
 
 export const schoolExamPlanRouter = {
   getExamPlanPreview: protectedProcedure
@@ -83,49 +132,9 @@ export const schoolExamPlanRouter = {
     .output(dto.generateExamPlanOutputSchema)
     .handler(async ({ context, input }) => {
       try {
-        return await context.db.transaction(async (tx) => {
-          const prepared = await prepareExamPlan(tx, input, true);
-          const plans = assertCreatableExamPlan(
-            prepared,
-            input.configurationVersion,
-            input.classIds,
-          );
-          // Participation is recorded first: every plan references its class's row.
-          await recordGeneratedExamClasses(
-            tx,
-            input,
-            resolveExamPlanClassIds(prepared, input.classIds),
-            new Map(
-              prepared.preview.classes.map((entry) => [
-                entry.classId,
-                entry.label,
-              ]),
-            ),
-          );
-          // Chunk within the same transaction to stay below PostgreSQL's bind
-          // parameter limit even for a large school. Any failure rolls back all rows.
-          for (let offset = 0; offset < plans.length; offset += 100) {
-            await tx
-              .insert(examPlanTable)
-              .values(plans.slice(offset, offset + 100));
-          }
-          await tx
-            .insert(examLifecycleTable)
-            .values({
-              schoolId: input.schoolId,
-              sessionId: input.sessionId,
-              examSlug: input.examSlug,
-              status: 'ready',
-            })
-            .onConflictDoUpdate({
-              target: [
-                examLifecycleTable.sessionId,
-                examLifecycleTable.examSlug,
-              ],
-              set: { status: 'ready', startedAt: null, completedAt: null },
-            });
-          return { createdCount: plans.length };
-        });
+        return await context.db.transaction((tx) =>
+          generateExamPlanRecords(tx, input),
+        );
       } catch (error) {
         throw toRpcError(error);
       }
