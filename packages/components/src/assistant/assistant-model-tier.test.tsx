@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-import { TooltipProvider } from '@campuspilot/ui/components/tooltip';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -8,22 +7,22 @@ import { AssistantModelSwitch, AssistantProSuggestion } from './assistant-model-
 afterEach(cleanup);
 
 describe('AssistantModelSwitch', () => {
-  it('shows the picked tier, says what Pro costs, and reports a change but never an empty pick', () => {
+  const open = (name: RegExp) => fireEvent.keyDown(screen.getByRole('button', { name }), { key: 'Enter' });
+
+  it('shows the model in use and opens a menu that marks it and says what Pro costs', () => {
     const onChange = vi.fn();
-    render(
-      <TooltipProvider>
-        <AssistantModelSwitch tier="standard" onChange={onChange} />
-      </TooltipProvider>,
-    );
-    const fast = screen.getByRole('radio', { name: /^Fast/ });
-    const pro = screen.getByRole('radio', { name: /^Pro: .*uses more of your school’s assistant budget/ });
+    const { rerender } = render(<AssistantModelSwitch tier="standard" onChange={onChange} />);
+    expect(screen.getByRole('button', { name: 'Model: Fast' }).textContent).toContain('Fast');
+    open(/^Model: Fast$/);
+    const fast = screen.getByRole('menuitemradio', { name: /^Fast/ });
+    const pro = screen.getByRole('menuitemradio', { name: /^Pro.*uses more of your school’s assistant budget/ });
     expect(fast.getAttribute('aria-checked')).toBe('true');
+    expect(pro.getAttribute('aria-checked')).toBe('false');
     fireEvent.click(pro);
     expect(onChange).toHaveBeenLastCalledWith('pro');
-    // Clicking the picked option again does not leave the switch without a tier.
-    onChange.mockClear();
-    fireEvent.click(fast);
-    expect(onChange).not.toHaveBeenCalled();
+
+    rerender(<AssistantModelSwitch tier="pro" onChange={onChange} />);
+    expect(screen.getByRole('button', { name: 'Model: Pro' })).toBeTruthy();
   });
 });
 

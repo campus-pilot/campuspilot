@@ -1,48 +1,58 @@
 import type { AssistantModelTier } from '@campuspilot/assistant-contract/dto';
 import { Button } from '@campuspilot/ui/components/button';
-import { ToggleGroup, ToggleGroupItem } from '@campuspilot/ui/components/toggle-group';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@campuspilot/ui/components/tooltip';
-import { Sparkles, Zap } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '@campuspilot/ui/components/dropdown-menu';
+import { ChevronDown, Sparkles, Zap } from 'lucide-react';
 
 /** What Pro costs, said wherever it can be picked. */
 const PRO_COST = 'Each Pro message uses more of your school’s assistant budget.';
 
-const TIERS: ReadonlyArray<{ value: AssistantModelTier; label: string; hint: string; icon: typeof Zap }> = [
+const TIERS = [
   { value: 'standard', label: 'Fast', hint: 'Quick answers for everyday requests.', icon: Zap },
   { value: 'pro', label: 'Pro', hint: `Sharper answers: reads photos and figures more carefully. ${PRO_COST}`, icon: Sparkles },
-];
+] as const satisfies ReadonlyArray<{ value: AssistantModelTier; label: string; hint: string; icon: typeof Zap }>;
 
 const isTier = (value: string): value is AssistantModelTier => TIERS.some((tier) => tier.value === value);
 
-/** The Fast / Pro switch in the message box's toolbar: the model that answers the next message. */
+/** The model picker in the message box's toolbar: shows the model that answers the next message, and opens a menu to change it. */
 export function AssistantModelSwitch({ tier, onChange, disabled }: { tier: AssistantModelTier; onChange: (tier: AssistantModelTier) => void; disabled?: boolean }) {
+  const current = TIERS.find((option) => option.value === tier) ?? TIERS[0];
+  const CurrentIcon = current.icon;
   return (
-    <ToggleGroup
-      type="single"
-      variant="outline"
-      size="sm"
-      spacing={0}
-      aria-label="Model"
-      className="shrink-0"
-      value={tier}
-      disabled={disabled}
-      // Clicking the picked option again would clear a single toggle group; the switch always has one.
-      onValueChange={(value) => {
-        if (isTier(value)) onChange(value);
-      }}
-    >
-      {TIERS.map(({ value, label, hint, icon: Icon }) => (
-        <Tooltip key={value}>
-          <TooltipTrigger asChild>
-            <ToggleGroupItem value={value} aria-label={`${label}: ${hint}`}>
-              <Icon data-icon="inline-start" aria-hidden />
-              {label}
-            </ToggleGroupItem>
-          </TooltipTrigger>
-          <TooltipContent className="max-w-60">{hint}</TooltipContent>
-        </Tooltip>
-      ))}
-    </ToggleGroup>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild disabled={disabled}>
+        <Button type="button" variant="outline" size="lg" className="shrink-0 rounded-full" aria-label={`Model: ${current.label}`}>
+          <CurrentIcon data-icon="inline-start" aria-hidden />
+          {current.label}
+          <ChevronDown data-icon="inline-end" className="text-muted-foreground" aria-hidden />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="top" align="start" className="w-64">
+        <DropdownMenuLabel>Model</DropdownMenuLabel>
+        <DropdownMenuRadioGroup
+          value={tier}
+          onValueChange={(value) => {
+            if (isTier(value)) onChange(value);
+          }}
+        >
+          {TIERS.map(({ value, label, hint, icon: Icon }) => (
+            <DropdownMenuRadioItem key={value} value={value} className="items-start">
+              <Icon className="mt-0.5" aria-hidden />
+              <span className="flex flex-col gap-0.5">
+                <span className="font-medium">{label}</span>
+                <span className="text-muted-foreground">{hint}</span>
+              </span>
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
