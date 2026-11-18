@@ -89,7 +89,8 @@ describe('school guided setup', () => {
       'Nursery', 'LKG', 'UKG', 'Class 1', 'Class 2', 'Class 3', 'Class 4', 'Class 5', 'Class 6', 'Class 7', 'Class 8', 'Class 9', 'Class 10',
     ]);
     const classEight = classes.find((entry) => entry.slug === 'class-8')!;
-    expect(Object.keys(classEight.config?.subjects ?? {})).toEqual(onboardingSubjectSlugs(ONBOARDING_STAGES[2].subjects));
+    // jsonb does not keep key order, so the subjects are compared as a set.
+    expect(Object.keys(classEight.config?.subjects ?? {}).sort()).toEqual(onboardingSubjectSlugs(ONBOARDING_STAGES[2].subjects).sort());
     expect(classEight.config?.subjects['science']).toMatchObject({ name: 'Science', examModes: { written: { name: 'Written', percentage: 100 } } });
     const sections = await client.school.listSections({ schoolId, classId: classEight.id });
     expect(sections).toMatchObject([{ slug: 'a', label: 'A' }]);
@@ -128,7 +129,7 @@ describe('school guided setup', () => {
     const classes = await db.select().from(classTable).where(eq(classTable.schoolId, schoolId)).orderBy(asc(classTable.displayOrder));
     // Catalogue order, whatever order they were sent in.
     expect(classes.map((entry) => entry.slug)).toEqual(['ukg', 'class-11']);
-    expect(Object.keys(classes[0]!.config?.subjects ?? {})).toEqual(['english', 'subject-2']);
+    expect(Object.keys(classes[0]!.config?.subjects ?? {}).sort()).toEqual(['english', 'subject-2']);
     expect(await db.select().from(examPlanTable).where(eq(examPlanTable.schoolId, schoolId))).toHaveLength(3 * 2);
   });
 
