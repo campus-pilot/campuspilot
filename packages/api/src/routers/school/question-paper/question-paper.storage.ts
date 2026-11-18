@@ -60,6 +60,16 @@ export async function getObjectBytes(key: string): Promise<Buffer> {
 }
 
 /**
+ * A stored object as a stream, for a response that passes it on without
+ * holding it in memory. `byteSize` is null when the store did not say.
+ */
+export async function getObjectStream(key: string): Promise<{ body: ReadableStream<Uint8Array>; byteSize: number | null }> {
+  const result = await getS3Client().send(new GetObjectCommand({ Bucket: env.S3_BUCKET, Key: key }));
+  if (!result.Body) throw new Error('The stored object has no content.');
+  return { body: result.Body.transformToWebStream(), byteSize: result.ContentLength ?? null };
+}
+
+/**
  * Deletes objects after the database no longer references them. Storage is
  * not part of the database transaction, so this is best effort: a failure is
  * logged and the object is left for the demo purge or a storage sweep, never

@@ -5,7 +5,6 @@ import { useQuery } from '@tanstack/react-query';
 import { Columns2, Download, History, Images, Languages, ListChecks, PanelLeftClose, PanelLeftOpen, Sparkles, SquarePen, WandSparkles, X } from 'lucide-react';
 import { APP_SHELL_FILL_HEIGHT_MD_CLASS } from '@campuspilot/components/app-shell';
 import type { AssistantSuggestion } from '@campuspilot/components/assistant';
-import { DocumentPreview } from '@campuspilot/components/documents/document-controls';
 import { OptionSelect } from '@campuspilot/components/option-select';
 import { GenerationStatus } from '@campuspilot/components/question-paper/generation-status';
 import { PlaceholderNote, RemovedList } from '@campuspilot/components/question-paper/paper-notices';
@@ -18,7 +17,6 @@ import { cn } from '@campuspilot/ui/lib/utils';
 import { AssistantChat } from '@/components/assistant/assistant-chat';
 import { DraftPreviewBody } from '@/components/assistant/assistant-question-paper';
 import { useSendAssistantMessage } from '@/components/assistant/use-assistant';
-import { ReadError } from '@/components/exam/exam-common';
 import { orpc } from '@/lib/orpc';
 import {
   assistantCollapsedOf,
@@ -34,6 +32,7 @@ import {
 import { PAPER_ASSISTANT_SURFACE, paperSeedOf, usePaperDraft, type PaperDraft } from './use-paper-assistant';
 import { PaperChatHistoryDialog } from './paper-chat-history';
 import { PaperPhotoCompare } from './paper-photo-compare';
+import { VersionPdf } from './version-pdf';
 import { TwoWaySwitch } from './source-preview-dialogs';
 import type { PageUploads } from './use-page-uploads';
 import { useDownloadQuestionPaper, type QuestionPaperDetail } from './use-question-paper-detail';
@@ -301,29 +300,26 @@ function PaperStage({ photos, children }: { photos: ReactNode; children: ReactNo
   );
 }
 
-/** One saved version as it prints: what was removed from its HTML, its figure placeholders and the sandboxed preview. */
+/**
+ * One saved version as it prints: its PDF (the stored file, with its page
+ * breaks), and above it what was removed from its HTML and its figure
+ * placeholders. The notes come from the version's HTML preview; while they
+ * load, or if they cannot be read, the paper shows without them.
+ */
 function SavedVersion({ scope, versionNo }: { scope: QuestionPaperScope; versionNo: number }) {
-  const preview = useQuery(orpc.school.getQuestionPaperPreview.queryOptions({ input: { ...scope, versionNo } }));
-  // Resolve from held data before the error flag, so a failed refetch never blanks a paper on screen.
-  if (preview.data === undefined) {
-    return preview.isPending ? (
-      <PaperFrame>
-        <Skeleton className="h-full w-full rounded-xl" />
-      </PaperFrame>
-    ) : (
-      <PaperNotes>
-        <ReadError error={preview.error} retry={preview.refetch} />
-      </PaperNotes>
-    );
-  }
+  const notes = useQuery(orpc.school.getQuestionPaperPreview.queryOptions({ input: { ...scope, versionNo } }));
   return (
     <>
       <PaperNotes>
-        <RemovedList lines={preview.data.warnings.map((notice) => notice.message)} />
-        <PlaceholderNote count={preview.data.placeholderFigures} />
+        {notes.data ? (
+          <>
+            <RemovedList lines={notes.data.warnings.map((notice) => notice.message)} />
+            <PlaceholderNote count={notes.data.placeholderFigures} />
+          </>
+        ) : null}
       </PaperNotes>
       <PaperFrame>
-        <DocumentPreview html={preview.data.html} label="Question paper preview" fitPageWidth fill />
+        <VersionPdf scope={scope} versionNo={versionNo} />
       </PaperFrame>
     </>
   );

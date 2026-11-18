@@ -501,15 +501,23 @@ one the URL names, else the paper's latest shared conversation).
     up the studio fills the window under the app's header (`APP_SHELL_FILL_HEIGHT_MD_CLASS`,
     which leaves room for the shell's alert rows): one header row (name, version, PDF,
     menu), then the assistant on the left and the paper on the right, each scrolling inside
-    its pane, so nothing is cut off on arrival and the page never scrolls. The paper is the
-    sandboxed preview in its `fill` form (`DocumentPreview`), scaled to the pane.
+    its pane, so nothing is cut off on arrival and the page never scrolls. A saved version
+    is shown as its PDF (`VersionPdf`): the file stored at save, the same one *Download PDF*
+    gives, streamed by `GET /api/blob/.../question-papers/{subject}/{mode}/versions/{n}/pdf`
+    (the checks of `getQuestionPaperDownload`; a removed PDF is printed again first) and
+    drawn page by page with pdf.js (`PdfPages`), so the printed page breaks show. Each page
+    is drawn at the pane's width times the screen's pixel ratio and only while it is near
+    the screen. The chat's version *Preview* shows the same. An unsaved draft has no PDF
+    and is not printed for the preview (that would mean a Gotenberg conversion on every
+    look): it stays the sandboxed HTML preview in its `fill` form (`DocumentPreview`),
+    scaled to the pane.
   - The **paper's side** shows the version the URL names; else the assistant's **unsaved
     draft** when the conversation holds one (`unsavedDraftOf`: the newest ready draft of
     this paper with no successful save after it); else the latest version. An unsaved
     draft has one action, *Save as version n*, which sends the same sentence as the draft
     card's Save in the chat (`saveDraftMessage`); the approval that follows is given in the
     assistant like every other change. Nothing on this side is editable: versions are
-    immutable and the preview frame stays sandboxed.
+    immutable, the PDF pages are pictures and the draft's frame stays sandboxed.
   - The header row also has an icon button beside *Download PDF*, named by its tooltip
     *View uploaded photos or file* (*Add photos or a file* while the paper has no photo):
     it opens the same card as the menu's *Add photos or a file*. It is shown when the paper

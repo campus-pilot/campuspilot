@@ -2,7 +2,8 @@
 
 import type { pageDtoSchema } from '@campuspilot/api/routers/school/question-paper/question-paper.dto';
 import { env } from '@campuspilot/env/management.client';
-import type { z } from 'zod';
+import { ORPCError } from '@orpc/client';
+import { z } from 'zod';
 
 /** The natural key of one paper, as the API and the upload routes take it. */
 export type QuestionPaperPageKey = {
@@ -14,12 +15,17 @@ export type QuestionPaperPageKey = {
   modeSlug: string;
 };
 
-function pagesUrl(key: QuestionPaperPageKey, suffix = '') {
+/** A route of the API's `/api/blob` routes for one paper; `path` starts with `/`. */
+function paperBlobUrl(key: QuestionPaperPageKey, path: string) {
   const segment = (value: string) => encodeURIComponent(value);
   return new URL(
-    `/api/blob/schools/${segment(key.schoolId)}/sessions/${segment(key.sessionId)}/exams/${segment(key.examSlug)}/classes/${segment(key.classId)}/question-papers/${segment(key.subjectSlug)}/${segment(key.modeSlug)}/pages${suffix}`,
+    `/api/blob/schools/${segment(key.schoolId)}/sessions/${segment(key.sessionId)}/exams/${segment(key.examSlug)}/classes/${segment(key.classId)}/question-papers/${segment(key.subjectSlug)}/${segment(key.modeSlug)}${path}`,
     env.NEXT_PUBLIC_SERVER_URL,
   ).toString();
+}
+
+function pagesUrl(key: QuestionPaperPageKey, suffix = '') {
+  return paperBlobUrl(key, `/pages${suffix}`);
 }
 
 /** What a page image URL needs to know of the page. */
@@ -92,4 +98,26 @@ export async function storeQuestionPaperPage(key: QuestionPaperPageKey, pageId: 
     throw new Error(failure?.message ?? `The upload failed (${response.status}).`);
   }
   return ((await response.json()) as { page: QuestionPaperPage }).page;
+}
+
+/** What an `/api/blob` route answers when it refuses (`rpcErrorResponse`). */
+const refusalBodySchema = z.object({ code: z.string().optional(), message: z.string().optional() });
+
+/**
+ * The bytes of a saved version's PDF (the file Download PDF gives), read with
+ * the session cookie. A refusal becomes an `ORPCError` with the server's code,
+ * status and message, like a refusal through the RPC client, so the screen
+ * words it and decides about retrying the same way.
+ */
+export async function fetchQuestionPaperVersionPdf(key: QuestionPaperPageKey, versionNo: number, signal?: AbortSignal): Promise<ArrayBuffer> {
+  const response = await fetch(paperBlobUrl(key, `/versions/${versionNo}/pdf`), { credentials: 'include', signal });
+  if (!response.ok) {
+    const failure = refusalBodySchema.safeParse(await response.json().catch(() => null));
+    const body = failure.success ? failure.data : null;
+    throw new ORPCError(body?.code ?? 'INTERNAL_SERVER_ERROR', {
+      status: response.status,
+      message: body?.message ?? `The PDF could not be loaded (${response.status}).`,
+    });
+  }
+  return response.arrayBuffer();
 }
