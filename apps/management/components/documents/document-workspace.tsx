@@ -394,6 +394,11 @@ function DocumentWorkspaceContent({
                       academic: access.academicHistory,
                       finance: access.financeHistory,
                     }}
+                    onCreate={
+                      access.academicTemplates || access.financeTemplates
+                        ? () => navigate("generate")
+                        : undefined
+                    }
                   />
                 ) : (
                   <DocumentNotice>

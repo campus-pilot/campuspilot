@@ -28,6 +28,7 @@ import {
   TableRow,
 } from '@campuspilot/ui/components/table';
 import { GripVertical } from 'lucide-react';
+import { TableEmptyMessage } from './table-empty-message';
 
 export type SortableTableColumn<TData> = {
   id: string;
@@ -41,6 +42,8 @@ export type SortableTableProps<TData> = {
   columns: readonly SortableTableColumn<TData>[];
   data: readonly TData[];
   emptyMessage: string;
+  /** A next step shown under `emptyMessage` while there are no rows, such as a create button. Gated by the caller. */
+  emptyAction?: ReactNode;
   getRowId: (item: TData) => string;
   getRowLabel: (item: TData) => string;
   onReorder?: (items: TData[]) => void;
@@ -134,6 +137,7 @@ export function SortableTable<TData>({
   columns,
   data,
   emptyMessage,
+  emptyAction,
   getRowId,
   getRowLabel,
   onReorder,
@@ -175,7 +179,7 @@ export function SortableTable<TData>({
                 colSpan={columns.length + (canReorder ? 1 : 0)}
                 className="h-32 text-center text-muted-foreground"
               >
-                {emptyMessage}
+                <TableEmptyMessage message={emptyMessage} action={emptyAction} />
               </TableCell>
             </TableRow>
           ) : (

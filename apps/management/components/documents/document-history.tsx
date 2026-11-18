@@ -3,7 +3,7 @@ import { useForm } from '@tanstack/react-form';
 import { useQuery } from '@tanstack/react-query';
 import { z } from 'zod';
 import { ConfirmationDialog } from '@campuspilot/components/confirmation-dialog';
-import { FileText, Trash2, RefreshCw } from 'lucide-react';
+import { FilePlus, FileText, Trash2, RefreshCw } from 'lucide-react';
 import {
   DocumentButton,
   DocumentField,
@@ -31,9 +31,12 @@ import { DocumentDownload } from './document-generator';
 export function DocumentHistory({
   scope,
   domains,
+  onCreate,
 }: {
   scope: DocumentScope;
   domains: { academic: boolean; finance: boolean };
+  /** Opens the New section; passed only to people who can read a template there. */
+  onCreate?: () => void;
 }) {
   const form = useForm({
     defaultValues: { search: '', page: 1 },
@@ -73,10 +76,26 @@ export function DocumentHistory({
             search={values.search}
             page={values.page}
             onPage={(page) => form.setFieldValue('page', page)}
+            onCreate={onCreate}
           />
         )}
       </form.Subscribe>
     </DocumentPanel>
+  );
+}
+/** The session has no PDFs yet; people who can create one get a button to the New section. */
+function NoDocumentsYet({ onCreate }: { onCreate?: () => void }) {
+  if (!onCreate) return <DocumentNotice>No PDFs yet.</DocumentNotice>;
+  return (
+    <div className="flex flex-col gap-3">
+      <DocumentNotice>No PDFs yet. Create your first document from the New tab.</DocumentNotice>
+      <div>
+        <DocumentButton variant="outline" onClick={onCreate}>
+          <FilePlus aria-hidden />
+          Create a document
+        </DocumentButton>
+      </div>
+    </div>
   );
 }
 function HistoryRows({
@@ -85,9 +104,11 @@ function HistoryRows({
   search,
   page,
   onPage,
+  onCreate,
 }: {
   scope: DocumentScope;
   domains: { academic: boolean; finance: boolean };
+  onCreate?: () => void;
   search: string;
   page: number;
   onPage: (value: number) => void;
@@ -119,12 +140,10 @@ function HistoryRows({
         history.data.items.map((artifact) => (
           <ArtifactRow key={artifact.id} artifact={artifact} />
         ))
+      ) : search ? (
+        <DocumentNotice>No documents match your search.</DocumentNotice>
       ) : (
-        <DocumentNotice>
-          {search
-            ? 'No documents match your search.'
-            : 'No PDFs yet. Create your first document from the Create document tab.'}
-        </DocumentNotice>
+        <NoDocumentsYet onCreate={onCreate} />
       )}
       <nav
         aria-label="Document history pages"

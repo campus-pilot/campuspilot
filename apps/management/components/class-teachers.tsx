@@ -23,8 +23,10 @@ import { Skeleton } from '@campuspilot/ui/components/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@campuspilot/ui/components/table';
 import { Plus, UserMinus } from 'lucide-react';
 import { z } from 'zod';
+import { TableEmptyMessage } from '@campuspilot/components/table-empty-message';
 import { client, orpc } from '@/lib/orpc';
 import { FormErrors } from './form-errors';
+import { InviteStaffAction } from './invite-staff-action';
 import { RequirePermissions } from './require-permissions';
 
 const teacherSelectionSchema = z.object({ userId: z.string().min(1, 'Select a teacher') });
@@ -120,10 +122,8 @@ function AddTeacherDialogContent({ classId, schoolId, onClose }: { classId: stri
               <div className="flex flex-col gap-2">
                 <Label>Teacher</Label>
                 {candidatesQuery.isPending ? <Skeleton className="h-36 w-full" /> : null}
-                {candidatesQuery.data?.items.length === 0 ? (
-                  <p className="rounded-lg border p-4 text-sm text-muted-foreground">No unassigned teachers found.</p>
-                ) : null}
-                <RadioGroup value={field.state.value} onValueChange={field.handleChange} className="max-h-72 overflow-y-auto rounded-lg border p-2">
+                {candidatesQuery.data?.items.length === 0 ? <NoTeacherCandidates schoolId={schoolId} /> : null}
+                {candidatesQuery.data?.items.length ? <RadioGroup value={field.state.value} onValueChange={field.handleChange} className="max-h-72 overflow-y-auto rounded-lg border p-2">
                   {candidatesQuery.data?.items.map((member) => (
                     <Label key={member.userId} className="flex cursor-pointer items-center gap-3 rounded-md p-2 hover:bg-muted">
                       <RadioGroupItem value={member.userId} />
@@ -137,7 +137,7 @@ function AddTeacherDialogContent({ classId, schoolId, onClose }: { classId: stri
                       </span>
                     </Label>
                   ))}
-                </RadioGroup>
+                </RadioGroup> : null}
                 <FormErrors errors={field.state.meta.errors} />
               </div>
             )}
@@ -165,6 +165,38 @@ function AddTeacherDialogContent({ classId, schoolId, onClose }: { classId: stri
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * The teacher picker has no one to offer. Invite staff (the Staff page's
+ * dialog) opens with the teacher role ticked; inviting refreshes the member
+ * lists, so a new teacher appears here.
+ */
+function NoTeacherCandidates({ schoolId }: { schoolId: string }) {
+  return (
+    <div className="flex flex-col items-center gap-3 rounded-lg border p-4 text-center text-sm text-muted-foreground">
+      <p>No unassigned teachers found.</p>
+      <InviteStaffAction schoolId={schoolId} defaultRoles={['teacher']} />
+    </div>
+  );
+}
+
+/** The classroom has no teachers; staff who may change roles get the same Add teacher picker as the header. */
+function NoAssignedTeachers({ schoolId, onAdd }: { schoolId: string; onAdd: () => void }) {
+  return (
+    <TableRow>
+      <TableCell colSpan={3} className="h-32 text-center text-muted-foreground">
+        <TableEmptyMessage
+          message="No teachers are assigned yet."
+          action={
+            <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.UPDATE_MEMBER_ROLES, resource: { kind: 'school', schoolId } }}>
+              <Button type="button" size="sm" variant="outline" onClick={onAdd}><Plus aria-hidden /> Add teacher</Button>
+            </RequirePermissions>
+          }
+        />
+      </TableCell>
+    </TableRow>
   );
 }
 
@@ -220,7 +252,7 @@ export function ClassTeachers({ classId, schoolId }: { classId: string; schoolId
                     </RequirePermissions>
                   </TableCell>
                 </TableRow>
-              )) : <TableRow><TableCell colSpan={3} className="h-32 text-center text-muted-foreground">No teachers are assigned yet.</TableCell></TableRow>}
+              )) : <NoAssignedTeachers schoolId={schoolId} onAdd={() => setAddOpen(true)} />}
             </TableBody>
           </Table>
         </div>

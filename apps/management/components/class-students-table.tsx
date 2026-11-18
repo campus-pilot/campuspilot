@@ -7,6 +7,7 @@ import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 
 import { orpc } from '@/lib/orpc';
+import { AddStudentAction } from './add-student-action';
 
 type Filters = { sectionId?: string };
 type Controller = DataTableListController<'name' | 'admissionNo' | 'rollNo' | 'createdAt', Filters>;
@@ -20,7 +21,7 @@ function StudentRows({ schoolId, sessionId, classId, controller, sections }: { s
     { accessorKey: 'rollNo', header: 'Roll no.', cell: ({ row }) => row.original.rollNo ?? '—' },
     { accessorKey: 'sectionId', header: 'Section', enableSorting: false, cell: ({ row }) => <Badge variant="secondary">{sections.find(({ id }) => id === row.original.sectionId)?.label ?? 'Unassigned'}</Badge> },
   ];
-  return <DataTable ariaLabel="Class students" columns={columns} data={data.items} getRowId={(student) => student.id} manualPagination manualSorting onPaginationChange={controller.onPaginationChange} onSortingChange={controller.onSortingChange} pageCount={data.pagination.totalPages} rowCount={data.pagination.totalItems} showPagination state={controller.tableState} onRowClick={(student) => router.push(`/school/${encodeURIComponent(schoolId)}/sessions/${encodeURIComponent(sessionId)}/classroom/${encodeURIComponent(classId)}/students/${encodeURIComponent(student.id)}`)} emptyMessage={controller.query.searchQuery ? 'No students match this search.' : 'No students are assigned to this classroom.'} />;
+  return <DataTable ariaLabel="Class students" columns={columns} data={data.items} getRowId={(student) => student.id} manualPagination manualSorting onPaginationChange={controller.onPaginationChange} onSortingChange={controller.onSortingChange} pageCount={data.pagination.totalPages} rowCount={data.pagination.totalItems} showPagination state={controller.tableState} onRowClick={(student) => router.push(`/school/${encodeURIComponent(schoolId)}/sessions/${encodeURIComponent(sessionId)}/classroom/${encodeURIComponent(classId)}/students/${encodeURIComponent(student.id)}`)} emptyMessage={controller.query.searchQuery ? 'No students match this search.' : controller.query.filters?.sectionId ? 'No students are assigned to this section.' : 'No students are assigned to this classroom.'} emptyAction={controller.query.searchQuery || controller.query.filters?.sectionId ? undefined : <AddStudentAction schoolId={schoolId} sessionId={sessionId} classId={classId} variant="outline" />} />;
 }
 
 export function ClassStudentsTable({ schoolId, sessionId, classId }: { schoolId: string; sessionId: string; classId: string }) {

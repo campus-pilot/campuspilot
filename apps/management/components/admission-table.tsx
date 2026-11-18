@@ -6,6 +6,8 @@ import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 
 import { orpc } from '@/lib/orpc';
+import { isUnfilteredAdmissionList } from './admission-table-model';
+import { CreateAdmissionAction } from './create-admission-action';
 import { useSchoolFeature } from './require-feature';
 import { useSchoolSessions, useStoredSchoolSessionId } from './session-selection';
 import { WHATSAPP_READINESS_LABELS, WhatsappReadinessBadge, whatsappReadiness } from '@campuspilot/components/notifications';
@@ -29,6 +31,7 @@ function useShowsWhatsappReadiness(schoolId: string): boolean {
 
 function AdmissionRows({ schoolId, controller, sessionId, classLabels, showWhatsapp }: { schoolId: string; controller: AdmissionController; sessionId?: string; classLabels: Map<string, string>; showWhatsapp: boolean }) {
   const router = useRouter();
+  const unfiltered = isUnfilteredAdmissionList(controller.query);
   const placementStatus = controller.query.filters?.placementStatus;
   const registrationStatus = controller.query.filters?.registrationStatus;
   const classId = controller.query.filters?.classId;
@@ -44,7 +47,7 @@ function AdmissionRows({ schoolId, controller, sessionId, classLabels, showWhats
       ? [{ id: 'whatsapp', header: 'WhatsApp', enableSorting: false, cell: ({ row }) => <WhatsappReadinessBadge readiness={whatsappReadiness(row.original)} /> } satisfies DataTableColumnDef<AdmissionListItemDto>]
       : []),
   ];
-  return <DataTable ariaLabel="Admissions" columns={columns} data={data.items} getRowId={(admission) => admission.id} manualPagination manualSorting onPaginationChange={controller.onPaginationChange} onSortingChange={controller.onSortingChange} pageCount={data.pagination.totalPages} rowCount={data.pagination.totalItems} showPagination state={controller.tableState} onRowClick={(admission) => router.push(`/school/${encodeURIComponent(schoolId)}/admission/${encodeURIComponent(admission.id)}/details`)} emptyMessage={controller.query.searchQuery ? 'No admissions match this search.' : 'No admissions match these filters.'} />;
+  return <DataTable ariaLabel="Admissions" columns={columns} data={data.items} getRowId={(admission) => admission.id} manualPagination manualSorting onPaginationChange={controller.onPaginationChange} onSortingChange={controller.onSortingChange} pageCount={data.pagination.totalPages} rowCount={data.pagination.totalItems} showPagination state={controller.tableState} onRowClick={(admission) => router.push(`/school/${encodeURIComponent(schoolId)}/admission/${encodeURIComponent(admission.id)}/details`)} emptyMessage={controller.query.searchQuery ? 'No admissions match this search.' : unfiltered ? 'No registered admissions yet.' : 'No admissions match these filters.'} emptyAction={unfiltered ? <CreateAdmissionAction schoolId={schoolId} variant="outline" /> : undefined} />;
 }
 
 export function AdmissionTable({ schoolId }: { schoolId: string }) {

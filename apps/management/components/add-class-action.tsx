@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { createClassInputSchema } from '@campuspilot/api/routers/school/class/class.dto';
+import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import { useForm } from '@tanstack/react-form';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@campuspilot/ui/components/button';
@@ -18,6 +19,7 @@ import { Label } from '@campuspilot/ui/components/label';
 import { Plus, Trash2 } from 'lucide-react';
 import { client, orpc } from '@/lib/orpc';
 import { FormErrors } from './form-errors';
+import { RequirePermissions } from './require-permissions';
 
 const classFormSchema = createClassInputSchema.omit({ schoolId: true });
 
@@ -49,9 +51,15 @@ function AddClassDialog({
       try {
         const validated = classFormSchema.parse(value);
         await client.school.createClass({ schoolId, ...validated });
-        await queryClient.invalidateQueries({
-          queryKey: orpc.school.listClasses.queryKey({ input: { schoolId } }),
-        });
+        // The dashboard's class load card offers this dialog when empty, so refresh it too.
+        await Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: orpc.school.listClasses.queryKey({ input: { schoolId } }),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: orpc.school.getDashboard.key({ input: { schoolId } }),
+          }),
+        ]);
         onClose();
       } catch (error) {
         form.setErrorMap({
@@ -260,7 +268,36 @@ function AddClassDialog({
   );
 }
 
-export function AddClassAction({ schoolId }: { schoolId: string }) {
+/**
+ * "Add classroom" with its permission gate, so the navbar and empty states
+ * (the classroom list, the dashboard's class load) render the same entry point.
+ */
+export function AddClassAction({
+  schoolId,
+  variant = 'default',
+}: {
+  schoolId: string;
+  variant?: 'default' | 'outline';
+}) {
+  return (
+    <RequirePermissions
+      permissions={{
+        action: SCHOOL_ACTIONS.CREATE_CLASS,
+        resource: { kind: 'school', schoolId },
+      }}
+    >
+      <AddClassButton schoolId={schoolId} variant={variant} />
+    </RequirePermissions>
+  );
+}
+
+function AddClassButton({
+  schoolId,
+  variant,
+}: {
+  schoolId: string;
+  variant: 'default' | 'outline';
+}) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -268,6 +305,7 @@ export function AddClassAction({ schoolId }: { schoolId: string }) {
       <Button
         type="button"
         size="sm"
+        variant={variant}
         className="rounded-lg"
         onClick={() => setOpen(true)}
       >
