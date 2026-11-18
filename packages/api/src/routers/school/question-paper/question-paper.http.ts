@@ -8,11 +8,12 @@ import { parseImageUpload, QUESTION_PAPER_IMAGE_FAMILY } from '../../../files/im
 import { assertPermission } from '../../../permissions/authorization';
 import { assertSchoolWritableByCaller } from '../../../school-access/school-access.service';
 import { assertQuestionPaperAssistantAccess } from './question-paper.access';
-import { paperKeySchema, QUESTION_PAPER_MAX_PAGE_BYTES, type PaperKey } from './question-paper.dto';
+import { paperKeySchema, QUESTION_PAPER_MAX_PAGE_BYTES, versionNoInputSchema, type PaperKey } from './question-paper.dto';
 import { findPaper } from './question-paper.records';
 import { assertPaperWritable, resolvePaperScope } from './question-paper.scope';
 import { addQuestionPaperPage, storeQuestionPaperPage } from './question-paper.service';
-import { pageImageUrl, QUESTION_PAPER_IMAGE_CACHE_SECONDS } from './question-paper.storage';
+import { getObjectStream, pageImageUrl, QUESTION_PAPER_IMAGE_CACHE_SECONDS } from './question-paper.storage';
+import { getVersion, storedVersionPdfKey } from './question-paper.version.service';
 
 /** The multipart field of an uploaded page photo. */
 export const QUESTION_PAPER_PAGE_FIELD_NAME = 'page';
@@ -169,6 +170,58 @@ export async function handleQuestionPaperPageRead(
     return new Response(null, {
       status: 302,
       headers: { Location: url, 'Cache-Control': `private, max-age=${QUESTION_PAPER_IMAGE_CACHE_SECONDS}` },
+    });
+  } catch (error) {
+    reportError?.(error);
+    return rpcErrorResponse(error);
+  }
+}
+
+/**
+ * How long the browser may keep a version's PDF. A version never changes; its
+ * PDF is only ever printed again from the same fragment and pinned template
+ * when the stored one was removed.
+ */
+const VERSION_PDF_CACHE_SECONDS = 60 * 60;
+
+/**
+ * The PDF of a saved version, streamed through the API rather than redirected
+ * to storage: the paper's screen draws it with pdf.js, which reads the bytes
+ * with `fetch`, and a redirect to a signed storage URL would need the bucket
+ * to allow the app's origin. The checks are those of `getQuestionPaperDownload`
+ * (read the class's papers, use the AI assistant), and it is the same file: the
+ * PDF stored at save, printed again first if it was removed.
+ */
+export async function handleQuestionPaperVersionPdfRead(
+  context: Context,
+  rawInput: { key: unknown; versionNo: string },
+  reportError?: HttpErrorReporter,
+): Promise<Response> {
+  try {
+    const key = parseKey(rawInput.key);
+    const versionNo = versionNoInputSchema.shape.versionNo.safeParse(Number(rawInput.versionNo));
+    if (!/^\d+$/.test(rawInput.versionNo) || !versionNo.success) throw rpcError.notFound('Question paper version');
+    await assertPermission(context, {
+      action: CLASS_ACTIONS.READ_EXAM_QUESTION_PAPERS,
+      resource: { kind: 'class', schoolId: key.schoolId, classId: key.classId },
+    });
+    const userId = requireUser(context);
+    await assertQuestionPaperAssistantAccess(context.db, { schoolId: key.schoolId, userId });
+    const scope = await resolvePaperScope(context.db, key);
+    const paper = await findPaper(context.db, key);
+    if (!paper) throw rpcError.notFound('Question paper');
+    const version = await getVersion(context.db, paper.id, versionNo.data);
+    const s3Key = await storedVersionPdfKey(context.db, { scope, version, userId });
+    const { body, byteSize } = await getObjectStream(s3Key);
+    return new Response(body, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': 'inline',
+        'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': `private, max-age=${VERSION_PDF_CACHE_SECONDS}`,
+        ...(byteSize === null ? {} : { 'Content-Length': String(byteSize) }),
+      },
     });
   } catch (error) {
     reportError?.(error);

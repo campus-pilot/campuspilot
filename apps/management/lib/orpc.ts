@@ -45,6 +45,18 @@ export const client: AppRouterClient = createORPCClient(link);
 export const orpc = createTanstackQueryUtils(client);
 
 /**
+ * Query data that holds something outside the JavaScript heap (a PDF opened
+ * with pdf.js keeps a worker and its parsed pages) has a `release` method; it
+ * is called when the cache drops the query, after its last viewer left and
+ * its `gcTime` passed.
+ */
+function releaseHeldData(data: unknown) {
+  if (data && typeof data === 'object' && 'release' in data && typeof data.release === 'function') {
+    Promise.resolve(data.release()).catch(() => undefined);
+  }
+}
+
+/**
  * The app's query client. Two server refusals mean something this app holds
  * about the school is out of date, and it is read again at once, so no
  * screen has to remember to do it:
@@ -65,6 +77,9 @@ export function createQueryClient() {
   const queryClient: QueryClient = new QueryClient({
     queryCache: new QueryCache({ onError: refreshOutdatedFlags }),
     mutationCache: new MutationCache({ onError: refreshOutdatedFlags }),
+  });
+  queryClient.getQueryCache().subscribe((event) => {
+    if (event.type === 'removed') releaseHeldData(event.query.state.data);
   });
   // In the browser only: the server renders a provider per request and makes
   // no calls through the link, so there is nothing to refresh there.
