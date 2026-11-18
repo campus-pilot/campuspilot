@@ -51,6 +51,7 @@ import { schoolHref } from '@/components/school-route';
 import { RequirePermissions } from '@/components/require-permissions';
 import { client, orpc } from '@/lib/orpc';
 import { CreateSessionDialog } from './create-session-dialog';
+import { useCreateSession } from './create-session-button';
 
 type SessionOrderField =
   | 'sessionStartYear'
@@ -370,22 +371,7 @@ export function SessionsTable({ schoolId }: { schoolId: string }) {
       },
     ];
   }, [filterOptionsQuery.data]);
-  const createSessionMutation = useMutation({
-    mutationFn: (value: {
-      sessionStartYear: number;
-      sessionEndYear: number;
-    }) => client.school.createSession({ schoolId, ...value }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({
-        queryKey: orpc.school.listSessions.queryKey({ input: { schoolId } }),
-      });
-      await queryClient.invalidateQueries({
-        queryKey: orpc.school.listSessionFilterOptions.queryKey({
-          input: { schoolId },
-        }),
-      });
-    },
-  });
+  const createSessionMutation = useCreateSession(schoolId);
   const suspenseKey = JSON.stringify(controller.query);
 
   return (

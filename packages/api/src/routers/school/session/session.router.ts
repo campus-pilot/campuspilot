@@ -242,7 +242,7 @@ export const schoolSessionRouter = {
     .route({
       summary: 'Create a school session',
       description:
-        'Create an academic session for a school with explicit year boundaries and optional academic configuration. Finance configuration is managed through its dedicated restricted routes.',
+        'Create an academic session for a school with explicit year boundaries and optional academic configuration. When the school has no active session, the new session becomes the active one; otherwise it is created inactive. Finance configuration is managed through its dedicated restricted routes.',
       tags: ['School', 'Sessions'],
     })
     .meta({
@@ -268,21 +268,44 @@ export const schoolSessionRouter = {
             'Only school exam administrators can create exam definitions, including through session configuration.',
           );
         }
-        const [school] = await context.db
-          .select({ id: schoolTable.id })
-          .from(schoolTable)
-          .where(eq(schoolTable.id, schoolId))
-          .limit(1);
-        if (!school) throw rpcError.notFound('School');
-        await assertStudentSessionSettingsUnchanged(context.db, schoolId, null, values.sessionConfig);
-        assertIntroducedExamNamesAllowed(null, values.sessionConfig);
+        return await context.db.transaction(async (transaction) => {
+          // Locking the school serializes this with activations and other
+          // creations, so two first sessions cannot both become active.
+          const [school] = await transaction
+            .select({ id: schoolTable.id })
+            .from(schoolTable)
+            .where(eq(schoolTable.id, schoolId))
+            .for('update')
+            .limit(1);
+          if (!school) throw rpcError.notFound('School');
+          await assertStudentSessionSettingsUnchanged(transaction, schoolId, null, values.sessionConfig);
+          assertIntroducedExamNamesAllowed(null, values.sessionConfig);
 
-        const [session] = await context.db
-          .insert(schoolSessionTable)
-          .values({ schoolId, ...values })
-          .returning(schoolSessionDtoColumns);
-        if (!session) throw rpcError.internal();
-        return toSchoolSessionDto(session);
+          /**
+           * A school without an active session cannot be worked in (every
+           * workspace page belongs to a session), so the session created then
+           * becomes the active one. With an active session already, the new
+           * one is created inactive and changing over stays an explicit
+           * `activateSession`.
+           */
+          const [activeSession] = await transaction
+            .select({ id: schoolSessionTable.id })
+            .from(schoolSessionTable)
+            .where(
+              and(
+                eq(schoolSessionTable.schoolId, schoolId),
+                eq(schoolSessionTable.isActive, true),
+              ),
+            )
+            .limit(1);
+
+          const [session] = await transaction
+            .insert(schoolSessionTable)
+            .values({ schoolId, ...values, isActive: !activeSession })
+            .returning(schoolSessionDtoColumns);
+          if (!session) throw rpcError.internal();
+          return toSchoolSessionDto(session);
+        });
       } catch (error) {
         throw toRpcError(error);
       }

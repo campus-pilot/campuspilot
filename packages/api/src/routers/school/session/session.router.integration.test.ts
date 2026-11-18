@@ -57,7 +57,8 @@ describe('school.session Router Integration', () => {
       expect(session.schoolId).toBe(school.id);
       expect(session.sessionStartYear).toBe(2026);
       expect(session.sessionEndYear).toBe(2027);
-      expect(session.isActive).toBe(false);
+      // The school had no active session, so its first one becomes active.
+      expect(session.isActive).toBe(true);
     });
 
     it('allows school manager to create an academic session', async () => {
@@ -71,6 +72,34 @@ describe('school.session Router Integration', () => {
 
       expect(session.sessionStartYear).toBe(2027);
       expect(session.sessionEndYear).toBe(2028);
+      // An active session exists already, so changing over stays an explicit activation.
+      expect(session.isActive).toBe(false);
+    });
+
+    it('activates a new session when the school has sessions but none active', async () => {
+      const testSchool = await createTestSchool();
+      await createTestSession({ schoolId: testSchool.id, sessionStartYear: 2020, sessionEndYear: 2021, isActive: false });
+      const staff = await createSchoolStaffSession(testSchool.id, [{ role: 'principal', meta: null }]);
+      const client = createTestClient(staff.session);
+
+      const session = await client.school.createSession({ schoolId: testSchool.id, sessionStartYear: 2021, sessionEndYear: 2022 });
+
+      expect(session.isActive).toBe(true);
+      const active = await client.school.listSessions({ schoolId: testSchool.id, filters: { isActive: true } });
+      expect(active.items.map((item) => item.id)).toEqual([session.id]);
+    });
+
+    it('makes only one of two parallel first sessions active', async () => {
+      const testSchool = await createTestSchool();
+      const staff = await createSchoolStaffSession(testSchool.id, [{ role: 'principal', meta: null }]);
+      const client = createTestClient(staff.session);
+
+      const created = await Promise.all([
+        client.school.createSession({ schoolId: testSchool.id, sessionStartYear: 2022, sessionEndYear: 2023 }),
+        client.school.createSession({ schoolId: testSchool.id, sessionStartYear: 2023, sessionEndYear: 2024 }),
+      ]);
+
+      expect(created.filter((session) => session.isActive)).toHaveLength(1);
     });
 
     it('rejects invalid year boundary where end year <= start year', async () => {

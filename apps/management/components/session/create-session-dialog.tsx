@@ -90,7 +90,8 @@ export function CreateSessionDialog({
         <DialogHeader>
           <DialogTitle>New academic session</DialogTitle>
           <DialogDescription>
-            Specify the academic year boundaries for the new session.
+            Specify the academic year boundaries for the new session. If
+            the school has no active session, this one becomes active.
           </DialogDescription>
         </DialogHeader>
         <form

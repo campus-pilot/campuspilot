@@ -151,8 +151,17 @@ allowances are human decisions.
   `components/school-creation/new-school-welcome.tsx`): the trial's plan and
   end date, the assistant's limit and what happens when the trial ends, read
   from the school list and the feature flags rather than the constants, plus
-  **Set up your first session** while the school has no active session. It
+  **Create your first session** while the school has no active session. It
   shows only while the school is on a trial; closing it removes the parameter.
+- A new school has no academic session, and every workspace page belongs to
+  one. Every place that says so offers **Create a session**
+  (`components/session/create-session-button.tsx`, gated on
+  `school.session.create`): the school's entry page, the sidebar's session
+  switcher, the statement's session requirement and the welcome dialog.
+  `school.createSession` makes the new session active when the school has no
+  active session (under a lock on the school, so two first sessions cannot
+  both become active); with one already active it is created inactive and
+  changing over stays an explicit `activateSession`.
 - **Ask for more schools** opens the request form in a dialog.
 - The school switcher offers **Create a school** (`/school/new`, the same
   panel) to people who may create one or ask for more; staff of a school they
