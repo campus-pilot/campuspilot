@@ -374,8 +374,8 @@ export const notificationDeliveryTable = pgTable(
     failureAlertedAt: timestamp("failure_alerted_at", { withTimezone: true }),
     /**
      * Template revision (`artifact.id`) of the PDF attached to the message,
-     * when one was rendered through the document system (WhatsApp
-     * `school_document`). The PDF itself is not stored; this records which
+     * when one was rendered through the document system (a WhatsApp
+     * document template). The PDF itself is not stored; this records which
      * revision produced it. Not a foreign key: provenance outlives
      * revisions, as on generated artifacts.
      */

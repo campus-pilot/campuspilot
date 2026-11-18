@@ -2,7 +2,8 @@ import { db } from '@campuspilot/db';
 import { admissionTable } from '@campuspilot/db/schema/admission';
 import { notificationDeliveryTable, notificationTable } from '@campuspilot/db/schema/notification';
 import type { NotificationType } from '@campuspilot/db/notifications/catalogue';
-import { eq, inArray } from 'drizzle-orm';
+import { whatsappMediaUploadTable } from '@campuspilot/db/schema/whatsapp-media';
+import { and, eq, inArray } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -16,10 +17,11 @@ import type { ChannelFetch, NotificationChannelAdapter } from '../types';
 import { createWhatsAppAdapter } from './adapter';
 import { OUTCOME_UNKNOWN_ERROR_CODE } from './client';
 import type { WhatsAppDocumentSources } from './documents';
+import { WHATSAPP_MEDIA_REUSE_MS } from './media-cache';
 
 const config = { accessToken: 'test-token-0123456789', phoneNumberId: '1234567890', graphApiVersion: 'v24.0', graphBaseUrl: 'https://graph.test' };
 const pushOff = { channel: 'web_push', available: false, unavailableReason: 'test' } as const;
-const noDocuments: WhatsAppDocumentSources = { payment_receipt: null, report_card: null, notice: null };
+const noDocuments: WhatsAppDocumentSources = { payment_receipt: null, bill: null, notice: null, timetable: null };
 
 type Contact = { whatsappNo: string | null; whatsappVerified: boolean; whatsappConsent: boolean };
 const reachable: Contact = { whatsappNo: '+919876543210', whatsappVerified: true, whatsappConsent: true };
@@ -99,7 +101,7 @@ describe('WhatsApp channel', () => {
       to: '919876543210',
       type: 'template',
       template: {
-        name: 'school_update',
+        name: 'bill_issued',
         language: { code: 'en' },
         components: [
           {
@@ -107,8 +109,9 @@ describe('WhatsApp channel', () => {
             parameters: [
               { type: 'text', parameter_name: 'student_name', text: 'Test Student' },
               { type: 'text', parameter_name: 'school_name', text: 'Maple Grove School' },
-              { type: 'text', parameter_name: 'update_text', text: 'a bill of ₹2,500.00 has been issued for October 2026' },
-              { type: 'text', parameter_name: 'reference', text: 'BILL/2026-27/000042' },
+              { type: 'text', parameter_name: 'bill_number', text: 'BILL/2026-27/000042' },
+              { type: 'text', parameter_name: 'issue_date', text: '1 October 2026' },
+              { type: 'text', parameter_name: 'amount', text: '₹2,500.00' },
             ],
           },
         ],
@@ -127,7 +130,7 @@ describe('WhatsApp channel', () => {
     };
     const textOnly = vi.fn<ChannelFetch>(async () => sent());
     await dispatch(payment, textOnly);
-    expect(requestBody(textOnly.mock.calls[0]!).template.name).toBe('school_update');
+    expect(requestBody(textOnly.mock.calls[0]!).template.name).toBe('payment_received');
 
     const produce = vi.fn(async () => ({ bytes: new TextEncoder().encode('%PDF-1.7 test'), mimeType: 'application/pdf' as const, templateRevisionId: 'artf_receipt_rev' }));
     const receipt = { available: async () => true, produce };
@@ -135,7 +138,7 @@ describe('WhatsApp channel', () => {
       .fn<ChannelFetch>()
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'media-1' }), { status: 200 }))
       .mockResolvedValueOnce(sent('wamid.doc'));
-    const { byAdmission } = await dispatch(payment, withPdf, { documentSources: { payment_receipt: receipt, report_card: null, notice: null } });
+    const { byAdmission } = await dispatch(payment, withPdf, { documentSources: { ...noDocuments, payment_receipt: receipt } });
     expect(produce).toHaveBeenCalledWith(expect.objectContaining({ kind: 'payment_receipt', paymentId: 'fpay_1', admissionId: admission.id }), { schoolId: school.id });
     const [uploadUrl, uploadInit] = withPdf.mock.calls[0]!;
     expect(uploadUrl).toBe('https://graph.test/v24.0/1234567890/media');
@@ -143,9 +146,14 @@ describe('WhatsApp channel', () => {
     expect(form.get('messaging_product')).toBe('whatsapp');
     expect((form.get('file') as File).name).toBe('Receipt RCP-2026-27-000001.pdf');
     const message = requestBody(withPdf.mock.calls[1]!);
-    expect(message.template.name).toBe('school_document');
+    expect(message.template.name).toBe('payment_receipt');
     expect(message.template.components[0]).toEqual({ type: 'header', parameters: [{ type: 'document', document: { id: 'media-1', filename: 'Receipt RCP-2026-27-000001.pdf' } }] });
-    expect(message.template.components[1].parameters.find((p: { parameter_name: string }) => p.parameter_name === 'document_name').text).toBe('payment receipt for ₹2,500.00');
+    expect(message.template.components[1].parameters).toEqual([
+      { type: 'text', parameter_name: 'student_name', text: 'Meera Singh' },
+      { type: 'text', parameter_name: 'school_name', text: school.name },
+      { type: 'text', parameter_name: 'amount', text: '₹2,500.00' },
+      { type: 'text', parameter_name: 'receipt_number', text: 'RCP/2026-27/000001' },
+    ]);
     expect(byAdmission.get(admission.id)).toMatchObject({ status: 'sent', providerMessageId: 'wamid.doc', documentTemplateRevisionId: 'artf_receipt_rev' });
   });
 
@@ -160,10 +168,10 @@ describe('WhatsApp channel', () => {
     };
     const receipt = { available: async () => true, produce: vi.fn(async () => 'template_unavailable' as const) };
     const fetchMock = vi.fn<ChannelFetch>(async () => sent('wamid.text'));
-    const { byAdmission } = await dispatch(payment, fetchMock, { documentSources: { payment_receipt: receipt, report_card: null, notice: null } });
+    const { byAdmission } = await dispatch(payment, fetchMock, { documentSources: { ...noDocuments, payment_receipt: receipt } });
     expect(receipt.produce).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(requestBody(fetchMock.mock.calls[0]!).template.name).toBe('school_update');
+    expect(requestBody(fetchMock.mock.calls[0]!).template.name).toBe('payment_received');
     expect(byAdmission.get(admission.id)).toMatchObject({ status: 'sent', providerMessageId: 'wamid.text', documentTemplateRevisionId: null });
   });
 
@@ -288,9 +296,87 @@ describe('WhatsApp channel', () => {
         recipients: { kind: 'admissions' as const, admissionIds: [admission.id] },
       },
       fetchMock,
-      { documentSources: { payment_receipt: receipt, report_card: null, notice: null } },
+      { documentSources: { ...noDocuments, payment_receipt: receipt } },
     );
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(byAdmission.get(admission.id)).toMatchObject({ status: 'sent', providerMessageId: 'wamid.doc2', attempts: 2 });
+  });
+
+  it('uploads a PDF shared by every recipient once per phone number, reuses it inside the window and uploads it again after', async () => {
+    const school = await createTestSchool({ features: ['notices', 'cadet'] });
+    const first = await student(school.id, { ...reachable, whatsappNo: '+919800000201' });
+    const second = await student(school.id, { ...reachable, whatsappNo: '+919800000202' });
+    const shareKey = `schools/${school.id}/notices/ntc_shared-a4.pdf`;
+    const produce = vi.fn(async () => ({ bytes: new TextEncoder().encode('%PDF-1.7 notice'), mimeType: 'application/pdf' as const, templateRevisionId: null, shareKey }));
+    const documentSources = { ...noDocuments, notice: { available: async () => true, produce } };
+    const notice = (admissionIds: string[]) => ({
+      type: 'notice.published' as const,
+      data: { noticeId: 'ntc_shared', sessionId: 'sess_1', noticeTitle: 'Sports Day', admissionId: admissionIds[0]!, studentName: 'Meera Singh' },
+      schoolId: school.id,
+      recipients: { kind: 'admissions' as const, admissionIds },
+    });
+    let uploads = 0;
+    const fetchMock = vi.fn<ChannelFetch>(async (url) => {
+      if (String(url).endsWith('/media')) return new Response(JSON.stringify({ id: `media-${++uploads}` }), { status: 200 });
+      return sent();
+    });
+    const headerIds = (from: number) =>
+      fetchMock.mock.calls
+        .slice(from)
+        .filter(([url]) => String(url).endsWith('/messages'))
+        .map((call) => requestBody(call).template.components[0].parameters[0].document.id);
+    const cached = async () =>
+      db.select().from(whatsappMediaUploadTable).where(and(eq(whatsappMediaUploadTable.phoneNumberId, config.phoneNumberId), eq(whatsappMediaUploadTable.shareKey, shareKey)));
+
+    // Miss: the first recipient uploads, the second reuses that upload.
+    const { byAdmission } = await dispatch(notice([first.id, second.id]), fetchMock, { documentSources });
+    expect(uploads).toBe(1);
+    expect(headerIds(0)).toEqual(['media-1', 'media-1']);
+    expect(requestBody(fetchMock.mock.calls.find(([url]) => String(url).endsWith('/messages'))!).template.name).toBe('notice_document');
+    expect(byAdmission.get(first.id)!.status).toBe('sent');
+    expect(byAdmission.get(second.id)!.status).toBe('sent');
+    expect(await cached()).toEqual([expect.objectContaining({ schoolId: school.id, mediaId: 'media-1' })]);
+
+    // Hit: still inside the 25-day window.
+    await db.update(whatsappMediaUploadTable).set({ uploadedAt: new Date(Date.now() - WHATSAPP_MEDIA_REUSE_MS + 60_000) }).where(eq(whatsappMediaUploadTable.shareKey, shareKey));
+    let from = fetchMock.mock.calls.length;
+    await dispatch(notice([first.id]), fetchMock, { documentSources });
+    expect(uploads).toBe(1);
+    expect(headerIds(from)).toEqual(['media-1']);
+
+    // Expired: uploaded again, and the new media ID replaces the old one.
+    await db.update(whatsappMediaUploadTable).set({ uploadedAt: new Date(Date.now() - WHATSAPP_MEDIA_REUSE_MS - 60_000) }).where(eq(whatsappMediaUploadTable.shareKey, shareKey));
+    from = fetchMock.mock.calls.length;
+    await dispatch(notice([second.id]), fetchMock, { documentSources });
+    expect(uploads).toBe(2);
+    expect(headerIds(from)).toEqual(['media-2']);
+    expect(await cached()).toEqual([expect.objectContaining({ mediaId: 'media-2' })]);
+  });
+
+  it('uploads a per-student PDF (no share key) for every message and records nothing', async () => {
+    const school = await createTestSchool();
+    const admission = await student(school.id);
+    const bill = {
+      available: async () => true,
+      produce: vi.fn(async () => ({ bytes: new TextEncoder().encode('%PDF-1.7 bill'), mimeType: 'application/pdf' as const, templateRevisionId: 'artf_bill_rev' })),
+    };
+    let uploads = 0;
+    const fetchMock = vi.fn<ChannelFetch>(async (url) => {
+      if (String(url).endsWith('/media')) return new Response(JSON.stringify({ id: `bill-media-${++uploads}` }), { status: 200 });
+      return sent();
+    });
+    const issued = (billNumber: string) => ({
+      type: 'bill.issued' as const,
+      data: billIssuedData(admission.id, { billNumber }),
+      schoolId: school.id,
+      recipients: { kind: 'admissions' as const, admissionIds: [admission.id] },
+    });
+    await dispatch(issued('BILL/1'), fetchMock, { documentSources: { ...noDocuments, bill } });
+    await dispatch(issued('BILL/2'), fetchMock, { documentSources: { ...noDocuments, bill } });
+    expect(uploads).toBe(2);
+    const messages = fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/messages')).map(requestBody);
+    expect(messages.map((message) => message.template.name)).toEqual(['bill_document', 'bill_document']);
+    expect(bill.produce).toHaveBeenCalledWith(expect.objectContaining({ kind: 'bill', admissionId: admission.id, filename: 'Bill BILL/1.pdf' }), { schoolId: school.id });
+    expect(await db.select().from(whatsappMediaUploadTable).where(eq(whatsappMediaUploadTable.schoolId, school.id))).toEqual([]);
   });
 });

@@ -86,7 +86,7 @@ export async function resendFailedDelivery(
     // Nor on a channel the school no longer has (a WhatsApp copy after the
     // school lost `whatsapp`).
     const disabledFeature =
-      (await disabledFeatureOf(tx, input.schoolId, row.type)) ?? (await disabledChannelFeatureOf(tx, input.schoolId, row.channel));
+      (await disabledFeatureOf(tx, input.schoolId, row.type)) ?? (await disabledChannelFeatureOf(tx, input.schoolId, row.type, row.channel));
     if (disabledFeature) throw schoolFeatureDisabledError(disabledFeature);
     const event = {
       type: row.type as NotificationType,

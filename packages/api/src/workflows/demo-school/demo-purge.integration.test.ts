@@ -24,6 +24,7 @@ import {
 import { demoSchoolPurgeTable } from '@campuspilot/db/schema/demo-school-job';
 import { noticeClassTable, noticeTable } from '@campuspilot/db/schema/notice';
 import { cadetPushSubscriptionTable } from '@campuspilot/db/schema/notification';
+import { whatsappMediaUploadTable } from '@campuspilot/db/schema/whatsapp-media';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { env } from '@campuspilot/env/server';
 import { getS3Client } from '@campuspilot/s3/client';
@@ -142,12 +143,17 @@ describe('purge_demo_school and the demo-only finance exception', () => {
       text: 'A demo remark',
       authorId: principalId,
     });
+    // A cached WhatsApp media ID of one of its shared PDFs, and one of the real school's.
+    await db.insert(whatsappMediaUploadTable).values([
+      { phoneNumberId: 'pn_test', shareKey: `schools/${demo.school.id}/notices/ntc_demo-full.pdf`, schoolId: demo.school.id, mediaId: 'media-demo', uploadedAt: new Date() },
+      { phoneNumberId: 'pn_test', shareKey: `schools/${real.school.id}/notices/ntc_real-full.pdf`, schoolId: real.school.id, mediaId: 'media-real', uploadedAt: new Date() },
+    ]);
 
     const result = await db.execute<{ counts: Record<string, number> }>(
       sql`SELECT purge_demo_school(${demo.school.id}) AS counts`,
     );
     // Events: the two emitted above plus the bill's and the payment's own (Phase 5); only the two above were fanned out.
-    expect(result.rows[0]!.counts).toMatchObject({ finance_payment: 1, finance_bill: 1, exam_student_remark: 1, user: 1, school_member: expect.any(Number), notification_event: 4, notification: 2, notification_delivery: 2, exam_result_publication: 1, school_feature_flag: 4 });
+    expect(result.rows[0]!.counts).toMatchObject({ finance_payment: 1, finance_bill: 1, exam_student_remark: 1, user: 1, school_member: expect.any(Number), notification_event: 4, notification: 2, notification_delivery: 2, exam_result_publication: 1, school_feature_flag: 4, whatsapp_media_upload: 1 });
 
     const remaining = await rowsReferencingSchool(demo.school.id);
     expect(Object.values(remaining).every((count) => count === 0)).toBe(true);
@@ -159,6 +165,7 @@ describe('purge_demo_school and the demo-only finance exception', () => {
     const realRows = await rowsReferencingSchool(real.school.id);
     expect(realRows.finance_payment).toBe(1);
     expect(realRows.school_feature_flag).toBe(3);
+    expect(realRows.whatsapp_media_upload).toBe(1);
   });
 
   it('removes the notices of a demo school with their class rows, before the template revisions and accounts they reference', async () => {

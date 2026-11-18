@@ -27,7 +27,8 @@ export const notificationChannelAdapters: Record<RemoteNotificationChannel, Noti
  * 1. the channel is unavailable on this platform → `skipped: disabled`;
  * 2. the school does not have a feature the notification type belongs to
  *    (`disabledFeatureOf`) or one this channel needs
- *    (`disabledChannelFeatureOf`: WhatsApp without the `whatsapp` feature)
+ *    (`disabledChannelFeatureOf`: WhatsApp without the `whatsapp` feature,
+ *    or the WhatsApp copy of results without `cadet`)
  *    → `skipped: feature_disabled`;
  * 3. the school is a demo school → `skipped: demo_school` (demos never send
  *    outside the inbox);

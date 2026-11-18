@@ -1,5 +1,5 @@
 import { db } from '@campuspilot/db';
-import { notificationChannelRequiredFeatures, REMOTE_NOTIFICATION_CHANNELS } from '@campuspilot/db/notifications/catalogue';
+import { notificationChannelRequiredFeatures, notificationTypeChannelRequiredFeatures, REMOTE_NOTIFICATION_CHANNELS } from '@campuspilot/db/notifications/catalogue';
 import { notificationDeliveryTable, notificationEventTable, notificationTable } from '@campuspilot/db/schema/notification';
 import { asc, eq, inArray } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
@@ -71,23 +71,37 @@ describe('the whatsapp feature', () => {
       createTestSchool({ tier: 'pro' }),
       createTestSchool({ tier: 'enterprise' }),
     ]);
-    expect(await channelsWithoutFeature(db, plus.id)).toEqual(['whatsapp']);
-    expect(await channelsWithoutFeature(db, pro.id)).toEqual(['whatsapp']);
-    expect(await channelsWithoutFeature(db, enterprise.id)).toEqual([]);
-    expect(await disabledChannelFeatureOf(db, pro.id, 'whatsapp')).toBe('whatsapp');
-    expect(await disabledChannelFeatureOf(db, enterprise.id, 'whatsapp')).toBeNull();
-    expect(await disabledChannelFeatureOf(db, pro.id, 'web_push')).toBeNull();
+    expect(await channelsWithoutFeature(db, plus.id, 'bill.issued')).toEqual(['whatsapp']);
+    expect(await channelsWithoutFeature(db, pro.id, 'bill.issued')).toEqual(['whatsapp']);
+    expect(await channelsWithoutFeature(db, enterprise.id, 'bill.issued')).toEqual([]);
+    expect(await disabledChannelFeatureOf(db, pro.id, 'bill.issued', 'whatsapp')).toBe('whatsapp');
+    expect(await disabledChannelFeatureOf(db, enterprise.id, 'bill.issued', 'whatsapp')).toBeNull();
+    expect(await disabledChannelFeatureOf(db, pro.id, 'bill.issued', 'web_push')).toBeNull();
 
     // Switched on for a Pro school, off for an Enterprise school.
     await setTestSchoolFeature(pro.id, 'whatsapp', true);
     await setTestSchoolFeature(enterprise.id, 'whatsapp', false);
-    expect(await channelsWithoutFeature(db, pro.id)).toEqual([]);
-    expect(await channelsWithoutFeature(db, enterprise.id)).toEqual(['whatsapp']);
+    expect(await channelsWithoutFeature(db, pro.id, 'bill.issued')).toEqual([]);
+    expect(await channelsWithoutFeature(db, enterprise.id, 'bill.issued')).toEqual(['whatsapp']);
     // On a Plus school the switch alone is not enough: WhatsApp needs student management.
     await setTestSchoolFeature(plus.id, 'whatsapp', true);
-    expect(await channelsWithoutFeature(db, plus.id)).toEqual(['whatsapp']);
-    expect(await schoolDeliveryFacts(db, pro.id)).toEqual({ isDemoSchool: false, channelsWithoutFeature: [] });
-    await expect(schoolDeliveryFacts(db, 'sch_missing')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(await channelsWithoutFeature(db, plus.id, 'bill.issued')).toEqual(['whatsapp']);
+    expect(await schoolDeliveryFacts(db, pro.id, 'bill.issued')).toEqual({ isDemoSchool: false, channelsWithoutFeature: [] });
+    await expect(schoolDeliveryFacts(db, 'sch_missing', 'bill.issued')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('sends the WhatsApp copy of results only while the school has the Cadet Portal, and decides no other copy by it', async () => {
+    const school = await createTestSchool();
+    expect(notificationTypeChannelRequiredFeatures['exam.results_published']).toEqual({ whatsapp: ['cadet'] });
+    expect(await channelsWithoutFeature(db, school.id, 'exam.results_published')).toEqual(['whatsapp']);
+    expect(await disabledChannelFeatureOf(db, school.id, 'exam.results_published', 'whatsapp')).toBe('cadet');
+    expect(await disabledChannelFeatureOf(db, school.id, 'exam.results_published', 'web_push')).toBeNull();
+    // Other types on WhatsApp do not need the Cadet Portal.
+    expect(await channelsWithoutFeature(db, school.id, 'bill.issued')).toEqual([]);
+
+    await setTestSchoolFeature(school.id, 'cadet', true);
+    expect(await channelsWithoutFeature(db, school.id, 'exam.results_published')).toEqual([]);
+    expect(await disabledChannelFeatureOf(db, school.id, 'exam.results_published', 'whatsapp')).toBeNull();
   });
 });
 
@@ -216,7 +230,7 @@ describe('a school without the whatsapp feature', () => {
     const forecastFor = async (schoolId: string) => {
       const admissions = await Promise.all([createTestAdmission({ schoolId }), createTestAdmission({ schoolId })]);
       const recipients = await resolveAdmissionRecipients(db, schoolId, admissions.map((admission) => admission.id));
-      return forecastDeliveries('bill.issued', await schoolDeliveryFacts(db, schoolId), recipients, adapters);
+      return forecastDeliveries('bill.issued', await schoolDeliveryFacts(db, schoolId, 'bill.issued'), recipients, adapters);
     };
     expect(await forecastFor(without.id)).toEqual({
       recipientCount: 2,
@@ -232,5 +246,43 @@ describe('a school without the whatsapp feature', () => {
         whatsapp: { owed: 2, skipped: {} },
       },
     });
+  });
+});
+
+describe('the WhatsApp copy of results', () => {
+  const emitResult = (schoolId: string, admissionId: string) =>
+    emit({
+      type: 'exam.results_published',
+      data: { sessionId: 'sess_test', examSlug: 'final', examName: 'Final examination', admissionId, studentId: 'stu_test', classId: 'cls_test', studentName: 'Test Student' },
+      schoolId,
+      recipients: { kind: 'admissions', admissionIds: [admissionId] },
+    });
+
+  it('is planned only while the school has the Cadet Portal, and is skipped when the portal is switched off before sending', async () => {
+    const school = await createTestSchool();
+    const admission = await createTestAdmission({ schoolId: school.id });
+
+    // Without the portal: the WhatsApp copy is skipped, the inbox row and web push are not.
+    const whatsapp = whatsappAdapter();
+    const webPush = webPushAdapter();
+    const adapters = { web_push: webPush.adapter, whatsapp: whatsapp.adapter };
+    const withoutPortal = await emitResult(school.id, admission.id);
+    expect(await loadDispatchableEvent(db, withoutPortal.eventId)).toMatchObject({ disabledFeature: null, channelsWithoutFeature: ['whatsapp'] });
+    await dispatchNow(withoutPortal.eventId, adapters);
+    const planned = await deliveriesOf(withoutPortal.eventId);
+    expect(planned.notifications).toHaveLength(1);
+    expect(planned.whatsapp[0]).toMatchObject({ status: 'skipped', skipReason: 'feature_disabled' });
+    expect(planned.webPush[0]).toMatchObject({ status: 'owed' });
+
+    // Planned while the portal was on, sent after it was switched off: skipped at send time.
+    await setTestSchoolFeature(school.id, 'cadet', true);
+    const queued = await emitResult(school.id, admission.id);
+    await dispatchNow(queued.eventId, adapters);
+    expect((await deliveriesOf(queued.eventId)).whatsapp[0]).toMatchObject({ status: 'owed' });
+    await setTestSchoolFeature(school.id, 'cadet', false);
+    await drainSchool(school.id, { adapters });
+    expect(whatsapp.send).not.toHaveBeenCalled();
+    expect((await deliveriesOf(queued.eventId)).whatsapp[0]).toMatchObject({ status: 'skipped', skipReason: 'feature_disabled' });
+    expect((await deliveriesOf(queued.eventId)).webPush[0]).toMatchObject({ status: 'sent' });
   });
 });

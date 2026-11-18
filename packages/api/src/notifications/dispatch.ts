@@ -61,9 +61,9 @@ export type DispatchableEvent = {
    */
   disabledFeature: SchoolFeatureKey | null;
   /**
-   * The remote channels the school lacked the feature for when the event
-   * was loaded (`channelsWithoutFeature`: WhatsApp without the `whatsapp`
-   * feature); copies on them are planned `skipped: feature_disabled` while
+   * The remote channels the school lacked a feature for, for this type, when
+   * the event was loaded (`channelsWithoutFeature`: WhatsApp without the
+   * `whatsapp` feature, or the WhatsApp copy of results without `cadet`); copies on them are planned `skipped: feature_disabled` while
    * the other channels go out. An event journaled before this field existed
    * has none; read it through {@link channelsWithoutFeatureOf}.
    */
@@ -135,7 +135,7 @@ export async function loadDispatchableEvent(db: DatabaseExecutor, eventId: strin
     schoolId: event.schoolId,
     isDemoSchool: event.isDemoSchool,
     disabledFeature: await disabledFeatureOf(db, event.schoolId, event.type),
-    channelsWithoutFeature: await channelsWithoutFeature(db, event.schoolId),
+    channelsWithoutFeature: await channelsWithoutFeature(db, event.schoolId, event.type),
     type: event.type,
     data: event.data,
     recipients: recipients.data,

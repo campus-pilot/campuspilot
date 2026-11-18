@@ -22,3 +22,4 @@ export * from "./school-creation";
 export * from "./notice";
 export * from "./assistant";
 export * from "./exam-question-paper";
+export * from "./whatsapp-media";
