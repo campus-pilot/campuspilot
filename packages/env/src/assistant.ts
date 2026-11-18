@@ -136,8 +136,8 @@ function requireQuestionPaperPricesWithModel(value: Record<string, unknown>, con
  * The settings of the stronger question paper model, in the order errors name
  * them: the model, its four prices, and the input price of the decision model
  * that tells a photographed paper with diagrams apart. The stronger model
- * writes such a paper (the figure route), and answers a conversation shared
- * with a question paper from its fourth message on.
+ * writes such a paper (the figure route), and answers chat messages sent with
+ * Pro picked when no other Pro provider is set.
  */
 const QUESTION_PAPER_STRONG_SETTING_NAMES = [
   'QUESTION_PAPER_STRONG_MODEL',
