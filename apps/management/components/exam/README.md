@@ -59,7 +59,9 @@ working-day limit. Legacy per-subject attendance/grades are preserved and displa
 separately, never silently converted to shared facts. Full contract and mobile UX:
 `.sks/exam-ui.md`; backend details: `packages/api/src/routers/school/exam/README.md`.
 
-Timetables remain optional, after creation. The page shows a table for every class
+Timetables remain optional, after plan creation: the editor offers only the
+classes taking part, and none take part before the plan exists, so the
+timetable is created after the plan. The page shows a table for every class
 without a class filter. The editor grid supports draggable class columns with a
 remove icon, multiple assessments per cell, and tooltip-labelled timing tools
 that open reuse/copy dialogs. New slots advance the date and inherit the previous

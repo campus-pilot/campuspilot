@@ -27,7 +27,14 @@ other class, and the management editor only offers those classes
 (`getExamContext`). Excluding a class later (`updateExamClasses`) is refused
 while the published timetable includes it or a draft schedules papers for it;
 an empty draft column is dropped with the class. So "examination-wide" means
-every class taking part, never an excluded class. Once the exam
+every class taking part, never an excluded class.
+
+**Generate the plan first.** Before the exam plan exists no class takes part
+(classes are chosen when the plan is generated, `generateExamPlan`), so
+`getExamContext` offers no classes and `saveExamTimetable` refuses any column:
+a timetable cannot be saved before its plan. API and MCP callers must generate
+the plan (or create a plan for the class) first; only a grid without columns
+can be saved before then. Once the exam
 is completed (`requireExamNotEnded`) nothing can be drafted, published or
 withdrawn; a timetable published before then stays published. Permission:
 `school.exam.timetable.publish` (principal, manager, exam coordinator); editing
@@ -65,7 +72,10 @@ list hides the examination from them), then sees **every** class taking part (th
 columns are also filtered by `exam_class` on read, so an excluded class never
 shows). Visibility is
 evaluated on each read, so a withdrawn timetable answers NOT_FOUND even from an
-old notification link. The PDF uses the school's selected Timetable template
+old notification link. Taking part is checked for the student's **current**
+class in the session, not for the class their results were made in (the exam
+list and results use that), so a student moved to a class not taking part
+loses the timetable but keeps their results (see the Cadet Portal guide). The PDF uses the school's selected Timetable template
 and is cached in S3 under `schools/{id}/exam-timetables/{timetable}-{publication}-{template}.pdf`.
 Screens: `apps/cadet` `/timetables` and `/timetables/{sessionId}/{examSlug}`
 (linked from More and the notification).

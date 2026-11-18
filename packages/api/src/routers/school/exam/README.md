@@ -67,12 +67,17 @@ legacy plan was deleted).
 - Reads that list an exam's classes use the row: `getExamContext.classes` (the
   timetable editor's columns) lists only classes taking part (none before the
   plan exists); `listExamClasses` lists classes taking part that have plans;
-  `saveExamTimetable` accepts only classes taking part as columns; documents
-  refuse a `classId` that does not take part; the Cadet Portal lists an exam for
-  a student only when their class takes part (once any class does) and
-  filters timetable columns by it. A published timetable is listed for, opened
-  by and announced to (`exam.timetable_published`) only students whose class
-  takes part.
+  `saveExamTimetable` accepts only classes taking part as columns, so **a
+  timetable with columns cannot be saved before the plan exists**: generate
+  the plan first (API and MCP callers too); documents
+  refuse a `classId` that does not take part; the Cadet Portal lists an exam
+  for a student's class record only when that class takes part (once any class
+  does) and, once the exam has plans, also has plans of its own (a class taking
+  part without plans, for example from the 0076 backfill, would otherwise wait
+  for a release that can never include it), and filters timetable columns by
+  it. A published timetable is listed for, opened by and announced to
+  (`exam.timetable_published`) only students whose **current** class takes
+  part (results follow the class they were made in; see docs/cadet-portal.md).
 - Migration 0076 backfills the rows once from what existed: classes with
   plans, plus the timetable columns of every exam (with or without plans), so
   existing timetables keep rendering their columns.
@@ -163,7 +168,8 @@ an existing approved result.
 
 `getExamTimetable` returns `null` when absent. `saveExamTimetable` atomically creates
 or replaces a grid; `deleteExamTimetable` removes it. Columns are ordered, unique
-school class IDs. Rows have stable unique IDs, real ISO dates, local `HH:mm` times
+IDs of classes taking part, so the plan must exist first (before it only a grid
+without columns is accepted). Rows have stable unique IDs, real ISO dates, local `HH:mm` times
 and an end time strictly after the start time. Cells allow null, one subject/mode,
 or a nonempty array of subject/mode pairs configured for that class. Duplicate
 pairs and overlapping slots for a class are rejected. A completed plan freezes

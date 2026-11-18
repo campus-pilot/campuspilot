@@ -90,16 +90,23 @@ export async function getPlan(
   if (!plan) throw rpcError.notFound('Exam plan');
   return { plan, session };
 }
+/**
+ * The school's class, or NOT_FOUND. `lock: 'share'` holds the class row until
+ * the transaction ends, so a concurrent deleteClass (FOR UPDATE) waits, or
+ * this read waits for it and then finds the class gone.
+ */
 export async function getExamClass(
   db: DatabaseExecutor,
   schoolId: string,
   classId: string,
+  lock?: 'share',
 ) {
-  const [schoolClass] = await db
+  const query = db
     .select()
     .from(classTable)
     .where(and(eq(classTable.id, classId), eq(classTable.schoolId, schoolId)))
     .limit(1);
+  const [schoolClass] = await (lock ? query.for(lock) : query);
   if (!schoolClass) throw rpcError.notFound('Class');
   return schoolClass;
 }

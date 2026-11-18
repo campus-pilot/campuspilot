@@ -222,7 +222,7 @@ and the admin follows it through `watchDemoSchoolPurge`:
    `purge_demo_school(schoolId)` (every row the school owns, including the
    in-app assistant's conversations, runs, saved costs, chat images and role list, its
    question papers with their pages, jobs, versions and figures, the classes
-   taking part in its examinations (`exam_class`, since 0075) and its
+   taking part in its examinations (`exam_class`, since 0076) and its
    demo-only users) and sets `data_deleted_at`; a replay after commit does nothing.
    Finance trigger functions allow those `DELETE`s only for a demo school
    (`is_demo`, immutable after insert since 0027) that has a

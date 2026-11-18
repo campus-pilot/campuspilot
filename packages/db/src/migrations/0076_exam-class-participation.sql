@@ -97,7 +97,7 @@ BEGIN
 	DELETE FROM "public"."exam_assessment_settings" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('exam_assessment_settings', affected);
 	DELETE FROM "public"."exam_timetable" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('exam_timetable', affected);
 	DELETE FROM "public"."exam_plan" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('exam_plan', affected);
-	-- Class participation after the plans that reference it (0075).
+	-- Class participation after the plans that reference it (0076).
 	DELETE FROM "public"."exam_class" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('exam_class', affected);
 	DELETE FROM "public"."exam_lifecycle" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('exam_lifecycle', affected);
 

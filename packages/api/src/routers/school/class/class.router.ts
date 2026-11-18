@@ -489,6 +489,17 @@ export const schoolClassRouter = {
           // every subject plan also needs) is part of that examination's
           // record: refuse with a clear reason instead of a foreign key error.
           // Taking it out of the examination is an explicit, checked step.
+          //
+          // The class row locked FOR UPDATE above is what serialises this
+          // check with a concurrent insert of participation: every writer of
+          // `exam_class` holds a lock on the class row that conflicts with it
+          // (generation and updateExamClasses take the school's class rows FOR
+          // SHARE, createExamPlan takes its class FOR SHARE, and the insert's
+          // foreign key check takes FOR KEY SHARE). If such a writer holds it,
+          // the lock above waits for its commit and this statement (read
+          // committed) then sees the new row and answers CONFLICT; if this
+          // transaction holds it first, the writer waits and then finds the
+          // class gone. Keep the lock before the check.
           const [participation] = await transaction
             .select({ examSlug: examClassTable.examSlug })
             .from(examClassTable)

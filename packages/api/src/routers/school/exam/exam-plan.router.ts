@@ -279,10 +279,15 @@ export const schoolExamPlanRouter = {
         return await context.db.transaction(async (tx) => {
           const { session } = await getExam(tx, input, 'share');
           await requireNotReleasedToCadet(tx, input);
+          // FOR SHARE serialises with deleteClass (which locks the class FOR
+          // UPDATE before refusing a class taking part): a class deleted
+          // meanwhile is NOT_FOUND here instead of a foreign key error when
+          // its participation and plan are inserted.
           const schoolClass = await getExamClass(
             tx,
             input.schoolId,
             input.classId,
+            'share',
           );
           const subject = Object.hasOwn(
             schoolClass.config.subjects,

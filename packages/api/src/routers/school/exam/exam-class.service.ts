@@ -145,9 +145,21 @@ export async function updateExamClasses(tx: DatabaseTransaction, input: UpdateEx
   };
 }
 
-/** Refuses or performs the removal of `classIds` from the examination (see {@link updateExamClasses}). */
+/**
+ * Refuses or performs the removal of `classIds` from the examination (see
+ * {@link updateExamClasses}).
+ *
+ * Saved results are found through their plans, so they are matched to the
+ * class they were entered in. Shared assessments and remarks have no class of
+ * their own and are matched through the student's **current** class
+ * (`student.class_id`), an approximation: a student moved to another class
+ * after their assessment or remark was saved counts for the new class, so it
+ * can block removing the new class and does not block removing the old one.
+ * Such a record is still kept (nothing here deletes assessments or remarks).
+ */
 async function removeExamClasses(tx: DatabaseTransaction, scope: ExamScope, classIds: string[], labels: Map<string, string>) {
   const label = (classId: string) => labels.get(classId) ?? 'A class';
+  // The caller's FOR UPDATE lock on the session (writers of results, remarks and question papers take it FOR SHARE) keeps these checks true until commit, which is what makes deleting the plans below safe despite `exam_result.exam_plan_id ON DELETE CASCADE`.
   const [withResult] = await tx
     .select({ classId: examPlanTable.classId })
     .from(examResultTable)

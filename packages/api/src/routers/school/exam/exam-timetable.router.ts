@@ -64,7 +64,7 @@ export const schoolExamTimetableRouter = {
     .route(
       route(
         "Save an exam timetable",
-        "Create or replace the optional shared grid as a draft, validating that every column is a class taking part in the exam, configured subjects and modes, dates and non-overlapping local time slots. Refused while the timetable is published (withdraw it first) and once the exam has ended.",
+        "Create or replace the optional shared grid as a draft, validating that every column is a class taking part in the exam, configured subjects and modes, dates and non-overlapping local time slots. Classes take part only once the exam plan exists (generateExamPlan chooses them), so generate the plan first: before it, every column is refused. Refused while the timetable is published (withdraw it first) and once the exam has ended.",
       ),
     )
     .meta({
