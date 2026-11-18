@@ -12,6 +12,7 @@ import {
 import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import { Button } from '@campuspilot/ui/components/button';
 import { Skeleton } from '@campuspilot/ui/components/skeleton';
+import { TableEmptyMessage } from '../table-empty-message';
 import {
   Table,
   TableBody,
@@ -32,6 +33,8 @@ export type DataTableProps<TData> = Omit<
 > & {
   ariaLabel: string;
   emptyMessage?: string;
+  /** A next step shown under `emptyMessage` while there are no rows, such as a create button. Gated by the caller. */
+  emptyAction?: ReactNode;
   showPagination?: boolean;
   onRowClick?: (row: TData) => void;
   /** Renders a full-width detail row directly beneath an expanded parent row.
@@ -55,6 +58,7 @@ function SortIndicator({ direction }: { direction: false | 'asc' | 'desc' }) {
 export function DataTable<TData>({
   ariaLabel,
   emptyMessage = 'No results found.',
+  emptyAction,
   showPagination = false,
   onRowClick,
   renderExpandedRow,
@@ -152,7 +156,7 @@ export function DataTable<TData>({
                 colSpan={table.getVisibleLeafColumns().length}
                 className="h-32 text-center text-muted-foreground"
               >
-                {emptyMessage}
+                <TableEmptyMessage message={emptyMessage} action={emptyAction} />
               </TableCell>
             </TableRow>
           )}

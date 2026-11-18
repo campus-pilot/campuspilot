@@ -101,7 +101,8 @@ function CreateExamButton({
 /**
  * Refreshes every read that shows the session's exams: the Examinations list
  * (every page and order, and the command palette's copy), the session read by
- * session settings and the exam screens, and the sessions list.
+ * session settings and the exam screens, the sessions list, and the
+ * dashboard's Examinations card (which offers this action when empty).
  */
 function useRefreshSessionExams(scope: SessionScope) {
   const queryClient = useQueryClient();
@@ -111,6 +112,7 @@ function useRefreshSessionExams(scope: SessionScope) {
         orpc.school.listExams.key({ input: scope }),
         orpc.school.getSession.key({ input: scope }),
         orpc.school.listSessions.key({ input: { schoolId: scope.schoolId } }),
+        orpc.school.getDashboard.key({ input: scope }),
       ].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
     );
 }

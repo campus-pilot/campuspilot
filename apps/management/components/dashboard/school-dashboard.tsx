@@ -32,6 +32,9 @@ import {
 
 import { authClient } from "@/lib/auth-client";
 import { orpc } from "@/lib/orpc";
+import { AddClassAction } from "@/components/add-class-action";
+import { NewNoticeAction } from "@/components/notices/notice-list";
+import { CreateExamAction } from "@/components/exam/exam-create";
 import { RequireFeature } from "@/components/require-feature";
 import { RequirePermissions } from "@/components/require-permissions";
 import { noticeAudienceLabel } from "@campuspilot/components/notices";
@@ -722,7 +725,17 @@ function AdmissionOverview({ admissions, href }: { admissions: NonNullable<Dashb
   );
 }
 
-function ExaminationOverview({ examinations, href }: { examinations: NonNullable<DashboardDto["examinations"]>; href: string }) {
+/** A dashboard card with nothing to show, and the next step when one applies (each action carries its own gates). */
+function DashboardEmpty({ message, action }: { message: string; action: ReactNode }) {
+  return (
+    <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+      <p>{message}</p>
+      {action}
+    </div>
+  );
+}
+
+function ExaminationOverview({ examinations, href, schoolId, sessionId }: { examinations: NonNullable<DashboardDto["examinations"]>; href: string } & DashboardProps) {
   return (
     <SectionCard
       title="Examinations"
@@ -745,16 +758,18 @@ function ExaminationOverview({ examinations, href }: { examinations: NonNullable
           ))}
         </div>
       ) : (
-        <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-          No examinations are available for this classroom scope.
-        </p>
+        <DashboardEmpty
+          message="No examinations are available for this classroom scope."
+          // A teacher's scope is their assigned classes; only a school-wide view can mean none are configured.
+          action={examinations.scope === "assigned" ? null : <CreateExamAction scope={{ schoolId, sessionId }} variant="outline" />}
+        />
       )}
     </SectionCard>
   );
 }
 
 /** Students per class. Only for a school whose classrooms carry student counts; classes without one are left out. */
-function ClassLoad({ classrooms, href }: { classrooms: NonNullable<DashboardDto["classrooms"]>; href: string }) {
+function ClassLoad({ classrooms, href, schoolId }: { classrooms: NonNullable<DashboardDto["classrooms"]>; href: string; schoolId: string }) {
   const classes = classrooms.classes.flatMap((item) => (item.studentCount === null ? [] : [{ ...item, studentCount: item.studentCount }]));
   const maximum = Math.max(1, ...classes.map(({ studentCount }) => studentCount));
   return (
@@ -775,9 +790,10 @@ function ClassLoad({ classrooms, href }: { classrooms: NonNullable<DashboardDto[
           ))}
         </div>
       ) : (
-        <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-          No classrooms are available for this account.
-        </p>
+        <DashboardEmpty
+          message="No classrooms are available for this account."
+          action={classrooms.scope === "assigned" ? null : <AddClassAction schoolId={schoolId} variant="outline" />}
+        />
       )}
     </SectionCard>
   );
@@ -828,9 +844,10 @@ function RecentNotices({ schoolId, sessionId }: DashboardProps) {
           ))}
         </ul>
       ) : (
-        <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-          No notices have been published to staff in this session.
-        </p>
+        <DashboardEmpty
+          message="No notices have been published to staff in this session."
+          action={<NewNoticeAction scope={{ schoolId, sessionId }} variant="outline" />}
+        />
       )}
     </SectionCard>
   );
@@ -889,14 +906,14 @@ function DashboardContent({ data, schoolId, sessionId }: DashboardProps & { data
           ) : null}
           {data.examinations ? (
             <PermissionSection action={SCHOOL_ACTIONS.READ_EXAMS} schoolId={schoolId}>
-              <ExaminationOverview examinations={data.examinations} href={schoolSessionHref(schoolId, sessionId, "/exam")} />
+              <ExaminationOverview examinations={data.examinations} href={schoolSessionHref(schoolId, sessionId, "/exam")} schoolId={schoolId} sessionId={sessionId} />
             </PermissionSection>
           ) : null}
         </section>
       ) : null}
       {data.classrooms && data.classrooms.studentCount !== null ? (
         <PermissionSection action={SCHOOL_ACTIONS.LIST_CLASSES} additionalActions={[SCHOOL_ACTIONS.LIST_STUDENTS]} schoolId={schoolId}>
-          <ClassLoad classrooms={data.classrooms} href={schoolSessionHref(schoolId, sessionId, "/classroom")} />
+          <ClassLoad classrooms={data.classrooms} href={schoolSessionHref(schoolId, sessionId, "/classroom")} schoolId={schoolId} />
         </PermissionSection>
       ) : null}
     </div>

@@ -225,7 +225,25 @@ function InviteStaffDialog({
   );
 }
 
+/**
+ * "Invite staff" with its permission gate, so the Staff navbar and empty
+ * states (the staff table, the class teacher picker) render the same entry
+ * point and the same dialog.
+ */
 export function InviteStaffAction({ schoolId }: { schoolId: string }) {
+  return (
+    <RequirePermissions
+      permissions={{
+        action: SCHOOL_ACTIONS.INVITE_MEMBER,
+        resource: { kind: 'school', schoolId },
+      }}
+    >
+      <InviteStaffButton schoolId={schoolId} />
+    </RequirePermissions>
+  );
+}
+
+function InviteStaffButton({ schoolId }: { schoolId: string }) {
   const [isOpen, setIsOpen] = useState(false);
   const [issued, setIssued] = useState<IssuedStaffPasswordDetails | null>(null);
   const dialog = (allowPhone: boolean) => (
@@ -241,6 +259,7 @@ export function InviteStaffAction({ schoolId }: { schoolId: string }) {
   return (
     <>
       <Button
+        type="button"
         variant="outline"
         size="sm"
         className="rounded-lg"

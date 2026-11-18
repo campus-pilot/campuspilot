@@ -10,11 +10,14 @@ import { Badge } from "@campuspilot/ui/components/badge";
 import { Button } from "@campuspilot/ui/components/button";
 import { ExternalLink } from "lucide-react";
 import { orpc } from "@/lib/orpc";
+import { BillingRunAction } from "./billing-run-action";
 
 type BillingRun = z.infer<typeof billingRunDtoSchema>;
 type Filters = { kind?: "regular" | "supplemental"; periodKey?: string };
 
 function BillingRunRows({ schoolId, sessionId, controller }: { schoolId: string; sessionId: string; controller: ReturnType<typeof useDataTableListState<"recordedAt" | "issueDate" | "periodKey", Filters>> }) {
+  // Only an empty list with no period search and no filter means no run exists yet.
+  const unfiltered = !controller.query.searchQuery && Object.values(controller.query.filters ?? {}).every((value) => value === undefined);
   const { data } = useSuspenseQuery(orpc.school.listBillingRuns.queryOptions({ input: { schoolId, page: controller.query.page, limit: controller.query.limit, orderBy: controller.query.orderBy, filters: { sessionId, ...(controller.query.filters?.kind ? { kind: controller.query.filters.kind } : {}), ...(controller.query.searchQuery ? { periodKey: controller.query.searchQuery } : {}) } } }));
   const columns: DataTableColumnDef<BillingRun>[] = [
     { accessorKey: "periodKey", header: "Period", cell: ({ row }) => <div><p className="font-medium">{row.original.periodKey}</p><p className="text-xs text-muted-foreground">{row.original.periodStartDate} – {row.original.periodEndDate}</p></div> },
@@ -26,7 +29,7 @@ function BillingRunRows({ schoolId, sessionId, controller }: { schoolId: string;
     { id: "status", header: "Status", cell: ({ row }) => <Badge variant={row.original.fullyReversed ? "secondary" : "outline"}>{row.original.fullyReversed ? "Reversed" : row.original.status}</Badge> },
     { id: "actions", header: "", enableSorting: false, cell: ({ row }) => <Button asChild variant="ghost" size="sm"><Link href={`/school/${encodeURIComponent(schoolId)}/sessions/${encodeURIComponent(sessionId)}/billing/runs/${encodeURIComponent(row.original.id)}`}>View<span className="sr-only"> run {row.original.periodKey}</span><ExternalLink aria-hidden /></Link></Button> },
   ];
-  return <DataTable ariaLabel="Billing runs" columns={columns} data={data.items} getRowId={(run) => run.id} manualPagination manualSorting onPaginationChange={controller.onPaginationChange} onSortingChange={controller.onSortingChange} pageCount={data.pagination.totalPages} rowCount={data.pagination.totalItems} showPagination state={controller.tableState} emptyMessage="No billing runs match this view." />;
+  return <DataTable ariaLabel="Billing runs" columns={columns} data={data.items} getRowId={(run) => run.id} manualPagination manualSorting onPaginationChange={controller.onPaginationChange} onSortingChange={controller.onSortingChange} pageCount={data.pagination.totalPages} rowCount={data.pagination.totalItems} showPagination state={controller.tableState} emptyMessage={unfiltered ? "No billing runs yet." : "No billing runs match this view."} emptyAction={unfiltered ? <BillingRunAction schoolId={schoolId} sessionId={sessionId} variant="outline" /> : undefined} />;
 }
 
 export function BillingRuns({ schoolId, sessionId }: { schoolId: string; sessionId: string }) {

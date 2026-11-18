@@ -37,6 +37,7 @@ import { BookOpen, GraduationCap, Pencil, Plus, Trash2 } from 'lucide-react';
 import { z } from 'zod';
 import { client, orpc } from '@/lib/orpc';
 import { FormErrors } from './form-errors';
+import { RequirePermissions } from './require-permissions';
 
 const slugSchema = z
   .string()
@@ -227,6 +228,24 @@ function SubjectDialog({
   );
 }
 
+/** Adding a subject saves the class configuration, so it needs that grant. */
+function AddSubjectButton({ schoolId, onAdd, variant = 'default' }: { schoolId: string; onAdd: () => void; variant?: 'default' | 'outline' }) {
+  return (
+    <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.UPDATE_CLASS_CONFIGURATION, resource: { kind: 'school', schoolId } }}>
+      <Button type="button" variant={variant} onClick={onAdd}><Plus aria-hidden /> Add subject</Button>
+    </RequirePermissions>
+  );
+}
+
+function NoSubjects({ schoolId, onAdd }: { schoolId: string; onAdd: () => void }) {
+  return (
+    <div className="flex flex-col items-center gap-3 rounded-xl border bg-card p-10 text-center text-sm text-muted-foreground">
+      <p>No subjects have been added yet.</p>
+      <AddSubjectButton schoolId={schoolId} onAdd={onAdd} variant="outline" />
+    </div>
+  );
+}
+
 export function ClassSubjects({ classId, schoolId }: { classId: string; schoolId: string }) {
   const [editingSlug, setEditingSlug] = useState<string | null>();
   const [deleteSlug, setDeleteSlug] = useState<string>();
@@ -256,7 +275,7 @@ export function ClassSubjects({ classId, schoolId }: { classId: string; schoolId
     <section className="flex flex-col gap-5">
       <div className="flex items-center justify-between gap-3">
         <div><h2 className="text-lg font-semibold">Subjects &amp; exam modes</h2><p className="text-sm text-muted-foreground">{subjects.length} {subjects.length === 1 ? 'subject' : 'subjects'}</p></div>
-        <Button type="button" onClick={() => setEditingSlug(null)}><Plus aria-hidden /> Add subject</Button>
+        <AddSubjectButton schoolId={schoolId} onAdd={() => setEditingSlug(null)} />
       </div>
       {subjects.length ? (
         <Accordion type="multiple" className="rounded-xl bg-card">
@@ -289,7 +308,7 @@ export function ClassSubjects({ classId, schoolId }: { classId: string; schoolId
             </AccordionItem>
           ))}
         </Accordion>
-      ) : <div className="rounded-xl border bg-card p-10 text-center text-sm text-muted-foreground">No subjects have been added yet.</div>}
+      ) : <NoSubjects schoolId={schoolId} onAdd={() => setEditingSlug(null)} />}
       {editingSlug !== undefined ? <SubjectDialog key={editingSlug ?? 'new'} classData={classQuery.data} originalSlug={editingSlug ?? undefined} schoolId={schoolId} onClose={() => setEditingSlug(undefined)} /> : null}
       <AlertDialog open={deleteSlug !== undefined} onOpenChange={(open) => !open && !deleteMutation.isPending && setDeleteSlug(undefined)}>
         <AlertDialogContent>
