@@ -1,8 +1,14 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { FieldApi, FormApi } from '@tanstack/react-form';
 import type { ExamPlanPreviewDto } from '@campuspilot/api/routers/school/exam/exam.dto';
 
-import { participatingClassIds, selectedPlanCount, selectionIssue } from './exam-class-model';
+import {
+  classSelectionFormOptions,
+  participatingClassIds,
+  selectedPlanCount,
+  selectionIssue,
+} from './exam-class-model';
 
 const mode = { slug: 'written', name: 'Written', percentage: 100, maxMarks: 100 };
 const preview: ExamPlanPreviewDto = {
@@ -45,5 +51,69 @@ describe('exam class selection', () => {
 
   it('lists the classes taking part now', () => {
     assert.deepEqual(participatingClassIds(preview), ['six']);
+  });
+});
+
+describe('saving a class selection', () => {
+  it('keeps the save available after a refusal, so the same selection can be retried', async () => {
+    const saved: string[][] = [];
+    const events: string[] = [];
+    let refuse = true;
+    const form = new FormApi(
+      classSelectionFormOptions({
+        classIds: ['six'],
+        save: async (classIds) => {
+          saved.push(classIds);
+          if (refuse) throw new Error('Class 7 has saved results.');
+        },
+        onAttempt: () => events.push('attempt'),
+        onRefused: (error) => {
+          events.push(`refused: ${error instanceof Error ? error.message : String(error)}`);
+        },
+      }),
+    );
+    const unmount = form.mount();
+    const field = new FieldApi({ form, name: 'classIds' });
+    const unmountField = field.mount();
+    field.handleChange(['six', 'seven']);
+
+    await form.handleSubmit();
+    assert.deepEqual(events, ['attempt', 'refused: Class 7 has saved results.']);
+    // The button is gated on canSubmit: a refusal must not close it.
+    assert.equal(form.state.canSubmit, true);
+    assert.equal(form.state.errors.length, 0);
+
+    refuse = false;
+    await form.handleSubmit();
+    assert.deepEqual(saved, [
+      ['six', 'seven'],
+      ['six', 'seven'],
+    ]);
+    assert.deepEqual(events, ['attempt', 'refused: Class 7 has saved results.', 'attempt']);
+    assert.equal(form.state.canSubmit, true);
+    unmountField();
+    unmount();
+  });
+
+  it('does not save an empty selection', async () => {
+    let calls = 0;
+    const form = new FormApi(
+      classSelectionFormOptions({
+        classIds: ['six'],
+        save: async () => {
+          calls++;
+        },
+        onAttempt: () => {},
+        onRefused: () => {},
+      }),
+    );
+    const unmount = form.mount();
+    const field = new FieldApi({ form, name: 'classIds' });
+    const unmountField = field.mount();
+    field.handleChange([]);
+    await form.handleSubmit();
+    assert.equal(calls, 0);
+    unmountField();
+    unmount();
   });
 });

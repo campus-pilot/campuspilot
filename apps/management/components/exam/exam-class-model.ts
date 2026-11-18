@@ -1,4 +1,8 @@
-import type { ExamPlanPreviewDto } from '@campuspilot/api/routers/school/exam/exam.dto';
+import { z } from 'zod';
+import {
+  examClassSelectionSchema,
+  type ExamPlanPreviewDto,
+} from '@campuspilot/api/routers/school/exam/exam.dto';
 
 /**
  * The first problem that blocks saving this selection: an invalid subject of
@@ -42,4 +46,48 @@ export function fieldError(errors: readonly unknown[]): string | undefined {
       return String(error.message);
   }
   return undefined;
+}
+
+/** The values of a form choosing the classes taking part in an examination. */
+export type ClassSelectionValues = { classIds: string[] };
+
+const classSelectionSchema = z.object({ classIds: examClassSelectionSchema });
+
+/**
+ * TanStack Form options for choosing the classes of an examination, shared by
+ * Create exam plan and Edit classes.
+ *
+ * A save the server refuses is handed to `onRefused` and is never written into
+ * the form's error map. TanStack Form treats a form-level `onSubmit` error as
+ * invalid until a field changes, so `canSubmit` stayed false and the button
+ * (gated on it) could not retry the same selection, for example after the
+ * results blocking a removal were deleted elsewhere. The caller shows the
+ * refusal outside the form and clears it in `onAttempt`, which runs as each
+ * attempt that passed validation starts.
+ */
+export function classSelectionFormOptions({
+  classIds,
+  save,
+  onAttempt,
+  onRefused,
+}: {
+  /** The selection the form starts with. */
+  classIds: string[];
+  /** Saves the selection; a rejection is a refusal. */
+  save: (classIds: string[]) => Promise<void>;
+  onAttempt: () => void;
+  onRefused: (error: unknown) => void | Promise<void>;
+}) {
+  return {
+    defaultValues: { classIds } as ClassSelectionValues,
+    validators: { onChange: classSelectionSchema, onSubmit: classSelectionSchema },
+    onSubmit: async ({ value }: { value: ClassSelectionValues }) => {
+      onAttempt();
+      try {
+        await save(value.classIds);
+      } catch (error) {
+        await onRefused(error);
+      }
+    },
+  };
 }

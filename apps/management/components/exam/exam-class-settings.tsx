@@ -5,7 +5,6 @@ import { z } from 'zod';
 import { Users } from 'lucide-react';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import {
-  examClassSelectionSchema,
   type ExamContextDto,
   type ExamOverviewDto,
   type ExamPlanPreviewDto,
@@ -30,7 +29,12 @@ import {
   ReadError,
   useExamCache,
 } from './exam-common';
-import { fieldError, participatingClassIds, selectionIssue } from './exam-class-model';
+import {
+  classSelectionFormOptions,
+  fieldError,
+  participatingClassIds,
+  selectionIssue,
+} from './exam-class-model';
 import { errorCode, errorMessage, schoolPermission, type ExamScope } from './exam-model';
 
 /**
@@ -53,6 +57,10 @@ export function ExamClassesSection({
     defaultValues: { editing: false },
     validators: { onChange: z.object({ editing: z.boolean() }) },
   });
+  // The server also accepts updateExamClasses with no plans (an examination
+  // whose only participation rows came from the migration backfill of
+  // timetable columns), but here the classes are chosen by creating the plan,
+  // so Edit classes is hidden until a plan exists.
   const editable =
     active &&
     overview.planCount > 0 &&
@@ -102,15 +110,17 @@ export function ExamClassesSection({
 }
 
 /**
- * Loads the review and renders a fresh form per `configurationVersion`. A
- * stale-review refusal (CONFLICT) refetches the review, which remounts the form
- * with the new baseline and would drop an error held inside it, so that
- * explanation is held here, outside the keyed form, until the next save
- * attempt or until the dialog closes.
+ * Loads the review and renders a fresh form per `configurationVersion`. The
+ * server's refusal of a save is held here, outside the keyed form, until the
+ * next save attempt or until the dialog closes: a stale-review refusal
+ * (CONFLICT) refetches the review, which remounts the form with the new
+ * baseline and would drop a message held inside it, and keeping any refusal
+ * out of the form's error map keeps Save classes available for a retry (see
+ * `classSelectionFormOptions`).
  */
 function ClassesPreview({ scope, onClose }: { scope: ExamScope; onClose: () => void }) {
   const query = useQuery(orpc.school.getExamPlanPreview.queryOptions({ input: scope }));
-  const stale = useForm({
+  const refusal = useForm({
     defaultValues: { message: null as string | null },
     validators: { onChange: z.object({ message: z.string().nullable() }) },
   });
@@ -118,36 +128,34 @@ function ClassesPreview({ scope, onClose }: { scope: ExamScope; onClose: () => v
   if (!query.data) return <ReadError error={query.error} retry={query.refetch} />;
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <stale.Subscribe selector={(state) => state.values.message}>
+      <refusal.Subscribe selector={(state) => state.values.message}>
         {(message) => message && <Notice error>{message}</Notice>}
-      </stale.Subscribe>
+      </refusal.Subscribe>
       <ClassesForm
         key={query.data.configurationVersion}
         scope={scope}
         preview={query.data}
         busy={query.isFetching}
         onClose={onClose}
-        onStale={(message) => stale.setFieldValue('message', message)}
+        onRefusal={(message) => refusal.setFieldValue('message', message)}
       />
     </div>
   );
 }
-
-const classesSchema = z.object({ classIds: examClassSelectionSchema });
 
 function ClassesForm({
   scope,
   preview,
   busy,
   onClose,
-  onStale,
+  onRefusal,
 }: {
   scope: ExamScope;
   preview: ExamPlanPreviewDto;
   busy: boolean;
   onClose: () => void;
-  /** Shows (or, with null, clears) the stale-review explanation outside this keyed form. */
-  onStale: (message: string | null) => void;
+  /** Shows (or, with null, clears) the server's refusal outside this keyed form. */
+  onRefusal: (message: string | null) => void;
 }) {
   const queries = useExamCache();
   const baseline = participatingClassIds(preview);
@@ -158,33 +166,35 @@ function ClassesForm({
         queries.cache.invalidateQueries({ queryKey: procedure.key({ input: scope }) }),
       ),
     ]);
-  const form = useForm({
-    defaultValues: { classIds: baseline },
-    validators: { onChange: classesSchema, onSubmit: classesSchema },
-    onSubmit: async ({ value }) => {
-      onStale(null);
-      try {
+  const form = useForm(
+    classSelectionFormOptions({
+      classIds: baseline,
+      save: async (classIds) => {
         const result = await client.school.updateExamClasses({
           ...scope,
           configurationVersion: preview.configurationVersion,
-          classIds: value.classIds,
+          classIds,
         });
         toast.success(
           `Classes updated: ${result.addedClassIds.length} added, ${result.removedClassIds.length} removed.`,
         );
         onClose();
         await refresh();
-      } catch (error) {
-        // A stale review reloads into a fresh form (new key), so its reason is
-        // shown above the form by the parent; any other refusal (results,
-        // timetable, question papers) stays with this form's selection.
-        if (errorCode(error) === 'CONFLICT')
-          onStale(`${errorMessage(error)} The list now shows the current classes taking part.`);
-        else form.setErrorMap({ onSubmit: { form: errorMessage(error), fields: {} } });
+      },
+      onAttempt: () => onRefusal(null),
+      onRefused: async (error) => {
+        // A stale review reloads into a fresh form (new key) with the current
+        // classes; any other refusal (results, timetable, question papers)
+        // keeps this form and its selection, so the same save can be retried.
+        onRefusal(
+          errorCode(error) === 'CONFLICT'
+            ? `${errorMessage(error)} The list now shows the current classes taking part.`
+            : errorMessage(error),
+        );
         await refresh();
-      }
-    },
-  });
+      },
+    }),
+  );
   return (
     <form
       className="flex min-w-0 flex-col gap-4"

@@ -3,10 +3,7 @@ import { useForm } from '@tanstack/react-form';
 import { useQuery } from '@tanstack/react-query';
 import { z } from 'zod';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
-import {
-  examClassSelectionSchema,
-  type ExamPlanPreviewDto,
-} from '@campuspilot/api/routers/school/exam/exam.dto';
+import type { ExamPlanPreviewDto } from '@campuspilot/api/routers/school/exam/exam.dto';
 import { ExamClassSelection } from '@campuspilot/components/exam/exam-class-selection';
 import { allSelectableClassIds } from '@campuspilot/components/exam/exam-class-selection-model';
 import {
@@ -28,7 +25,12 @@ import {
   useExamCache,
 } from './exam-common';
 import { errorMessage, schoolPermission, type ExamScope } from './exam-model';
-import { fieldError, selectedPlanCount, selectionIssue } from './exam-class-model';
+import {
+  classSelectionFormOptions,
+  fieldError,
+  selectedPlanCount,
+  selectionIssue,
+} from './exam-class-model';
 
 export function ExamPlanCreation({
   scope,
@@ -93,6 +95,13 @@ export function ExamPlanCreation({
     </div>
   );
 }
+/**
+ * Loads the review and renders a fresh form per `configurationVersion`. The
+ * server's refusal is held here, outside the keyed form, until the next
+ * attempt or until the dialog closes: a changed configuration remounts the
+ * form, and keeping the refusal out of the form's error map keeps Create exam
+ * plan available for a retry (see `classSelectionFormOptions`).
+ */
 function GenerationPreview({
   scope,
   active,
@@ -105,45 +114,56 @@ function GenerationPreview({
   const query = useQuery(
     orpc.school.getExamPlanPreview.queryOptions({ input: scope }),
   );
+  const refusal = useForm({
+    defaultValues: { message: null as string | null },
+    validators: { onChange: z.object({ message: z.string().nullable() }) },
+  });
   if (query.isPending) return <LoadingExam />;
   if (!query.data || query.isError)
     return <ReadError error={query.error} retry={query.refetch} />;
   return (
-    <GenerationForm
-      key={query.data.configurationVersion}
-      scope={scope}
-      preview={query.data}
-      active={active && !query.isFetching}
-      onCancel={onCancel}
-    />
+    <div className="flex min-w-0 flex-col gap-4">
+      <refusal.Subscribe selector={(state) => state.values.message}>
+        {(message) => message && <Notice error>{message}</Notice>}
+      </refusal.Subscribe>
+      <GenerationForm
+        key={query.data.configurationVersion}
+        scope={scope}
+        preview={query.data}
+        active={active && !query.isFetching}
+        onCancel={onCancel}
+        onRefusal={(message) => refusal.setFieldValue('message', message)}
+      />
+    </div>
   );
 }
-/** Every class that can take part starts selected, which creates the same plans as generating for the whole school. */
-const generationSchema = z.object({ classIds: examClassSelectionSchema });
 
+/** Every class that can take part starts selected, which creates the same plans as generating for the whole school. */
 function GenerationForm({
   scope,
   preview,
   active,
   onCancel,
+  onRefusal,
 }: {
   scope: ExamScope;
   preview: ExamPlanPreviewDto;
   active: boolean;
   onCancel: () => void;
+  /** Shows (or, with null, clears) the server's refusal outside this keyed form. */
+  onRefusal: (message: string | null) => void;
 }) {
   const queries = useExamCache();
   const exists = preview.existingPlanCount > 0;
-  const form = useForm({
-    defaultValues: { classIds: allSelectableClassIds(preview.classes) },
-    validators: { onChange: generationSchema, onSubmit: generationSchema },
-    onSubmit: async ({ value }) => {
-      if (!active || exists || selectionIssue(preview, value.classIds)) return;
-      try {
+  const form = useForm(
+    classSelectionFormOptions({
+      classIds: allSelectableClassIds(preview.classes),
+      save: async (classIds) => {
+        if (!active || exists || selectionIssue(preview, classIds)) return;
         const result = await client.school.generateExamPlan({
           ...scope,
           configurationVersion: preview.configurationVersion,
-          classIds: value.classIds,
+          classIds,
         });
         toast.success(
           `Exam plan created for ${result.createdCount} class subjects.`,
@@ -155,10 +175,10 @@ function GenerationForm({
             queryKey: orpc.school.getExamContext.key({ input: scope }),
           }),
         ]);
-      } catch (error) {
-        form.setErrorMap({
-          onSubmit: { form: errorMessage(error), fields: {} },
-        });
+      },
+      onAttempt: () => onRefusal(null),
+      onRefused: async (error) => {
+        onRefusal(errorMessage(error));
         // Refresh source data without resubmitting. A changed configuration gets
         // a new keyed review; existing plans are never overwritten on retry.
         toast.error(errorMessage(error));
@@ -168,9 +188,9 @@ function GenerationForm({
           }),
           queries.plans(scope),
         ]);
-      }
-    },
-  });
+      },
+    }),
+  );
   return (
     <form
       className="flex min-w-0 flex-col gap-4"
