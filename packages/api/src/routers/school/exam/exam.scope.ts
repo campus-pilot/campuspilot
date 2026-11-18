@@ -1,5 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import {
+  examClassTable,
   examPlanTable,
   examStudentAssessmentTable,
   examAssessmentSettingsTable,
@@ -31,4 +32,11 @@ export const lifecycleWhere = (scope: ExamScope) =>
     eq(examLifecycleTable.schoolId, scope.schoolId),
     eq(examLifecycleTable.sessionId, scope.sessionId),
     eq(examLifecycleTable.examSlug, scope.examSlug),
+  );
+/** The classes taking part in the examination (`exam_class`). */
+export const examClassWhere = (scope: ExamScope) =>
+  and(
+    eq(examClassTable.schoolId, scope.schoolId),
+    eq(examClassTable.sessionId, scope.sessionId),
+    eq(examClassTable.examSlug, scope.examSlug),
   );

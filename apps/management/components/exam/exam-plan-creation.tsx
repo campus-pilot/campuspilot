@@ -4,7 +4,8 @@ import { useQuery } from '@tanstack/react-query';
 import { z } from 'zod';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import type { ExamPlanPreviewDto } from '@campuspilot/api/routers/school/exam/exam.dto';
-import { ExamPlanReviewTable } from '@campuspilot/components/exam/exam-plan-review-table';
+import { ExamClassSelection } from '@campuspilot/components/exam/exam-class-selection';
+import { allSelectableClassIds } from '@campuspilot/components/exam/exam-class-selection-model';
 import {
   Dialog,
   DialogContent,
@@ -24,6 +25,12 @@ import {
   useExamCache,
 } from './exam-common';
 import { errorMessage, schoolPermission, type ExamScope } from './exam-model';
+import {
+  classSelectionFormOptions,
+  fieldError,
+  selectedPlanCount,
+  selectionIssue,
+} from './exam-class-model';
 
 export function ExamPlanCreation({
   scope,
@@ -66,7 +73,8 @@ export function ExamPlanCreation({
                     <DialogHeader>
                       <DialogTitle>Review exam plan</DialogTitle>
                       <DialogDescription>
-                        Generated from class settings. Start the examination
+                        Choose the classes taking part. Their plans are
+                        generated from class settings. Start the examination
                         when you are ready to enter results.
                       </DialogDescription>
                     </DialogHeader>
@@ -87,6 +95,13 @@ export function ExamPlanCreation({
     </div>
   );
 }
+/**
+ * Loads the review and renders a fresh form per `configurationVersion`. The
+ * server's refusal is held here, outside the keyed form, until the next
+ * attempt or until the dialog closes: a changed configuration remounts the
+ * form, and keeping the refusal out of the form's error map keeps Create exam
+ * plan available for a retry (see `classSelectionFormOptions`).
+ */
 function GenerationPreview({
   scope,
   active,
@@ -99,46 +114,56 @@ function GenerationPreview({
   const query = useQuery(
     orpc.school.getExamPlanPreview.queryOptions({ input: scope }),
   );
+  const refusal = useForm({
+    defaultValues: { message: null as string | null },
+    validators: { onChange: z.object({ message: z.string().nullable() }) },
+  });
   if (query.isPending) return <LoadingExam />;
   if (!query.data || query.isError)
     return <ReadError error={query.error} retry={query.refetch} />;
   return (
-    <GenerationForm
-      key={query.data.configurationVersion}
-      scope={scope}
-      preview={query.data}
-      active={active && !query.isFetching}
-      onCancel={onCancel}
-    />
+    <div className="flex min-w-0 flex-col gap-4">
+      <refusal.Subscribe selector={(state) => state.values.message}>
+        {(message) => message && <Notice error>{message}</Notice>}
+      </refusal.Subscribe>
+      <GenerationForm
+        key={query.data.configurationVersion}
+        scope={scope}
+        preview={query.data}
+        active={active && !query.isFetching}
+        onCancel={onCancel}
+        onRefusal={(message) => refusal.setFieldValue('message', message)}
+      />
+    </div>
   );
 }
+
+/** Every class that can take part starts selected, which creates the same plans as generating for the whole school. */
 function GenerationForm({
   scope,
   preview,
   active,
   onCancel,
+  onRefusal,
 }: {
   scope: ExamScope;
   preview: ExamPlanPreviewDto;
   active: boolean;
   onCancel: () => void;
+  /** Shows (or, with null, clears) the server's refusal outside this keyed form. */
+  onRefusal: (message: string | null) => void;
 }) {
   const queries = useExamCache();
-  const blocked =
-    preview.planCount === 0 ||
-    preview.existingPlanCount > 0 ||
-    preview.classes.some((schoolClass) =>
-      schoolClass.subjects.some((subject) => subject.issue !== null),
-    );
-  const form = useForm({
-    defaultValues: {},
-    validators: { onSubmit: z.object({}) },
-    onSubmit: async () => {
-      if (!active || blocked) return;
-      try {
+  const exists = preview.existingPlanCount > 0;
+  const form = useForm(
+    classSelectionFormOptions({
+      classIds: allSelectableClassIds(preview.classes),
+      save: async (classIds) => {
+        if (!active || exists || selectionIssue(preview, classIds)) return;
         const result = await client.school.generateExamPlan({
           ...scope,
           configurationVersion: preview.configurationVersion,
+          classIds,
         });
         toast.success(
           `Exam plan created for ${result.createdCount} class subjects.`,
@@ -150,10 +175,10 @@ function GenerationForm({
             queryKey: orpc.school.getExamContext.key({ input: scope }),
           }),
         ]);
-      } catch (error) {
-        form.setErrorMap({
-          onSubmit: { form: errorMessage(error), fields: {} },
-        });
+      },
+      onAttempt: () => onRefusal(null),
+      onRefused: async (error) => {
+        onRefusal(errorMessage(error));
         // Refresh source data without resubmitting. A changed configuration gets
         // a new keyed review; existing plans are never overwritten on retry.
         toast.error(errorMessage(error));
@@ -163,9 +188,9 @@ function GenerationForm({
           }),
           queries.plans(scope),
         ]);
-      }
-    },
-  });
+      },
+    }),
+  );
   return (
     <form
       className="flex min-w-0 flex-col gap-4"
@@ -174,47 +199,93 @@ function GenerationForm({
         void form.handleSubmit();
       }}
     >
-      <ExamPlanReviewTable classes={preview.classes} />
-      {blocked && (
+      <form.Field name="classIds">
+        {(field) => (
+          <ExamClassSelection
+            classes={preview.classes}
+            selected={field.state.value}
+            disabled={!active || exists}
+            error={fieldError(field.state.meta.errors)}
+            onChange={(classIds) => field.handleChange(classIds)}
+          />
+        )}
+      </form.Field>
+      {exists ? (
+        <Notice error>An exam plan already exists. Return to the saved plans.</Notice>
+      ) : preview.planCount === 0 ? (
         <Notice error>
-          {preview.existingPlanCount
-            ? 'An exam plan already exists. Return to the saved plans.'
-            : 'Configure subjects and valid assessment modes in class settings before creating this plan.'}
+          Configure subjects and valid assessment modes in class settings
+          before creating this plan.
         </Notice>
-      )}
+      ) : null}
       <form.Subscribe
         selector={(state) => ({
+          classIds: state.values.classIds,
           canSubmit: state.canSubmit,
           isSubmitting: state.isSubmitting,
           errors: state.errors,
         })}
       >
-        {({ canSubmit, isSubmitting, errors }) => (
-          <div className="sticky bottom-0 flex flex-col gap-3 border-t bg-popover py-3">
-            <Issues errors={errors} />
-            <p className="text-sm text-muted-foreground">
-              {preview.planCount} subject plans · {preview.totalMarks} marks per
-              subject. Classes without subjects are skipped.
-            </p>
-            <div className="flex flex-wrap justify-end gap-3">
-              <ExamButton
-                type="button"
-                variant="outline"
-                disabled={isSubmitting}
-                onClick={onCancel}
-              >
-                Cancel
-              </ExamButton>
-              <ExamButton
-                type="submit"
-                disabled={!active || blocked || !canSubmit || isSubmitting}
-              >
-                {isSubmitting ? 'Creating plan…' : 'Create exam plan'}
-              </ExamButton>
-            </div>
-          </div>
+        {({ classIds, canSubmit, isSubmitting, errors }) => (
+          <GenerationFooter
+            preview={preview}
+            classIds={classIds}
+            errors={errors}
+            submitting={isSubmitting}
+            submittable={active && !exists && canSubmit}
+            onCancel={onCancel}
+          />
         )}
       </form.Subscribe>
     </form>
+  );
+}
+
+function GenerationFooter({
+  preview,
+  classIds,
+  errors,
+  submitting,
+  submittable,
+  onCancel,
+}: {
+  preview: ExamPlanPreviewDto;
+  classIds: string[];
+  errors: readonly unknown[];
+  submitting: boolean;
+  submittable: boolean;
+  onCancel: () => void;
+}) {
+  const issue = selectionIssue(preview, classIds);
+  return (
+    <div className="sticky bottom-0 flex flex-col gap-3 border-t bg-popover py-3">
+      {issue && (
+        <Notice error>
+          {issue} Fix it in class settings or leave the class out.
+        </Notice>
+      )}
+      <Issues errors={errors} />
+      <p className="text-sm text-muted-foreground">
+        {selectedPlanCount(preview, classIds)} subject plans ·{' '}
+        {preview.totalMarks} marks per subject. Classes left out take no part
+        in this examination.
+      </p>
+      <div className="flex flex-wrap justify-end gap-3">
+        <ExamButton
+          type="button"
+          variant="outline"
+          disabled={submitting}
+          onClick={onCancel}
+        >
+          Cancel
+        </ExamButton>
+        <ExamButton
+          type="submit"
+          disabled={!submittable || issue !== null || submitting}
+        >
+          {submitting ? 'Creating plan…' : 'Create exam plan'}
+        </ExamButton>
+      </div>
+    </div>
   );
 }

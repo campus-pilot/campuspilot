@@ -6,6 +6,7 @@ import { RequirePermissions } from '@/components/require-permissions';
 import { orpc } from '@/lib/orpc';
 import { LoadingExam, Notice, ReadError } from './exam-common';
 import { ExamActions } from './exam-lifecycle';
+import { ExamClassesSection } from './exam-class-settings';
 import { schoolPermission, type ExamScope } from './exam-model';
 import { NotificationDeliveryLogSection } from '@/components/notifications/notification-delivery-log';
 
@@ -51,6 +52,9 @@ function SettingsData({ scope, placement }: {
     <div className="flex flex-col gap-4">
       <h2 className="text-lg font-semibold">Settings</h2>
       {!session.data.isActive && <Notice>Historical session · Read-only</Notice>}
+      <ExamClassesSection scope={scope}
+        active={session.data.isActive && !session.isError && !overview.isError && !context.isError}
+        overview={overview.data} context={context.data} />
       {controls}
       {studentManagement ? (
         <NotificationDeliveryLogSection

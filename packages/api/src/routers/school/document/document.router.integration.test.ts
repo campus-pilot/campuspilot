@@ -29,6 +29,7 @@ import {
   createTestSchool,
   createTestSession,
   createTestStudent,
+  includeTestExamClasses,
 } from '../../../../test/fixtures';
 import { DOCUMENT_MARKETPLACE } from './document.catalog';
 import { combineDocuments, renderDocument } from './document.render';
@@ -123,6 +124,7 @@ describe('document templates, generation, and artifact lifecycle', () => {
         },
       })
       .where(eq(schoolSessionTable.id, sessionId));
+    await includeTestExamClasses([{ schoolId, sessionId, examSlug: 'midterm', classId }]);
     const [plan] = await db
       .insert(examPlanTable)
       .values({

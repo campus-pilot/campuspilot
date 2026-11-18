@@ -1,6 +1,7 @@
 import type { DatabaseExecutor } from '@campuspilot/db';
 import { admissionTable } from '@campuspilot/db/schema/admission';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
+import { examClassTable } from '@campuspilot/db/schema/exam';
 import { studentTable } from '@campuspilot/db/schema/student';
 import { and, asc, eq } from 'drizzle-orm';
 
@@ -17,8 +18,10 @@ import { MAX_EVENT_RECIPIENTS } from './notices';
  *   of the school, in events of at most {@link MAX_EVENT_RECIPIENTS};
  * - **students** (`exam.timetable_published`: inbox, web push, WhatsApp),
  *   only while the school has the `cadet` feature: one event per registered
- *   student enrolled in the timetable's session, whatever their class, because
- *   every student may read every class's timetable. They are bulk sends.
+ *   student enrolled in the timetable's session whose class takes part in the
+ *   examination (`exam_class`), the students who may open it in the Cadet
+ *   Portal; they may read every class taking part. A student of an excluded
+ *   class is not notified. They are bulk sends.
  *
  * With the `cadet` feature off, only the staff event is emitted; switching it
  * on later notifies nobody retroactively. Recipients are resolved when the
@@ -40,14 +43,25 @@ export const timetableStaffEventKey = (timetableId: string, publicationNumber: n
     ? `exam-timetable-staff:${timetableId}:${publicationNumber}`
     : `exam-timetable-staff:${timetableId}:${publicationNumber}:${chunk}`;
 
-export type TimetableAudienceScope = { schoolId: string; sessionId: string };
+export type TimetableAudienceScope = { schoolId: string; sessionId: string; examSlug: string };
 
-/** Registered students enrolled in the session, by admission, ordered by name. */
+/**
+ * Registered students enrolled in the session in a class taking part in the
+ * examination, by admission, ordered by name.
+ */
 async function timetableCadetRoster(db: DatabaseExecutor, scope: TimetableAudienceScope) {
   return db
     .select({ admissionId: admissionTable.id, name: admissionTable.name })
     .from(studentTable)
     .innerJoin(admissionTable, and(eq(admissionTable.id, studentTable.admissionId), eq(admissionTable.schoolId, studentTable.schoolId)))
+    .innerJoin(
+      examClassTable,
+      and(
+        eq(examClassTable.sessionId, studentTable.sessionId),
+        eq(examClassTable.examSlug, scope.examSlug),
+        eq(examClassTable.classId, studentTable.classId),
+      ),
+    )
     .where(and(eq(studentTable.schoolId, scope.schoolId), eq(studentTable.sessionId, scope.sessionId), eq(admissionTable.registered, true)))
     .orderBy(asc(admissionTable.name), asc(admissionTable.id));
 }

@@ -15,7 +15,7 @@ import sharp from 'sharp';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { expectFeatureDisabled, expectPermissionDenied } from '../../../../test/feature-flags';
-import { createTestSchoolMember, createTestSession, setTestSchoolFeature } from '../../../../test/fixtures';
+import { createTestSchoolMember, createTestSession, includeTestExamClasses, setTestSchoolFeature } from '../../../../test/fixtures';
 import { createQuestionPaperWorld, switchAssistantRoles, type QuestionPaperWorld } from '../../../../test/question-paper';
 import { assertQuestionPaperAssistantAccess } from './question-paper.access';
 import { resolvePaperScope } from './question-paper.scope';
@@ -45,6 +45,7 @@ async function addTermTwo(world: QuestionPaperWorld) {
     .update(schoolSessionTable)
     .set({ sessionConfig: { ...config, examConfig: { ...config.examConfig, 'term-2': { name: 'Term II Examination', order: 2 } } } })
     .where(eq(schoolSessionTable.id, world.sessionId));
+  await includeTestExamClasses([{ schoolId: world.schoolId, sessionId: world.sessionId, examSlug: 'term-2', classId: world.classId }]);
   await db.insert(examPlanTable).values([
     { schoolId: world.schoolId, sessionId: world.sessionId, classId: world.classId, examSlug: 'term-2', subjectSlug: 'science', totalMarks: 30, modeConfig: { theory: { percentage: 100, maxMarks: 30 } }, status: 'approved' },
     { schoolId: world.schoolId, sessionId: world.sessionId, classId: world.classId, examSlug: 'term-2', subjectSlug: 'math', totalMarks: 12, modeConfig: { theory: { percentage: 100, maxMarks: 12 } }, status: 'approved' },
@@ -127,6 +128,7 @@ describe('starting a paper from an earlier paper', () => {
       .update(schoolSessionTable)
       .set({ sessionConfig: { examConfig: { annual: { name: 'Annual Examination', order: 1 } }, coScholasticAreas: {}, gradingScale: {}, attendanceTracking: { enabled: false } } })
       .where(eq(schoolSessionTable.id, previous.id));
+    await includeTestExamClasses([{ schoolId: world.schoolId, sessionId: previous.id, examSlug: 'annual', classId: world.classId }]);
     await db.insert(examPlanTable).values({
       schoolId: world.schoolId,
       sessionId: previous.id,

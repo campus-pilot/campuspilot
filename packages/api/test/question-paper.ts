@@ -15,6 +15,7 @@ import {
   createTestSession,
   type TestClient,
   type UserSession,
+  includeTestExamClasses,
 } from './fixtures';
 import type { Context } from '../src/context';
 
@@ -79,6 +80,7 @@ export async function createQuestionPaperWorld(options: { template?: boolean; sc
         },
       })
       .where(eq(classTable.id, id));
+    await includeTestExamClasses([{ schoolId, sessionId, examSlug: 'term-1', classId: id }]);
     await db.insert(examPlanTable).values([
       { schoolId, sessionId, classId: id, examSlug: 'term-1', subjectSlug: 'science', totalMarks: 20, modeConfig: { theory: { percentage: 100, maxMarks: 20 } }, status: 'approved' },
       {

@@ -3,6 +3,7 @@ import { user } from '@campuspilot/db/schema/auth';
 import { classTable, sectionTable } from '@campuspilot/db/schema/class';
 import {
   examAssessmentSettingsTable,
+  examClassTable,
   examLifecycleTable,
   examPlanTable,
   examResultTable,
@@ -115,6 +116,30 @@ export function parseExamId(examId: string) {
 
 const sessionLabelOf = (start: number, end: number) => `${start}–${String(end).slice(-2)}`;
 
+/**
+ * Whether a student of `classId` sits an examination, from two independent
+ * facts: which classes take part (`exam_class`) and which classes have plans.
+ *
+ * - Once the examination has any plans, a class sits it only when it both
+ *   takes part and has plans of its own. A class can take part without plans
+ *   (its last single plan deleted, or recorded by the 0076 backfill because a
+ *   timetable scheduled it); its results can never be released (`examState`
+ *   needs plans), so listing it would show "awaiting release" forever.
+ * - Before any plan exists, a class sits it when it takes part, or when no
+ *   class takes part yet (an examination not planned at all is listed for
+ *   every class, as before classes could be chosen).
+ */
+function sitsCadetExam(
+  classId: string,
+  participants: ReadonlyArray<{ classId: string }>,
+  examPlanCount: number,
+  classPlanCount: number,
+): boolean {
+  const takesPart = participants.some((row) => row.classId === classId);
+  if (examPlanCount > 0) return takesPart && classPlanCount > 0;
+  return takesPart || participants.length === 0;
+}
+
 function examState(
   planCountForClass: number,
   lifecycle: { status: 'ready' | 'active' | 'completed'; cadetReleasedAt: Date | null } | undefined,
@@ -207,7 +232,7 @@ export async function loadCadetAcademics(db: DatabaseExecutor, cadet: Cadet) {
   }
   const classIds = [...new Set(recordKeys.map(({ classId }) => classId))];
   const sessionIds = [...new Set(enrollments.map(({ sessionId }) => sessionId))];
-  const [classes, plans, lifecycles] = await Promise.all([
+  const [classes, plans, lifecycles, examClasses] = await Promise.all([
     classIds.length
       ? db
           .select({ id: classTable.id, label: classTable.label, config: classTable.config })
@@ -238,6 +263,12 @@ export async function loadCadetAcademics(db: DatabaseExecutor, cadet: Cadet) {
           })
           .from(examLifecycleTable)
           .where(and(eq(examLifecycleTable.schoolId, cadet.schoolId), inArray(examLifecycleTable.sessionId, sessionIds)))
+      : [],
+    sessionIds.length
+      ? db
+          .select({ sessionId: examClassTable.sessionId, examSlug: examClassTable.examSlug, classId: examClassTable.classId })
+          .from(examClassTable)
+          .where(and(eq(examClassTable.schoolId, cadet.schoolId), inArray(examClassTable.sessionId, sessionIds)))
       : [],
   ]);
   const classById = new Map(classes.map((row) => [row.id, row]));
@@ -272,8 +303,8 @@ export async function loadCadetAcademics(db: DatabaseExecutor, cadet: Cadet) {
     for (const [examSlug, definition] of definitions) {
       const examPlans = plans.filter((plan) => plan.sessionId === record.sessionId && plan.examSlug === examSlug);
       const classPlans = examPlans.filter((plan) => plan.classId === record.classId);
-      // An exam planned only for other classes is not one this student sits.
-      if (examPlans.length > 0 && classPlans.length === 0) continue;
+      const participants = examClasses.filter((row) => row.sessionId === record.sessionId && row.examSlug === examSlug);
+      if (!sitsCadetExam(record.classId, participants, examPlans.length, classPlans.length)) continue;
       const lifecycle = lifecycleByExam.get(`${record.sessionId}|${examSlug}`);
       const state = examState(classPlans.length, lifecycle);
       list.push({

@@ -6,6 +6,7 @@ import type { SessionConfig } from '@campuspilot/db/schema/jsonb/session-config'
 import { schoolSessionTable } from '@campuspilot/db/schema/session';
 import { eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
+import { selectableExamClassIds } from '../src/routers/school/exam/exam.dto';
 
 import {
   createSchoolStaffSession,
@@ -118,7 +119,7 @@ export async function runExam(
   options: { complete?: boolean; workingDays?: number } = {},
 ) {
   const preview = await client.school.getExamPlanPreview(scope);
-  await client.school.generateExamPlan({ ...scope, configurationVersion: preview.configurationVersion });
+  await client.school.generateExamPlan({ ...scope, configurationVersion: preview.configurationVersion, classIds: selectableExamClassIds(preview) });
   await client.school.transitionExam({ ...scope, status: 'active' });
   if (options.workingDays !== undefined)
     await client.school.updateExamAssessmentSettings({ ...scope, totalWorkingDays: options.workingDays });

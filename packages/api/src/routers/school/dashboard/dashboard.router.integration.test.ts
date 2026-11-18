@@ -19,6 +19,7 @@ import {
   setTestSchoolFeature,
   createTestSession,
   createTestStudent,
+  includeTestExamClasses,
 } from "../../../../test/fixtures";
 
 describe("school.getDashboard integration", () => {
@@ -131,6 +132,10 @@ describe("school.getDashboard integration", () => {
         },
       })
       .where(eq(schoolSessionTable.id, sessionId));
+    await includeTestExamClasses([
+      { schoolId, sessionId, examSlug: "half_yearly", classId: firstClassId },
+      { schoolId, sessionId, examSlug: "half_yearly", classId: secondClassId },
+    ]);
     await db.insert(examPlanTable).values([
       {
         schoolId,

@@ -102,7 +102,7 @@ disabled with "Withdraw from Cadet Portal before reopening." beside it instead o
 opening a dialog that can only fail.
 
 Settings holds
-working days, lifecycle and Cadet Portal release controls. Keep the immediate task visible in context: Create plan in an empty state,
+the classes taking part, working days, lifecycle and Cadet Portal release controls. Keep the immediate task visible in context: Create plan in an empty state,
 Enter results in a student preview, and Save in an editor. Avoid a row of competing
 buttons. Menu entries must preserve the underlying shared component's required
 group/context hierarchy; inspect the actual wrapper before composing its parts.
@@ -113,6 +113,22 @@ and exam status. The entire card links to the examination workspace; do not add 
 redundant details link. This collection-specific decision does not make cards the
 default for every operational list.
 
+### Sidebar entries that open in place
+
+A sidebar entry that leads to a choice rather than a page (today the Academics
+group's **Question papers**: examination, then class) is an
+`AppShellNavigationDisclosure`: pressing it folds app-owned content open under it
+instead of opening a popover. The same markup then works in the desktop sidebar and
+the mobile sheet (a popover beside the sheet has no room on a phone); the shell's
+sidebar collapses off-canvas, so there is no icon-only state. The content is mounted
+only while open, so its reads start then. Render it as a `SidebarMenuSub`; its links
+use `AppShellSidebarSubLink` and code that navigates calls
+`useAppShellCloseMobileSidebar` first, so the sheet closes either way. Long lists
+(classes) are cmdk lists with a search box; short ones (a session's examinations)
+are plain nested folds. Show loading, empty and read-error states in each list, gate
+the entry with the same permissions and features as the page it leads to, and leave
+it out when a fact it needs (the selected session) is missing.
+
 ## Empty states and configuration-driven creation
 
 An empty state should explain the missing resource and offer one next action.
@@ -120,7 +136,10 @@ For an examination without plans, show the examination name followed by a dashed
 container with “No plans yet”, a short muted explanation, and Create plan.
 
 Create plan opens a concise review dialog. Summarize classes, enrolled student
-counts, subjects and modes. Clicking a class row expands its subject/mode breakdown
+counts, subjects and modes, with a checkbox per class choosing whether it takes
+part in the examination (every class with subjects selected by default, Select
+all / Deselect all, at least one class required before Create is enabled). The
+same table edits the classes later from Settings ("Classes taking part"). Clicking a class row expands its subject/mode breakdown
 as a sub-table directly underneath it; do not add a separate all-classes accordion.
 Do not ask users to re-enter facts that already exist in session/class configuration.
 The server validates the reviewed configuration and creates the plans atomically.
@@ -281,8 +300,17 @@ the implementation and APIs in more detail.
   is wrapped in the same `READ_EXAM_PLANS` gate as Results, and the exam-name
   breadcrumb on class and student pages links to `/results`, never the landing. The
   lifecycle navbar action shows on the root and on `/results`.
-- `/question-paper` is one table per accessible class (row per subject and mode,
-  sticky subject column, status badge, Open/View). `/question-paper/<class>/<subject>/<mode>`
+- `/question-paper` is an accordion of the accessible classes, one open at a time and kept
+  in the address as `?class=<classId>` (replaced without scrolling; no parameter means all
+  collapsed, an unknown id opens nothing). Each trigger names the class with a summary of
+  the rows it shows ("3 of 8 ready · 1 generating"); the open class is one table (row per
+  subject and mode, sticky subject column, status badge, Open/View). A multi-select Mode
+  `TableFilterBar` above it filters rows on the client and is remembered per school in
+  local storage; a class emptied by the filter says "No papers match the selected modes".
+  Closed classes are unmounted, so the voice assistant sees only the open class's links.
+  A paper's *Question paper* breadcrumb (and the redirect after deleting a paper) returns
+  to the tab with that paper's class open (`questionPaperReturnHref`).
+  See [Question papers](../../../docs/question-papers.md#ways-into-the-tab). `/question-paper/<class>/<subject>/<mode>`
   is the paper's screen. A paper with nothing yet is one card in a centred column
   (`max-w-3xl`), in the shape of the assistant's message box: what the paper is made from
   on top (photos as a row of page tiles that ends in a dashed add tile, `PaperSourceTray`;

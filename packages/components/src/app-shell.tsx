@@ -17,6 +17,7 @@ import {
 } from 'react';
 import {
   BookOpen,
+  ChevronRight,
   CircleAlert,
   CircleUserRound,
   Download,
@@ -42,6 +43,11 @@ import {
   BreadcrumbSeparator,
 } from '@campuspilot/ui/components/breadcrumb';
 import { Button } from '@campuspilot/ui/components/button';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@campuspilot/ui/components/collapsible';
 import {
   Dialog,
   DialogContent,
@@ -98,16 +104,49 @@ export type AppShellNavigationItem = {
   wrap?: (children: ReactNode) => ReactNode;
 };
 
+/**
+ * A sidebar entry that opens app-owned content in place instead of linking
+ * to a page: pressing it expands `content` under it, pressing it again folds
+ * it away. The shell renders the trigger and the fold; the app renders the
+ * content (for example a list it reads from the API), so the shell still
+ * fetches nothing.
+ *
+ * The content is mounted only while the entry is open (Radix Collapsible
+ * unmounts closed content), so its reads start when the person opens it.
+ * It sits inside the sidebar menu item, so it is usually a `SidebarMenuSub`;
+ * its links close the mobile sheet when they use `AppShellSidebarSubLink`,
+ * and code that navigates closes it with `useAppShellCloseMobileSidebar`.
+ *
+ * An inline fold was chosen over a popover because the same markup works in
+ * the expanded desktop sidebar and in the mobile sheet (a popover beside an
+ * 18rem sheet has no room on a phone, and a popover inside the sheet's modal
+ * dialog adds a second layer to dismiss). The shell's sidebar collapses
+ * off-canvas, never to icons, so there is no icon-only state to serve.
+ */
+export type AppShellNavigationDisclosure = {
+  type: 'disclosure';
+  id: string;
+  label: string;
+  icon: AppShellIcon;
+  /** Whether the trigger is highlighted for the current path (for example while a page the content leads to is open). */
+  isActive?: (currentPath: string) => boolean;
+  /** App-owned content shown under the trigger while it is open. */
+  content: ReactNode;
+  /** Lets the consuming app gate the complete entry without fetching data in the shell. */
+  wrap?: (children: ReactNode) => ReactNode;
+};
+
 export type AppShellNavigationGroup = {
   type: 'group';
   id: string;
   label: string;
-  items: AppShellNavigationItem[];
+  items: (AppShellNavigationItem | AppShellNavigationDisclosure)[];
 };
 
 export type AppShellNavigationEntry =
   | AppShellNavigationGroup
-  | AppShellNavigationItem;
+  | AppShellNavigationItem
+  | AppShellNavigationDisclosure;
 
 export type AppShellBreadcrumb = {
   id: string;
@@ -311,6 +350,52 @@ function SidebarAppLink({
       }}
     />
   );
+}
+
+/**
+ * The app's link renderer, for links that app-owned sidebar content renders
+ * (`AppShellSidebarSubLink`). Undefined renders a plain anchor, like the
+ * shell's own links without `renderLink`.
+ */
+const AppShellRenderLinkContext = createContext<AppShellProps['renderLink']>(undefined);
+
+/**
+ * A sub-navigation link for app-owned sidebar content (a disclosure's
+ * content): styled like the shell's sub-items, rendered with the app's
+ * `renderLink`, and closing the mobile sheet when followed, exactly like the
+ * shell's own links.
+ */
+export function AppShellSidebarSubLink({
+  href,
+  children,
+  isActive = false,
+}: {
+  href: string;
+  children: ReactNode;
+  isActive?: boolean;
+}) {
+  const renderLink = useContext(AppShellRenderLinkContext);
+  return (
+    <SidebarMenuSubButton asChild isActive={isActive} className="rounded-lg">
+      <SidebarAppLink href={href} renderLink={renderLink}>
+        {children}
+      </SidebarAppLink>
+    </SidebarMenuSubButton>
+  );
+}
+
+/**
+ * Closes the mobile sidebar sheet, and does nothing on desktop. For
+ * app-owned sidebar content that navigates in code (a searchable list
+ * choosing an option) rather than through a link, which `SidebarAppLink`
+ * already handles. Call it before navigating, in the event handler; no
+ * effect watches the path.
+ */
+export function useAppShellCloseMobileSidebar() {
+  const { isMobile, setOpenMobile } = useSidebar();
+  return useCallback(() => {
+    if (isMobile) setOpenMobile(false);
+  }, [isMobile, setOpenMobile]);
 }
 
 /**
@@ -522,7 +607,7 @@ function NavigationGroup({
       <SidebarGroupContent>
         <SidebarMenu className="gap-0.5">
           {group.items.map((item) => (
-            <NavigationItem
+            <NavigationEntryItem
               key={item.id}
               item={item}
               currentPath={currentPath}
@@ -533,6 +618,59 @@ function NavigationGroup({
       </SidebarGroupContent>
     </SidebarGroup>
   );
+}
+
+/** A link item or a disclosure, by its `type`. */
+function NavigationEntryItem({
+  item,
+  currentPath,
+  renderLink,
+}: {
+  item: AppShellNavigationItem | AppShellNavigationDisclosure;
+  currentPath: string;
+  renderLink?: AppShellProps['renderLink'];
+}) {
+  return item.type === 'disclosure' ? (
+    <NavigationDisclosure item={item} currentPath={currentPath} />
+  ) : (
+    <NavigationItem item={item} currentPath={currentPath} renderLink={renderLink} />
+  );
+}
+
+/**
+ * A disclosure entry (see `AppShellNavigationDisclosure`). Radix keeps the
+ * open state, so nothing here needs React state; the chevron turns while
+ * the entry is open.
+ */
+function NavigationDisclosure({
+  item,
+  currentPath,
+}: {
+  item: AppShellNavigationDisclosure;
+  currentPath: string;
+}) {
+  const Icon = item.icon;
+  const content = (
+    <Collapsible asChild className="group/disclosure">
+      <SidebarMenuItem>
+        <CollapsibleTrigger asChild>
+          <SidebarMenuButton
+            isActive={item.isActive?.(currentPath) ?? false}
+            className="rounded-lg [&>span]:truncate"
+          >
+            <Icon />
+            <span>{item.label}</span>
+            <ChevronRight
+              aria-hidden
+              className="ml-auto transition-transform group-data-[state=open]/disclosure:rotate-90"
+            />
+          </SidebarMenuButton>
+        </CollapsibleTrigger>
+        <CollapsibleContent>{item.content}</CollapsibleContent>
+      </SidebarMenuItem>
+    </Collapsible>
+  );
+  return item.wrap ? item.wrap(content) : content;
 }
 
 function NavigationItem({
@@ -754,142 +892,144 @@ export function AppShell({
 
   return (
     <AppShellAlertRegistryContext.Provider value={alertRegistry}>
-      <SidebarProvider
-        style={{ '--sidebar-width': '16.5rem' } as React.CSSProperties}
-      >
-        <Sidebar variant="inset" className="p-2 pr-0">
-          <SidebarHeader className="p-3">{sidebarHeader}</SidebarHeader>
-          <SidebarContent>
-            {navigation.map((entry) =>
-              entry.type === 'group' ? (
-                <NavigationGroup
-                  key={entry.id}
-                  group={entry}
-                  currentPath={currentPath}
-                  renderLink={renderLink}
-                />
-              ) : (
-                <SidebarGroup
-                  key={entry.id}
-                  className="mt-1/2 group-data-[collapsible=icon]:mt-0"
-                >
-                  <SidebarGroupContent>
-                    <SidebarMenu>
-                      <NavigationItem
-                        item={entry}
-                        currentPath={currentPath}
-                        renderLink={renderLink}
-                      />
-                    </SidebarMenu>
-                  </SidebarGroupContent>
-                </SidebarGroup>
-              ),
-            )}
-          </SidebarContent>
-          <SidebarFooter className="gap-1 p-3">
-            {search}
-            <Button
-              asChild
-              variant="ghost"
-              className="justify-start rounded-lg px-2"
-            >
-              <SidebarAppLink href={docsHref} renderLink={renderLink}>
-                <BookOpen />
-                Docs
-              </SidebarAppLink>
-            </Button>
-            {footerLinks.length > 0 ? <Separator className="my-1" /> : null}
-            {footerLinks.map((link) => {
-              const Icon = link.icon;
-
-              return (
-                <Button
-                  key={link.id}
-                  asChild
-                  variant="ghost"
-                  className="justify-start rounded-lg px-2"
-                >
-                  <SidebarAppLink href={link.href} renderLink={renderLink}>
-                    <Icon />
-                    {link.label}
-                  </SidebarAppLink>
-                </Button>
-              );
-            })}
-            {footerContent}
-            <Separator className="my-2" />
-            <AppShellUserMenu
-              user={user}
-              onManageAccount={onManageAccount}
-              isInstallAvailable={isInstallAvailable}
-              onInstallApp={onInstallApp}
-              onLogout={onLogout}
-            />
-          </SidebarFooter>
-        </Sidebar>
-        <SidebarInset
-          className="min-w-0 rounded-none md:my-2 md:mr-2 md:rounded-2xl md:ring-1 md:ring-border"
-          style={
-            {
-              '--app-shell-alerts': `${Math.min(alerts.length, 2) * APP_SHELL_ALERT_ROW_REM}rem`,
-              '--app-shell-alerts-sm': `${Math.min(alerts.length, 1) * APP_SHELL_ALERT_ROW_REM}rem`,
-            } as CSSProperties
-          }
+      <AppShellRenderLinkContext.Provider value={renderLink}>
+        <SidebarProvider
+          style={{ '--sidebar-width': '16.5rem' } as React.CSSProperties}
         >
-          <header className="flex h-14 items-center gap-2 border-b px-4 sm:px-6">
-            <SidebarTrigger className="-ml-1 md:hidden" />
-            <Breadcrumb>
-              <BreadcrumbList>
-                {breadcrumbs.map((breadcrumb, index) => {
-                  const isLast = index === breadcrumbs.length - 1;
-                  const Icon = breadcrumb.icon;
-                  const content = (
-                    <span className="flex items-center gap-1.5">
-                      {Icon ? <Icon className="size-3.5 shrink-0" /> : null}
-                      <span>{breadcrumb.label}</span>
-                    </span>
-                  );
-                  return (
-                    <Fragment key={breadcrumb.id}>
-                      <BreadcrumbItem
-                        className={isLast ? undefined : 'hidden sm:flex'}
-                      >
-                        {breadcrumb.href && !isLast ? (
-                          <BreadcrumbLink asChild>
-                            <AppLink
-                              href={breadcrumb.href}
-                              renderLink={renderLink}
-                            >
-                              {content}
-                            </AppLink>
-                          </BreadcrumbLink>
-                        ) : (
-                          <BreadcrumbPage>{content}</BreadcrumbPage>
-                        )}
-                      </BreadcrumbItem>
-                      {!isLast ? (
-                        <BreadcrumbSeparator className="hidden sm:block" />
-                      ) : null}
-                    </Fragment>
-                  );
-                })}
-              </BreadcrumbList>
-            </Breadcrumb>
-            {navbarActions || navbarSearch ? (
-              <div className="ml-auto flex items-center gap-1.5">
-                {navbarActions}
-                {navbarSearch}
-              </div>
+          <Sidebar variant="inset" className="p-2 pr-0">
+            <SidebarHeader className="p-3">{sidebarHeader}</SidebarHeader>
+            <SidebarContent>
+              {navigation.map((entry) =>
+                entry.type === 'group' ? (
+                  <NavigationGroup
+                    key={entry.id}
+                    group={entry}
+                    currentPath={currentPath}
+                    renderLink={renderLink}
+                  />
+                ) : (
+                  <SidebarGroup
+                    key={entry.id}
+                    className="mt-1/2 group-data-[collapsible=icon]:mt-0"
+                  >
+                    <SidebarGroupContent>
+                      <SidebarMenu>
+                        <NavigationEntryItem
+                          item={entry}
+                          currentPath={currentPath}
+                          renderLink={renderLink}
+                        />
+                      </SidebarMenu>
+                    </SidebarGroupContent>
+                  </SidebarGroup>
+                ),
+              )}
+            </SidebarContent>
+            <SidebarFooter className="gap-1 p-3">
+              {search}
+              <Button
+                asChild
+                variant="ghost"
+                className="justify-start rounded-lg px-2"
+              >
+                <SidebarAppLink href={docsHref} renderLink={renderLink}>
+                  <BookOpen />
+                  Docs
+                </SidebarAppLink>
+              </Button>
+              {footerLinks.length > 0 ? <Separator className="my-1" /> : null}
+              {footerLinks.map((link) => {
+                const Icon = link.icon;
+
+                return (
+                  <Button
+                    key={link.id}
+                    asChild
+                    variant="ghost"
+                    className="justify-start rounded-lg px-2"
+                  >
+                    <SidebarAppLink href={link.href} renderLink={renderLink}>
+                      <Icon />
+                      {link.label}
+                    </SidebarAppLink>
+                  </Button>
+                );
+              })}
+              {footerContent}
+              <Separator className="my-2" />
+              <AppShellUserMenu
+                user={user}
+                onManageAccount={onManageAccount}
+                isInstallAvailable={isInstallAvailable}
+                onInstallApp={onInstallApp}
+                onLogout={onLogout}
+              />
+            </SidebarFooter>
+          </Sidebar>
+          <SidebarInset
+            className="min-w-0 rounded-none md:my-2 md:mr-2 md:rounded-2xl md:ring-1 md:ring-border"
+            style={
+              {
+                '--app-shell-alerts': `${Math.min(alerts.length, 2) * APP_SHELL_ALERT_ROW_REM}rem`,
+                '--app-shell-alerts-sm': `${Math.min(alerts.length, 1) * APP_SHELL_ALERT_ROW_REM}rem`,
+              } as CSSProperties
+            }
+          >
+            <header className="flex h-14 items-center gap-2 border-b px-4 sm:px-6">
+              <SidebarTrigger className="-ml-1 md:hidden" />
+              <Breadcrumb>
+                <BreadcrumbList>
+                  {breadcrumbs.map((breadcrumb, index) => {
+                    const isLast = index === breadcrumbs.length - 1;
+                    const Icon = breadcrumb.icon;
+                    const content = (
+                      <span className="flex items-center gap-1.5">
+                        {Icon ? <Icon className="size-3.5 shrink-0" /> : null}
+                        <span>{breadcrumb.label}</span>
+                      </span>
+                    );
+                    return (
+                      <Fragment key={breadcrumb.id}>
+                        <BreadcrumbItem
+                          className={isLast ? undefined : 'hidden sm:flex'}
+                        >
+                          {breadcrumb.href && !isLast ? (
+                            <BreadcrumbLink asChild>
+                              <AppLink
+                                href={breadcrumb.href}
+                                renderLink={renderLink}
+                              >
+                                {content}
+                              </AppLink>
+                            </BreadcrumbLink>
+                          ) : (
+                            <BreadcrumbPage>{content}</BreadcrumbPage>
+                          )}
+                        </BreadcrumbItem>
+                        {!isLast ? (
+                          <BreadcrumbSeparator className="hidden sm:block" />
+                        ) : null}
+                      </Fragment>
+                    );
+                  })}
+                </BreadcrumbList>
+              </Breadcrumb>
+              {navbarActions || navbarSearch ? (
+                <div className="ml-auto flex items-center gap-1.5">
+                  {navbarActions}
+                  {navbarSearch}
+                </div>
+              ) : null}
+            </header>
+            {alerts.length ? (
+              <AppShellAlerts alerts={alerts} renderLink={renderLink} />
             ) : null}
-          </header>
-          {alerts.length ? (
-            <AppShellAlerts alerts={alerts} renderLink={renderLink} />
-          ) : null}
-          <main className="flex-1 overflow-auto p-4 sm:p-6 lg:p-8">
-            {children}
-          </main>
-        </SidebarInset>
-      </SidebarProvider>
+            <main className="flex-1 overflow-auto p-4 sm:p-6 lg:p-8">
+              {children}
+            </main>
+          </SidebarInset>
+        </SidebarProvider>
+      </AppShellRenderLinkContext.Provider>
     </AppShellAlertRegistryContext.Provider>
   );
 }

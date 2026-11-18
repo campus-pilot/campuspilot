@@ -40,6 +40,7 @@ const { schoolSessionTable } =
   await import("../packages/db/src/schema/session");
 const { classTable } = await import("../packages/db/src/schema/class");
 const {
+  examClassTable,
   examPlanTable,
   examResultTable,
   examTimetableTable,
@@ -92,6 +93,12 @@ await db
     },
   })
   .where(eq(classTable.id, schoolClass.id));
+await db.insert(examClassTable).values({
+  schoolId: school.id,
+  sessionId: session.id,
+  examSlug: "midterm",
+  classId: schoolClass.id,
+});
 const plans = [];
 for (const [subjectSlug] of subjects) {
   const [plan] = await db

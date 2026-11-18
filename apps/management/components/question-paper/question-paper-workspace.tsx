@@ -21,7 +21,7 @@ import { cellStatus, isPaperLocked, paperLockReason } from '@campuspilot/compone
 import { VersionList } from '@campuspilot/components/question-paper/version-list';
 import { RequirePermissions } from '@/components/require-permissions';
 import { DirtyGuard, LoadingExam, Notice, ReadError } from '@/components/exam/exam-common';
-import { questionPaperHref, questionPaperWorkspaceHref } from '@/components/exam/exam-model';
+import { questionPaperReturnHref, questionPaperWorkspaceHref } from '@/components/exam/exam-model';
 import { orpc } from '@/lib/orpc';
 import {
   currentJobFailure,
@@ -193,7 +193,8 @@ function PaperMenu({
       onSuccess: async () => {
         setConfirming(false);
         await refresh();
-        router.replace(questionPaperHref(scope));
+        // Back to the tab with the deleted paper's class still open.
+        router.replace(questionPaperReturnHref(scope));
       },
       onError: (error) => toast.error(requestErrorMessage(error, 'The paper could not be deleted.')),
     }),

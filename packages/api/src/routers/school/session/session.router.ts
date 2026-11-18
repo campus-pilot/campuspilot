@@ -3,6 +3,7 @@ import {
   financeLedgerEntryTable,
   financeNumberCounterTable,
 } from '@campuspilot/db/schema/finance';
+import { examClassTable } from '@campuspilot/db/schema/exam';
 import {
   findIntroducedExamNameClashes,
   sessionConfigSchema,
@@ -412,6 +413,23 @@ export const schoolSessionRouter = {
               previous.examConfig,
               next.examConfig,
             );
+            // A removed exam's class selection goes with it, as in deleteExam.
+            // Runs only after the guard above passed. `exam_class` rows do not
+            // block a removal: they exist alongside plans (which do), except
+            // for a legacy exam whose plans were deleted, where they are
+            // leftovers of the selection, not recorded data.
+            const removedExamSlugs = Object.keys(previous.examConfig).filter(
+              (slug) => !Object.hasOwn(next.examConfig, slug),
+            );
+            if (removedExamSlugs.length)
+              await transaction
+                .delete(examClassTable)
+                .where(
+                  and(
+                    eq(examClassTable.sessionId, sessionId),
+                    inArray(examClassTable.examSlug, removedExamSlugs),
+                  ),
+                );
           }
           const [session] = await transaction
             .update(schoolSessionTable)

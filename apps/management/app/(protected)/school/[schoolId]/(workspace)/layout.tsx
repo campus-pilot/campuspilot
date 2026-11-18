@@ -6,7 +6,7 @@ import { SCHOOL_ACTIONS, type PermissionCheck } from '@campuspilot/api/routers/a
 import { RequireFeature, useSchoolFeatureCheck } from '@/components/require-feature';
 import type { SchoolFeatureKey } from '@campuspilot/api/routers/school/feature-flags/feature-flags.dto';
 import { RequirePermissions } from '@/components/require-permissions';
-import type { AppShellNavigationEntry, AppShellNavigationItem } from '@campuspilot/components/app-shell';
+import type { AppShellNavigationDisclosure, AppShellNavigationEntry, AppShellNavigationItem } from '@campuspilot/components/app-shell';
 import {
   Files,
   ClipboardCheck,
@@ -14,6 +14,7 @@ import {
   GraduationCap,
   LayoutDashboard,
   Megaphone,
+  NotebookPen,
   Settings,
   Sparkles,
   UserRoundPlus,
@@ -38,6 +39,8 @@ import {
 import { SchoolDocumentHead } from '@/components/school-document-head';
 import { SessionSwitcher } from '@/components/session-switcher';
 import { AssistantAccess } from '@/components/assistant/assistant-access';
+import { isQuestionPaperSectionPath } from '@/components/exam/exam-model';
+import { QuestionPaperNav } from '@/components/question-paper/question-paper-nav';
 import { admissionPage } from './admission/_route';
 import { assistantPage } from './assistant/_route';
 import { admissionDetailsPage } from './admission/[admissionId]/_route';
@@ -193,7 +196,12 @@ function navigationFor(
           wrap: children => <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.READ_EXAMS, resource: { kind: 'school', schoolId } }}>{children}</RequirePermissions>,
           href: sessionHref('/exam'),
           icon: ClipboardCheck,
+          // The Question paper section highlights its own entry below instead.
+          isActive: (path) =>
+            (path === sessionHref('/exam') || path.startsWith(`${sessionHref('/exam')}/`)) &&
+            !(sessionId && isQuestionPaperSectionPath(path, sessionHref())),
         },
+        ...(sessionId ? [questionPapersEntry(schoolId, sessionId, sessionHref())] : []),
       ],
     },
     // Shown when the school has at least one of its items' features, so the
@@ -218,6 +226,35 @@ function navigationFor(
         ]
       : []),
   ];
+}
+
+/**
+ * The sidebar's Question papers entry: it opens in place to the session's
+ * examinations and then their classes (`QuestionPaperNav`), a fold rather
+ * than popovers so the same steps work in the desktop sidebar and the mobile
+ * sheet. Left out without a selected session. Its gates are separate facts,
+ * each checked on its own: `READ_EXAMS` (as Examinations), `READ_EXAM_PLANS`
+ * (what the Question paper tab needs) and the assistant (question papers are
+ * part of the `assistant` feature, so the entry shows only where the tab does).
+ */
+function questionPapersEntry(schoolId: string, sessionId: string, sessionBase: string): AppShellNavigationDisclosure {
+  return {
+    type: 'disclosure',
+    id: 'question-papers',
+    label: 'Question papers',
+    icon: NotebookPen,
+    isActive: (path) => isQuestionPaperSectionPath(path, sessionBase),
+    content: <QuestionPaperNav schoolId={schoolId} sessionId={sessionId} />,
+    wrap: (children) => (
+      <RequirePermissions
+        permissions={[SCHOOL_ACTIONS.READ_EXAMS, SCHOOL_ACTIONS.READ_EXAM_PLANS].map(
+          (action) => ({ action, resource: { kind: 'school', schoolId } }) as PermissionCheck,
+        )}
+      >
+        <AssistantAccess schoolId={schoolId}>{children}</AssistantAccess>
+      </RequirePermissions>
+    ),
+  };
 }
 
 export default function SchoolWorkspaceLayout({

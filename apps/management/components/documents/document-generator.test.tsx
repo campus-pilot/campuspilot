@@ -79,3 +79,44 @@ test('without the permission to download, the button only creates the PDF', () =
   assert.doesNotMatch(render(false), /Download PDF/);
   assert.match(render(false), /Create PDF/);
 });
+
+test("an examination document's class picker lists the examination's classes, not the school's", () => {
+  // A class excluded from the examination must not be offered for its admit
+  // cards: the picker reads the examination's classes taking part
+  // (`getExamContext`), never the school's whole class list (`listClasses`).
+  const client = new QueryClient();
+  const workspace = documentWorkspacePermissions(scope.schoolId, 'admit_card');
+  client.setQueryData(orpc.authorization.checkPermissions.queryKey({ input: { permissions: workspace } }), {
+    results: workspace.map(() => true),
+  });
+  client.setQueryData(
+    orpc.school.getActiveDocumentTemplate.queryKey({ input: { schoolId: scope.schoolId, documentType: 'admit_card' } }),
+    { artifact: { id: 'template', name: 'Admit card' } } as never,
+  );
+  client.setQueryData(orpc.school.getSession.queryKey({ input: scope }), {
+    sessionConfig: { examConfig: { 'mid-term': { name: 'Mid-term', order: 1 } } },
+  } as never);
+  client.setQueryData(orpc.school.getExamContext.queryKey({ input: { ...scope, examSlug: 'mid-term' } }), {
+    classes: [{ id: 'class-6', label: 'Class 6', subjects: {} }],
+  } as never);
+  const markup = renderToStaticMarkup(
+    createElement(
+      QueryClientProvider,
+      { client },
+      createElement(DocumentGenerator, {
+        scope,
+        documentType: 'admit_card',
+        initial: { examSlug: 'mid-term' },
+        onHistory: () => {},
+      }),
+    ),
+  );
+  assert.match(markup, /Classes/);
+  assert.doesNotMatch(markup, /Loading classes/);
+  const read = client
+    .getQueryCache()
+    .getAll()
+    .map((query) => JSON.stringify(query.queryKey));
+  assert.ok(read.some((key) => key.includes('getExamContext')), 'reads the classes taking part');
+  assert.ok(!read.some((key) => key.includes('listClasses')), 'never reads every school class');
+});

@@ -16,6 +16,7 @@ import {
   createTestSchool,
   createTestSession,
   createTestStudent,
+  includeTestExamClasses,
 } from '../../../test/fixtures';
 import { dispatchNow } from '../../../test/notifications';
 import { createReportCardDocumentSource } from '../documents/report-card';
@@ -57,6 +58,7 @@ describe('result notifications', () => {
         .update(classTable)
         .set({ config: { subjects: { math: { name: 'Mathematics', books: [], examModes: { written: { name: 'Written', percentage: 100 } } } } } })
         .where(eq(classTable.id, classId));
+      await includeTestExamClasses([{ schoolId, sessionId, examSlug: 'final', classId }]);
       const [plan] = await db
         .insert(examPlanTable)
         .values({ schoolId, sessionId, classId, examSlug: 'final', subjectSlug: 'math', totalMarks: 100, modeConfig: { written: { maxMarks: 100, percentage: 100 } }, status: 'active' })

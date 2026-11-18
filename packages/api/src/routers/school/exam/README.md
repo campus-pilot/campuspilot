@@ -22,6 +22,66 @@ and platform roles are independent assignments: a platform role never substitute
 for a school governance grant. Session configuration endpoints apply the same
 exam-governance boundary, including full-config replacements.
 
+## Classes taking part
+
+Whether a class takes part in an examination is its own stored fact,
+`exam_class` (one row per session, exam and class, migration 0076), never
+inferred from plans, results or timetable columns. Every subject plan
+references its class's row (`exam_plan_exam_class_fk`), so plans exist only for
+classes taking part; a class may take part without plans (after its last
+legacy plan was deleted).
+
+- `generateExamPlan({ classIds })` records exactly the chosen classes and
+  creates their plans. A class still recorded from before (taking part without
+  plans) that is not chosen stops taking part, under the same refusals as
+  removing it with `updateExamClasses`; a chosen one is kept. An empty list, a class of another school and a chosen class without
+  subjects are BAD_REQUEST; an invalid subject blocks only when its class is
+  chosen. `classIds` is optional: left out, every class that has subjects
+  (`selectableExamClassIds`) is chosen, which creates exactly the plans
+  generation created before classes could be excluded, so existing API and MCP
+  callers keep working. An explicit empty list is refused, never read as "all".
+- `updateExamClasses({ configurationVersion, classIds })` (exam plan update
+  permission) sets the complete list later, under the exclusive session lock.
+  The review hash covers participation, so a concurrent change is a CONFLICT.
+  Refused before a plan exists, once the exam is completed, and while it is
+  released to the Cadet Portal. Added classes get plans from class settings,
+  `active` when the exam has started (as starting does for every plan),
+  otherwise drafts. A removed class is **refused** while it has saved results,
+  shared attendance/activity assessments or remarks of its students, question
+  papers, a published timetable that includes it, or a draft timetable that
+  schedules papers for it; clear those first. Otherwise its plans, its row and
+  an empty draft timetable column go, and chat conversations shared to its
+  papers are unshared, as `deleteExamPlan` does.
+- `createExamPlan` (legacy single plan) records its class as taking part.
+  Adding a class this way follows the same lifecycle rule as
+  `updateExamClasses`: it is refused once the exam has ended (and, as for every
+  plan change, while released to the Cadet Portal). A class already taking part
+  may still get further plans.
+  `deleteExam` and session-config replacement remove a deleted exam's rows.
+  `deleteClass` is a CONFLICT with a clear reason while the class takes part in
+  any exam (instead of a foreign key error); take it out of the exam first.
+- `updateExamClasses` needs only the exam plan **update** permission although
+  it creates and deletes plans: changing the classes is one edit of the
+  existing plan, and every role holding it also holds plan create and delete
+  (`grants.rego`). If those grants ever diverge, revisit this.
+- Reads that list an exam's classes use the row: `getExamContext.classes` (the
+  timetable editor's columns) lists only classes taking part (none before the
+  plan exists); `listExamClasses` lists classes taking part that have plans;
+  `saveExamTimetable` accepts only classes taking part as columns, so **a
+  timetable with columns cannot be saved before the plan exists**: generate
+  the plan first (API and MCP callers too); documents
+  refuse a `classId` that does not take part; the Cadet Portal lists an exam
+  for a student's class record only when that class takes part (once any class
+  does) and, once the exam has plans, also has plans of its own (a class taking
+  part without plans, for example from the 0076 backfill, would otherwise wait
+  for a release that can never include it), and filters timetable columns by
+  it. A published timetable is listed for, opened by and announced to
+  (`exam.timetable_published`) only students whose **current** class takes
+  part (results follow the class they were made in; see docs/cadet-portal.md).
+- Migration 0076 backfills the rows once from what existed: classes with
+  plans, plus the timetable columns of every exam (with or without plans), so
+  existing timetables keep rendering their columns.
+
 ## Lifecycle and student-wide API
 
 1. Configure exam definitions in session settings, or create one with
@@ -51,14 +111,15 @@ exam-governance boundary, including full-config replacements.
      callers that do not edit an earlier copy may leave it out, and then the save
      applies to whatever is stored.
    - **Exams with data.** Removing an exam slug that has recorded data is refused
-     with `CONFLICT` naming the exam (`session-exam-removal.ts`): plans (and their
-     results), a timetable, a working-day limit that is set, student assessments,
-     student remarks, a lifecycle that records anything beyond the bare `ready`
-     row plan generation writes, a results notification record, or question
-     papers. Generated document artifacts and assistant conversations do not
-     block it. Only slugs the stored configuration defines and the submission
-     leaves out are checked, so data under a slug deleted earlier never blocks
-     unrelated saves.
+     with `CONFLICT` naming the exam (`session/session-exam-removal.ts`): plans (and their results), a timetable,
+     a working-day limit that is set, student assessments, student remarks, a
+     lifecycle that records anything beyond the bare `ready` row plan
+     generation writes, a results notification record, or question papers.
+     Generated document artifacts and assistant conversations do not block it,
+     and neither does the exam's class selection (`exam_class`), which is
+     deleted with the exam once the guard passes. Only slugs the stored
+     configuration defines and the submission leaves out are checked, so data
+     under a slug deleted earlier never blocks unrelated saves.
 
    **Changing an exam's slug in session settings makes it a new exam**: the save
    adds the exam under the new slug and removes the old slug. The old slug's
@@ -86,8 +147,11 @@ exam-governance boundary, including full-config replacements.
    refinement would make stored duplicates unreadable.
 
    `getExamPlanPreview` returns
-   classes, registered enrollment counts, subjects, assessment modes and a
-   configuration hash. `generateExamPlan` atomically creates draft planning snapshots and an explicit **ready** examination from
+   classes, registered enrollment counts, subjects, assessment modes, whether
+   each class takes part (`participating`) and a configuration hash.
+   `generateExamPlan` takes the reviewed hash and, optionally, the `classIds` taking
+   part (default every class with subjects; see "Classes taking part") and atomically creates draft
+   planning snapshots for them and an explicit **ready** examination from
    that review. There is no per-subject approval prerequisite. A school principal,
    manager or exam coordinator must manually start it through `transitionExam`
    before results may be saved, approved or deleted, including legacy APIs.
@@ -166,7 +230,8 @@ an existing approved result.
 
 `getExamTimetable` returns `null` when absent. `saveExamTimetable` atomically creates
 or replaces a grid; `deleteExamTimetable` removes it. Columns are ordered, unique
-school class IDs. Rows have stable unique IDs, real ISO dates, local `HH:mm` times
+IDs of classes taking part, so the plan must exist first (before it only a grid
+without columns is accepted). Rows have stable unique IDs, real ISO dates, local `HH:mm` times
 and an end time strictly after the start time. Cells allow null, one subject/mode,
 or a nonempty array of subject/mode pairs configured for that class. Duplicate
 pairs and overlapping slots for a class are rejected. A completed plan freezes

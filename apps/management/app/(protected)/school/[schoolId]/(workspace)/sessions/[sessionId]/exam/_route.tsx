@@ -7,7 +7,7 @@ import {
   ExamClassBreadcrumbValue,
   ExamStudentBreadcrumbValue,
 } from '@/components/exam/exam-breadcrumb-value';
-import { examHref, examClassHref, examResultsHref, questionPaperHref } from '@/components/exam/exam-model';
+import { examHref, examClassHref, examResultsHref, questionPaperReturnHref } from '@/components/exam/exam-model';
 import { QuestionPaperBreadcrumbValue } from '@/components/question-paper/question-paper-breadcrumb-value';
 import { ExamNavbarActions } from '@/components/exam/exam-navbar-actions';
 import { CreateExamAction } from '@/components/exam/exam-create';
@@ -125,7 +125,8 @@ export const questionPaperDetailsPage = defineManagementPage<QuestionPaperRouteP
   title: 'Question paper',
   breadcrumbs: (scope) => [
     ...questionPaperTrail(scope),
-    { id: 'question-paper', label: 'Question paper', href: questionPaperHref(scope) },
+    // Back to the tab with this paper's class open, not an all-collapsed accordion.
+    { id: 'question-paper', label: 'Question paper', href: questionPaperReturnHref(scope) },
     ...(scope.classId && scope.subjectSlug && scope.modeSlug
       ? [
           {
