@@ -8,6 +8,7 @@ import {
   draftFactsOf,
   draftCallsNeedingRecheck,
   draftOrdinalOf,
+  draftSaved,
   draftSaveSpent,
   parseDraftCallInput,
   parseStoredDraftResult,
@@ -94,6 +95,13 @@ describe('QuestionPaperDraftCard', () => {
     expect(button.disabled).toBe(true);
     fireEvent.click(button);
     expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('says a draft the assistant saved is saved, keeps Preview and offers no Save', () => {
+    render(<QuestionPaperDraftCard ordinal={1} {...draftFactsOf(valid)} preview={<button type="button">Preview</button>} onSave={vi.fn()} saved />);
+    expect(screen.getByText('Saved as a new version.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Preview' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Save/ })).toBeNull();
   });
 
   it('lists the problems of an invalid draft and offers neither preview nor save', () => {
@@ -204,6 +212,22 @@ describe('drafts of a conversation', () => {
     (cut as { call: { body: { outputTruncated: boolean } } }).call.body.outputTruncated = true;
     expect(unsavedDraftOf([cut], paper)).toBeNull();
     expect(unsavedDraftOf([cut], paper, new Map([['x', ready('xxxxxxxxxxxx')]]))?.draftId).toBe('xxxxxxxxxxxx');
+  });
+
+  it('knows a draft is saved only from a save of that draft id for that paper that went through', () => {
+    const paper = { sessionId: 'ss', examSlug: 'e1', classId: 'c', subjectSlug: 'su', modeSlug: 'm' };
+    const save = (status: string, input: Record<string, unknown>) =>
+      ({ kind: 'activity', id: `s-${status}`, calls: [{ id: `s-${status}`, status, body: { toolName: 'school.saveQuestionPaperVersion', input: { schoolId: 's', expectedVersionNo: 0, ...input } } }] }) as unknown as AssistantTimelineRow;
+    expect(draftSaved(rows, paper, 'dddddddddddd')).toBe(false);
+    expect(draftSaved([...rows, save('succeeded', { ...paper, draftId: 'dddddddddddd' })], paper, 'dddddddddddd')).toBe(true);
+    // Another draft, another paper, a save by html or one that did not go through: not this draft.
+    expect(draftSaved([...rows, save('succeeded', { ...paper, draftId: 'bbbbbbbbbbbb' })], paper, 'dddddddddddd')).toBe(false);
+    expect(draftSaved([...rows, save('succeeded', { ...paper, modeSlug: 'oral', draftId: 'dddddddddddd' })], paper, 'dddddddddddd')).toBe(false);
+    expect(draftSaved([...rows, save('succeeded', { ...paper, html: '<p>x</p>' })], paper, 'dddddddddddd')).toBe(false);
+    expect(draftSaved([...rows, save('failed', { ...paper, draftId: 'dddddddddddd' })], paper, 'dddddddddddd')).toBe(false);
+    // Folded under a work bar counts like a visible save.
+    const folded = { kind: 'work', id: 'w', folded: [save('succeeded', { ...paper, draftId: 'dddddddddddd' })] } as unknown as AssistantTimelineRow;
+    expect(draftSaved([...rows, folded], paper, 'dddddddddddd')).toBe(true);
   });
 
   it('finds the ordinal of the newest draft with an id', () => {

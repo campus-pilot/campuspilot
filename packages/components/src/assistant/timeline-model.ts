@@ -1,5 +1,6 @@
 import type {
   AssistantItemDto,
+  AssistantModelTier,
   AssistantRunDto,
   AssistantToolCallItemDto,
   AssistantUserMessageItemDto,
@@ -139,6 +140,21 @@ function contentRows(items: readonly AssistantItemDto[]): AssistantTimelineRow[]
 
 /** The text of a turn's last question, which is what trying it again sends. */
 /** The text of the newest message the user sent among `items`, or null. */
+/**
+ * What the conversation says about Fast and Pro: the tier its latest message
+ * was sent with (null before any message) and how many messages the user sent.
+ */
+export function conversationModelTier(items: readonly AssistantItemDto[]): { tier: AssistantModelTier | null; userMessages: number } {
+  let tier: AssistantModelTier | null = null;
+  let userMessages = 0;
+  for (const item of items) {
+    if (item.kind !== 'user_message') continue;
+    userMessages += 1;
+    tier = item.body.tier ?? 'standard';
+  }
+  return { tier, userMessages };
+}
+
 export function lastUserText(items: readonly AssistantItemDto[]): string | null {
   for (let index = items.length - 1; index >= 0; index -= 1) {
     const item = items[index]!;

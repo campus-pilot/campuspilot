@@ -132,12 +132,16 @@ const HIDDEN_TOOLS = [
   // ability to work: a human platform decision, made in the admin app.
   'systemAdmin.suspendSchool',
   'systemAdmin.unsuspendSchool',
-  // So are a school's trials (docs/school-trials.md), and their history is
-  // only read where they are managed.
-  'systemAdmin.listSchoolTrials',
+  // So is a school's billing (docs/school-billing.md): its periods, payments
+  // and the price catalogue are read and changed only where they are managed.
+  'systemAdmin.getSchoolBilling',
   'systemAdmin.startSchoolTrial',
   'systemAdmin.updateSchoolTrial',
-  'systemAdmin.endSchoolTrial',
+  'systemAdmin.endSchoolBillingPeriod',
+  'systemAdmin.addSchoolBillingPeriods',
+  'systemAdmin.voidSchoolInvoice',
+  'systemAdmin.listSubscriptionPrices',
+  'systemAdmin.setSubscriptionPrice',
   // The school's assistant role list as the platform administrator edits it;
   // hidden like every assistant setting (school.getAssistantAccess,
   // school.updateAssistantRoles), so never offered to the assistant itself.
@@ -162,6 +166,16 @@ const HIDDEN_TOOLS = [
   // reads any paper with getQuestionPaper and saves its own edit instead.
   'school.listQuestionPaperCopySources',
   'school.copyQuestionPaperVersion',
+  // Opening a school and asking CampusPilot for more are a person's own
+  // decisions (docs/school-creation.md), and so is deciding such a request,
+  // or naming a school's owner.
+  'schoolCreation.getStatus',
+  'schoolCreation.createSchool',
+  'schoolCreation.requestMore',
+  'systemAdmin.listSchoolCreationRequests',
+  'systemAdmin.countPendingSchoolCreationRequests',
+  'systemAdmin.decideSchoolCreationRequest',
+  'systemAdmin.updateSchoolOwner',
 ];
 
 /**
@@ -269,8 +283,8 @@ describe('catalog metadata', () => {
     // +1 systemAdmin.getSchoolFeatureFlags; +9 notice tools (list, get,
     // create, update, delete, preview, publish preview, publish, download);
     // +3 exam timetable publication tools (publish preview, publish, withdraw);
-    // +7 question paper tools (list, get, versions, learn, validate, save, get draft).
-    expect(catalog.advanced).toHaveLength(117);
+    // +8 question paper tools (list, get, versions, learn, validate, save, get draft, edit).
+    expect(catalog.advanced).toHaveLength(118);
   });
 });
 
@@ -792,7 +806,7 @@ describe('assistant service view', () => {
   /** The question paper tools by name: what each is for, and how the in-app assistant and external clients reach it. */
   const QUESTION_PAPER_TOOLS = {
     reads: ['school.listQuestionPapers', 'school.getQuestionPaper', 'school.listQuestionPaperVersions', 'school.getQuestionPaperDraft', 'school.learn_question_paper_generation', 'school.validateQuestionPaperDraft'],
-    writes: ['school.saveQuestionPaperVersion'],
+    writes: ['school.saveQuestionPaperVersion', 'school.editQuestionPaper'],
     // The UI's own procedures: a person does these, never the assistant.
     humanOnly: [
       'school.startQuestionPaperGeneration',
@@ -806,7 +820,7 @@ describe('assistant service view', () => {
     ],
   };
 
-  it('gives the in-app assistant the question paper tools, with the save behind an approval and the human-only ones withheld', async () => {
+  it('gives the in-app assistant the question paper tools, the save without an approval card and the human-only ones withheld', async () => {
     const byName = new Map(exposedTools().map((tool) => [tool.name, tool]));
     for (const name of [...QUESTION_PAPER_TOOLS.reads, ...QUESTION_PAPER_TOOLS.writes]) {
       const tool = byName.get(name);
@@ -814,7 +828,8 @@ describe('assistant service view', () => {
       expect(tool!.mcp.module).toBe('exams');
       expect(assistantToolDecision(tool!.mcp), name).toMatchObject({ allowed: true });
     }
-    for (const name of QUESTION_PAPER_TOOLS.writes) expect(assistantToolDecision(byName.get(name)!.mcp)).toEqual({ allowed: true, requiresApproval: true });
+    // Saving only adds a version (the previous one stays), so the assistant saves without asking.
+    for (const name of QUESTION_PAPER_TOOLS.writes) expect(assistantToolDecision(byName.get(name)!.mcp)).toEqual({ allowed: true, requiresApproval: false });
     for (const name of QUESTION_PAPER_TOOLS.reads) expect(assistantToolDecision(byName.get(name)!.mcp)).toEqual({ allowed: true, requiresApproval: false });
     for (const name of QUESTION_PAPER_TOOLS.humanOnly) expect(byName.has(name), name).toBe(false);
 
@@ -826,6 +841,10 @@ describe('assistant service view', () => {
     expect(learn?._meta?.[ASSISTANT_TOOL_META.exposure]).toBe('advanced');
     for (const name of [...QUESTION_PAPER_TOOLS.reads, ...QUESTION_PAPER_TOOLS.writes]) expect(listed.has(name), name).toBe(true);
     for (const name of QUESTION_PAPER_TOOLS.humanOnly) expect(listed.has(name), name).toBe(false);
+    expect(tools.filter((tool) => tool._meta?.[ASSISTANT_TOOL_META.skipsApproval] !== undefined).map((tool) => [tool.name, tool._meta![ASSISTANT_TOOL_META.skipsApproval]])).toEqual([
+      ['school.saveQuestionPaperVersion', true],
+      ['school.editQuestionPaper', true],
+    ]);
   });
 
   it('gives external clients the learn tool through the advanced tools', async () => {
@@ -848,5 +867,16 @@ describe('assistant service view', () => {
       .route({ summary: 'x', description: 'y' })
       .handler(() => 'ok');
     await expect(buildMcpCatalog({ broken })).rejects.toThrow(/invalid outputChars/);
+  });
+
+  it('refuses skipsApproval on a read or a destructive write while the catalog is built', async () => {
+    for (const mcp of [
+      { exposure: 'advanced', access: 'read', destructive: false, module: 'exams', skipsApproval: true },
+      { exposure: 'advanced', access: 'write', destructive: true, module: 'exams', skipsApproval: true },
+    ] as const) {
+      const { os } = await import('@orpc/server');
+      const broken = os.meta({ mcp }).route({ summary: 'x', description: 'y' }).handler(() => 'ok');
+      await expect(buildMcpCatalog({ broken })).rejects.toThrow(/may only skip approval/);
+    }
   });
 });

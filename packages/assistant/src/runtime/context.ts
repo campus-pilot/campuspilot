@@ -1,144 +1,64 @@
 import { encodedImageBytes, MODEL_REQUEST_ATTACHMENT_BUDGET_BYTES } from '@campuspilot/assistant-contract/attachments';
 
-import { isAttachmentMarker, omitPageText, type AttachmentMarker } from '../transcript';
+import { isAttachmentMarker, type AttachmentMarker } from '../transcript';
 import type { ReadableMimeTypes } from './providers/image-types';
-import type { AttachmentFile, ModelProvider, ToolInputStubInput, TranscriptEntry } from './providers/types';
+import type { AttachmentFile, ModelProvider, TranscriptEntry } from './providers/types';
 
 /**
- * The model's context for one request, built from the stored transcript
- * (design G2/G3, decisions D41/D45). It is a view for the model only: the
- * stored transcript, the items and the UI are never changed.
+ * The model's context for one request, built from the stored transcript. It
+ * is a view for the model only: the stored transcript, the items and the UI
+ * are never changed.
  *
- * - Attachment markers become the provider's image or document parts, newest
- *   first within one byte budget for both kinds, with a short note for
- *   anything that cannot be shown.
- * - Entries before the last two human messages are shortened: tool results
- *   that are long become a one-line stub, and every attachment becomes a note
- *   that keeps its id but says its content is no longer visible (the model may
- *   still embed an image by id; it asks the user to attach a file again only
- *   to look at or read it). The text of the page a message was sent from
- *   becomes a one-line note as well; its path and title stay.
- *   Long text fields of old tool CALL inputs (the whole paper a model wrote
- *   into `validateQuestionPaperDraft` or `saveQuestionPaperVersion`) become a
- *   one-line stub too: every revision of a long paper would otherwise stay in
- *   the context in full for the rest of the chat. Cheap chats are the point;
- *   so is keeping the cache prefix stable: the cut moves only when a new human
- *   message arrives.
+ * Nothing the model was given is taken away later in the conversation: every
+ * tool result and tool call input stays in full, and so does the page a
+ * message was sent from. A conversation shared with a question paper also
+ * shows the paper's photographed pages before its first message, on every
+ * request, so the model can always check the paper against them. Attachment
+ * markers become the provider's image or document parts, newest first within
+ * one byte budget shared with the page photos (the providers' request limit),
+ * with a short note for anything that cannot be shown.
  *
  * Properties the tests pin: the number and order of entries never change; no
- * tool call or its id is touched, so every call keeps its result (Anthropic
- * `tool_use`/`tool_result`, Gemini `functionCall`/`functionResponse`); the
- * output depends only on stored data (tool name, length, file name, type), so
- * the same transcript gives byte-identical context and pruning twice equals
- * pruning once.
+ * tool call or its id is touched; the output depends only on stored data and
+ * the loaded files, so the same transcript gives byte-identical context.
  *
  * Imports only provider types: the turn loop may not reach school tables or
  * API code (see boundary.test.ts). Loading an attachment's bytes is injected.
  */
 
-/** How many of the newest human messages are shown to the model in full. */
-export const CONTEXT_FULL_HUMAN_MESSAGES = 2;
-/** Tool results of at least this many characters (about 2,000 tokens) are stubbed once old. */
-export const CONTEXT_TOOL_RESULT_MIN_CHARS = 8_000;
-/**
- * A long text field of an old tool call input (about 1,000 tokens) is stubbed. Lower than
- * the result threshold on purpose: an input is the model's own words, which it can always re-send.
- */
-export const CONTEXT_TOOL_INPUT_MIN_CHARS = 4_000;
 /** Attachment bytes (images and PDFs), as sent (base64), one chat request may carry; shared with the question paper job. */
 export const CONTEXT_ATTACHMENT_BUDGET_BYTES = MODEL_REQUEST_ATTACHMENT_BUDGET_BYTES;
 
 export type ModelContextOptions = {
-  fullHumanMessages?: number;
-  toolResultMinChars?: number;
-  toolInputMinChars?: number;
   attachmentBudgetBytes?: number;
 };
 
 export type ModelContextDeps = {
   /** The bytes of an attachment the provider can read (per kind), or why not. */
   loadAttachment(attachmentId: string, readable: ReadableMimeTypes): Promise<AttachmentFile>;
+  /**
+   * The photographed pages of the question paper the conversation is shared
+   * with, in order (none for any other conversation). They are shown before
+   * the conversation's first message on every request.
+   */
+  loadPaperPages?(): Promise<PaperPagePhoto[]>;
 };
 
-/** Fixed wording of the stubs below, shared with `findCopiedContextNote` so the two never drift apart. */
-const RESULT_STUB_MARK = 'omitted to keep the chat short (';
-const INPUT_STUB_MARK = 'was removed from this chat to keep it short. This note is not the content';
-
-/** The note that replaces a long tool result in an old entry. */
-export const toolResultStub = ({ toolName, chars }: { toolName: string; chars: number }) =>
-  `[Earlier result of ${toolName} ${RESULT_STUB_MARK}${chars.toLocaleString('en-US')} characters). Call the tool again if you need it.]`;
-
-const VALIDATE_DRAFT_TOOL = /(^|[._])validateQuestionPaperDraft$/;
-const SAVE_VERSION_TOOL = /(^|[._])saveQuestionPaperVersion$/;
+/** One photographed page of a question paper, as the generation job read it (its model copy). */
+export type PaperPagePhoto = { pageId: string; position: number; total: number; mimeType: string; bytes: Uint8Array };
 
 /**
- * The note that replaces a long text field of an old tool call input. The stored
- * transcript keeps the text (a draft id is the hash of it and saving resolves the id from
- * the stored call), so the note names the way back that works for the tool that wrote it:
- *
- * - `validateQuestionPaperDraft`: an unsaved draft is read again with `getQuestionPaperDraft`
- *   and the `draftId` in that call's result; a paper saved since is read with `getQuestionPaper`.
- * - `saveQuestionPaperVersion` (pasted `html`): the paper is saved, so `getQuestionPaper`.
- * - any other tool: no draft is involved, so no `draftId` is mentioned; the model writes it again.
- *
- * The note is deliberately plain bracketed prose that says it is not the content. A model that
- * copies it into a call anyway is refused by the runtime (`findCopiedContextNote`) before the
- * tool runs, whatever the tool. Only the tool name, field name and length are named, so the note
- * is stable and far shorter than the threshold.
+ * The line before a page photo. The page id is a server id (`qpg_...`), never
+ * user text. A page is not a figure: a save refuses its id as `data-figure-id`.
  */
-export const toolInputStub = ({ toolName, field, chars }: ToolInputStubInput) => {
-  const head = `[Omitted: the \`${field}\` of ${toolName} (${chars.toLocaleString('en-US')} characters) ${INPUT_STUB_MARK}; never send it as ${field}.`;
-  if (VALIDATE_DRAFT_TOOL.test(toolName)) {
-    return `${head} To read that draft again call getQuestionPaperDraft with the draftId in the result of that call; if the paper was saved since, call getQuestionPaper instead.]`;
-  }
-  if (SAVE_VERSION_TOOL.test(toolName)) {
-    return `${head} That paper was saved: call getQuestionPaper to read it.]`;
-  }
-  return `${head} Write it again if you still need it.]`;
-};
+export const paperPageLabel = (page: Pick<PaperPagePhoto, 'pageId' | 'position' | 'total'>) =>
+  `[Page ${page.position} of ${page.total} of this question paper as photographed (${page.pageId}). The paper was typed up from these photos: read them to check the paper or to redo a part of it. A page photo is not a figure: its id cannot be used as data-figure-id.]`;
 
-/**
- * The path of the first string in a tool call input (at any depth) that carries
- * one of the notes above, or null. A model can copy a note into a new call
- * instead of writing the content again; the note is plain text, so most tools
- * would accept it (a school template saved as one line of prose), and only the
- * question paper draft check happens to refuse it. The runtime refuses such a
- * call before it reaches the API or asks the user to approve it.
- */
-export function findCopiedContextNote(input: unknown, path: string[] = []): string | null {
-  if (typeof input === 'string') {
-    return input.includes(INPUT_STUB_MARK) || input.includes(RESULT_STUB_MARK) ? path.join('.') || 'input' : null;
-  }
-  if (typeof input !== 'object' || input === null) return null;
-  for (const [key, value] of Object.entries(input)) {
-    const found = findCopiedContextNote(value, [...path, key]);
-    if (found !== null) return found;
-  }
-  return null;
-}
-
-/**
- * Replaces each top-level string field of a tool call input that has at least
- * `minChars` characters by the stub. Returns the same object when nothing is
- * long, and leaves non-string and nested values alone (the large inputs are
- * flat text fields such as `html`). A stub is far shorter than any threshold a
- * caller uses, so stubbing twice equals stubbing once.
- */
-export function stubLongInputFields(
-  toolName: string,
-  input: unknown,
-  stub: (input: ToolInputStubInput) => string,
-  minChars: number,
-): unknown {
-  if (typeof input !== 'object' || input === null || Array.isArray(input)) return input;
-  const entries = Object.entries(input);
-  if (!entries.some(([, value]) => typeof value === 'string' && value.length >= minChars)) return input;
-  return Object.fromEntries(
-    entries.map(([field, value]) =>
-      typeof value === 'string' && value.length >= minChars ? [field, stub({ toolName, field, chars: value.length })] : [field, value],
-    ),
-  );
-}
+/** The note for a page photo that cannot be shown. */
+export const paperPageNote = (page: Pick<PaperPagePhoto, 'pageId' | 'position' | 'total'>, reason: 'unreadable' | 'omitted') =>
+  reason === 'omitted'
+    ? `[Page ${page.position} of ${page.total} of this question paper as photographed (${page.pageId}) - left out because the photos in this chat are too large to show at once.]`
+    : `[Page ${page.position} of ${page.total} of this question paper as photographed (${page.pageId}) - in a format this assistant cannot read.]`;
 
 /**
  * Server-generated and sanitised facts only: the id (`asat_...`), the sanitised
@@ -157,12 +77,10 @@ const FIGURE_HINT = 'Use this id as data-figure-id on an <img> to put the image 
 const DOCUMENT_HINT = 'It is a PDF document: read it as source material. It is not an image and cannot be used as data-figure-id.';
 
 /** Why an attachment is shown as a note instead of its content. */
-export type AttachmentNoteReason = Exclude<AttachmentFile['kind'], 'image' | 'document'> | 'old';
+export type AttachmentNoteReason = Exclude<AttachmentFile['kind'], 'image' | 'document'>;
 
 function imageNote(head: string, reason: AttachmentNoteReason): string {
   switch (reason) {
-    case 'old':
-      return `${head} - the image content is no longer visible to you (it was shown earlier). ${FIGURE_HINT} Ask the user to attach it again only if you need to look at it.]`;
     case 'unreadable':
       return `${head} - in a format this assistant cannot read. Ask the user to convert it to JPEG and attach it again.]`;
     case 'omitted':
@@ -174,8 +92,6 @@ function imageNote(head: string, reason: AttachmentNoteReason): string {
 
 function documentNote(head: string, reason: AttachmentNoteReason): string {
   switch (reason) {
-    case 'old':
-      return `${head} - the document's content is no longer visible to you (it was shown earlier). ${DOCUMENT_HINT} Ask the user to attach it again only if you need to read it.]`;
     case 'unreadable':
       return `${head} - a document this assistant cannot read. Ask the user to attach photos of its pages instead.]`;
     case 'omitted':
@@ -186,10 +102,10 @@ function documentNote(head: string, reason: AttachmentNoteReason): string {
 }
 
 /**
- * The text that stands in for an attachment whose content is not shown. Every
- * note keeps the attachment's id: an image id stays valid for figures while the
- * attachment exists server-side for this user, even when its pixels are not
- * shown any more; a document note says it is not a figure.
+ * The text that stands in for an attachment whose content cannot be shown.
+ * Every note keeps the attachment's id: an image id stays valid for figures
+ * while the attachment exists server-side for this user; a document note says
+ * it is not a figure.
  */
 export function attachmentNote(marker: AttachmentMarker, reason: AttachmentNoteReason): string {
   const head = `[Attachment ${describe(marker)}`;
@@ -205,39 +121,7 @@ export function attachmentNote(marker: AttachmentMarker, reason: AttachmentNoteR
 export const attachmentLabel = (marker: AttachmentMarker) =>
   `[Attachment ${describe(marker)} (${marker.ordinal} of ${marker.total}). ${marker.kind === 'document' ? DOCUMENT_HINT : FIGURE_HINT}]`;
 
-/** Index of the first entry of the oldest human message that is still shown in full (0 when there are fewer). */
-export function fullContextBoundary(
-  entries: readonly TranscriptEntry[],
-  provider: Pick<ModelProvider, 'context'>,
-  fullHumanMessages = CONTEXT_FULL_HUMAN_MESSAGES,
-): number {
-  let seen = 0;
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    if (entries[index]!.role === 'user' && provider.context.isHumanTurn(entries[index]!)) {
-      seen += 1;
-      if (seen === fullHumanMessages) return index;
-    }
-  }
-  return 0;
-}
-
 const markersOf = (entry: TranscriptEntry): AttachmentMarker[] => entry.content.filter(isAttachmentMarker);
-
-/**
- * A user entry whose `<current_page>` block no longer carries the page's text
- * (`omitPageText`). Every provider's text block keeps its words in `text`, so
- * this needs no adapter; an entry without such a block is returned as it is.
- */
-function withoutPageText(entry: TranscriptEntry): TranscriptEntry {
-  // The page block is the first block of a user message (`buildUserTranscriptContent`); only it is looked at, so
-  // nothing the user typed in the same shape, which comes after it, is ever taken for one.
-  const [first, ...rest] = entry.content;
-  if (entry.role !== 'user' || typeof first !== 'object' || first === null) return entry;
-  const text = (first as { text?: unknown }).text;
-  if (typeof text !== 'string') return entry;
-  const shortened = omitPageText(text);
-  return shortened === text ? entry : { ...entry, content: [{ ...first, text: shortened }, ...rest] };
-}
 
 /** The context for one request, and how many PDFs it shows the model (a refused request is then explained as a PDF problem). */
 export type ModelContext = { entries: TranscriptEntry[]; documentsShown: number };
@@ -267,17 +151,26 @@ export async function buildModelContextWithStats(
   deps: ModelContextDeps,
   options: ModelContextOptions = {},
 ): Promise<ModelContext> {
-  const minChars = options.toolResultMinChars ?? CONTEXT_TOOL_RESULT_MIN_CHARS;
-  const inputMinChars = options.toolInputMinChars ?? CONTEXT_TOOL_INPUT_MIN_CHARS;
-  const boundary = fullContextBoundary(entries, provider, options.fullHumanMessages);
-  const toolNames = provider.context.toolNamesByUseId(entries);
   const readable: ReadableMimeTypes = { image: provider.imageMimeTypes, document: provider.documentMimeTypes };
+  let remaining = options.attachmentBudgetBytes ?? CONTEXT_ATTACHMENT_BUDGET_BYTES;
+
+  // The paper's own photos come first: they are what every question in the chat is about.
+  const pageParts: unknown[] = [];
+  for (const page of (await deps.loadPaperPages?.()) ?? []) {
+    const image = provider.maxImageBytes !== undefined && page.bytes.byteLength > provider.maxImageBytes ? null : provider.context.image(page);
+    const cost = encodedImageBytes(page.bytes.byteLength);
+    if (image === null) pageParts.push(provider.context.text(paperPageNote(page, 'unreadable')));
+    else if (cost > remaining) pageParts.push(provider.context.text(paperPageNote(page, 'omitted')));
+    else {
+      remaining -= cost;
+      pageParts.push(provider.context.text(paperPageLabel(page)), image);
+    }
+  }
 
   // Newest first, so when the budget runs out it is the older pages and files that are left out.
-  let remaining = options.attachmentBudgetBytes ?? CONTEXT_ATTACHMENT_BUDGET_BYTES;
   let documentsShown = 0;
   const files = new Map<string, AttachmentFile>();
-  for (let index = entries.length - 1; index >= boundary; index -= 1) {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
     for (const marker of markersOf(entries[index]!).reverse()) {
       const loaded = await deps.loadAttachment(marker.attachmentId, readable);
       const carried = loaded.kind === 'image' || loaded.kind === 'document';
@@ -301,19 +194,14 @@ export async function buildModelContextWithStats(
     }
   }
 
+  const firstUser = entries.findIndex((entry) => entry.role === 'user');
   const built = entries.map((entry, index) => {
-    const old = index < boundary;
-    const shortened = old
-      ? withoutPageText(provider.context.stubToolInputs(provider.context.stubToolResults(entry, toolNames, toolResultStub, minChars), toolInputStub, inputMinChars))
-      : entry;
-    if (!shortened.content.some(isAttachmentMarker)) return shortened;
-    const content = shortened.content.flatMap((block) => {
-      if (!isAttachmentMarker(block)) return [block];
-      return old
-        ? provider.context.stubAttachment(block)
-        : provider.context.materializeAttachment(block, files.get(block.attachmentId) ?? { kind: 'missing' });
-    });
-    return { ...shortened, content };
+    const pages = index === firstUser ? pageParts : [];
+    if (!entry.content.some(isAttachmentMarker) && pages.length === 0) return entry;
+    const content = entry.content.flatMap((block) =>
+      isAttachmentMarker(block) ? provider.context.materializeAttachment(block, files.get(block.attachmentId) ?? { kind: 'missing' }) : [block],
+    );
+    return { ...entry, content: [...pages, ...content] };
   });
   return { entries: built, documentsShown };
 }

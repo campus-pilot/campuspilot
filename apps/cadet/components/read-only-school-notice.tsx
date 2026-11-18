@@ -11,7 +11,7 @@ import { CADET_READ_ONLY_SCHOOL_NOTICES, readOnlySchoolReason } from '@/lib/read
  * Permanent notice at the top of every signed-in page while the student's
  * school is read-only: suspended (`getSchool().isSuspended`,
  * docs/school-suspension.md) or without an active plan
- * (`getSchool().hasActivePlan`, docs/school-trials.md). Every screen still
+ * (`getSchool().hasActivePlan`, docs/school-billing.md). Every screen still
  * shows its records, and the few things a student can change (device
  * notifications, read marks) are refused by the server.
  *

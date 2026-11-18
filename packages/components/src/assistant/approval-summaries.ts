@@ -76,9 +76,29 @@ const saveQuestionPaperVersion: SummaryEntry = {
   },
 };
 
+/** `editQuestionPaper`: how many changes, to which version of which paper, and the version it becomes. The edits stay listed. */
+const editQuestionPaper: SummaryEntry = {
+  paperScope: scopeOf,
+  summarize(input, facts) {
+    const count = Array.isArray(input.edits) ? input.edits.length : 0;
+    const [changes, them] = count === 1 ? ['1 change', 'it'] : [`${count} changes`, 'them'];
+    const expected = typeof input.expectedVersionNo === 'number' ? input.expectedVersionNo : null;
+    const paper = facts.paperLabel ?? 'this paper';
+    return {
+      sentence:
+        expected === null
+          ? `Make ${changes} to ${paper} and save ${them} as a new version.`
+          : `Make ${changes} to version ${expected} of ${paper} and save ${them} as version ${expected + 1}.`,
+      detailKeys: new Set(['sessionId', 'examSlug', 'classId', 'subjectSlug', 'modeSlug', 'expectedVersionNo']),
+      notes: {},
+    };
+  },
+};
+
 /** The tools with a summary, by the MCP name a `tool_call` item stores as `toolName`. */
 const APPROVAL_SUMMARIES: Readonly<Record<string, SummaryEntry>> = {
   'school.saveQuestionPaperVersion': saveQuestionPaperVersion,
+  'school.editQuestionPaper': editQuestionPaper,
 };
 
 const asRecord = (input: unknown): Record<string, unknown> | null =>

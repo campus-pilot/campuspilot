@@ -24,12 +24,13 @@ import {
   type AssistantConversationHandlers,
   type ProcessRunInput,
 } from './contract';
-import { buildModelContextWithStats, findCopiedContextNote, type ModelContextDeps } from './context';
+import { buildModelContextWithStats, type ModelContextDeps, type PaperPagePhoto } from './context';
+import { foreignRunIds, transcriptForProvider, type HandoffEntry } from './handoff';
 import { buildAssistantPrompt, istInstant, type AssistantConversationFacts } from './prompt';
 import { readActiveSchoolFeatures } from './school-features';
 import { unavailableSchoolWork } from './unavailable-work';
 import type { ProviderRegistry } from './providers/registry';
-import { billedUsageOf, type ModelProvider, type ModelToolResult, type TranscriptEntry } from './providers/types';
+import { billedUsageOf, type ModelProvider, type ModelToolResult } from './providers/types';
 import { showViewInputSchema } from '@campuspilot/assistant-contract/views';
 
 import {
@@ -109,6 +110,12 @@ export type AssistantConversationDeps = {
    * storage itself; a test without attachments may omit it.
    */
   loadAttachment?: ModelContextDeps['loadAttachment'];
+  /**
+   * Loads the photographed pages of a question paper, for a conversation
+   * shared with one (see `context.ts`). Injected by `apps/worker` for the same
+   * reason; without it such a conversation is shown no photos.
+   */
+  loadPaperPages?: (input: { schoolId: string; paper: store.PaperKeyParts }) => Promise<PaperPagePhoto[]>;
 };
 
 type RunFailure = { code: string; message: string; detail?: string };
@@ -174,6 +181,15 @@ type RunFacts = {
   userId: string;
   /** The provider the conversation runs on. */
   providerId: ModelProvider['id'];
+  /**
+   * The model this run calls, chosen when it began: the provider's own, or its
+   * Pro model (another provider, or its stronger one) when the user sent the
+   * message with Pro picked. Absent from
+   * a run journaled before the choice existed, which calls the provider's own.
+   */
+  model?: string;
+  /** The question paper the conversation is shared with, whose photos every request shows; absent for any other conversation. */
+  paper?: store.PaperKeyParts | null;
   facts: AssistantConversationFacts;
 };
 
@@ -285,7 +301,7 @@ export type RunContext = Pick<restate.ObjectContext, 'run' | 'awakeable'>;
 export function createRunProcessor(deps: AssistantConversationDeps) {
   /** The provider a run uses; it was checked when the run began. */
   const providerFor = (run: RunFacts): ModelProvider => {
-    const provider = deps.providers.get(run.providerId);
+    const provider = deps.providers.get(run.providerId, run.model);
     if (!provider) {
       throw runFailure('provider_unavailable', `The ${run.providerId} model provider is no longer configured.`);
     }
@@ -319,14 +335,17 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
       });
       return null;
     }
-    const provider = deps.providers.get(conversation.provider);
-    if (!provider) {
+    const configured = deps.providers.get(conversation.provider);
+    if (!configured) {
       await finishRun(run, 'failed', {
         code: 'provider_unavailable',
         message: `This conversation runs on ${conversation.provider}, which is not configured now. Start a new conversation.`,
       });
       return null;
     }
+    // Pro is another provider (`ASSISTANT_PRO_PROVIDER`) or the stronger model; without either it is the conversation's own.
+    const pro = (item.body as AssistantUserMessageBody).tier === 'pro';
+    const provider = (pro ? deps.providers.pro(configured.id) : null) ?? configured;
 
     /**
      * The run's start, read once here, inside the run's first durable step:
@@ -361,6 +380,8 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
       schoolId: run.schoolId,
       userId: run.userId,
       providerId: provider.id,
+      model: provider.model,
+      paper: store.sharedPaperOf(conversation),
       facts: {
         schoolId: run.schoolId,
         schoolName: await lookUpSchoolName(run.id, run.schoolId),
@@ -432,7 +453,7 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
 
     // Every request is saved with the prices it was made at, so a provider
     // without prices is never called.
-    const prices = deps.providers.prices(provider.id);
+    const prices = deps.providers.prices(provider.id, provider.model);
     if (!prices) {
       throw runFailure('provider_unavailable', 'The assistant is not available right now. Please try again later.', {
         detail: `No prices are configured for ${provider.id}.`,
@@ -442,10 +463,16 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
     const catalog = await schoolToolCatalog(await requireToken(run.runId), run.schoolId);
     // The stored transcript holds markers and whole old results; the model gets
     // the shortened view (see `buildModelContext`). Nothing stored changes.
+    // Turns another provider answered (Fast and Pro on different providers) reach this one as a handoff (`handoff.ts`).
+    const stored = (await store.loadTranscriptWithRuns(db, run.conversationId)) as HandoffEntry[];
+    const handedOff = transcriptForProvider(stored, await store.loadItemsOfRuns(db, run.conversationId, foreignRunIds(stored, provider.id)), provider);
     const { entries: transcript, documentsShown } = await buildModelContextWithStats(
-      (await store.loadTranscript(db, run.conversationId)) as TranscriptEntry[],
+      handedOff,
       provider,
-      { loadAttachment: deps.loadAttachment ?? (async () => ({ kind: 'missing' })) },
+      {
+        loadAttachment: deps.loadAttachment ?? (async () => ({ kind: 'missing' })),
+        ...(run.paper && deps.loadPaperPages ? { loadPaperPages: () => deps.loadPaperPages!({ schoolId: run.schoolId, paper: run.paper! }) } : {}),
+      },
     );
     const itemKey = assistantMessageItemKey(run.runId, step);
 
@@ -646,28 +673,6 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
     }
 
     if (tool.source === 'local') return showView(run, toolUse);
-
-    // Refused before anything is recorded or put to the user for approval:
-    // the call would send a context note as if it were the content.
-    const copiedNote = findCopiedContextNote(toolUse.input ?? {});
-    if (copiedNote !== null) {
-      deps.log.warn(
-        { runId: run.runId, conversationId: run.conversationId, tool: tool.mcpName, field: copiedNote },
-        'assistant.tool.copied-context-note',
-      );
-      return {
-        action: 'result',
-        result: {
-          toolUseId: toolUse.id,
-          toolName: toolUse.name,
-          content: JSON.stringify({
-            code: 'BAD_REQUEST',
-            message: `\`${copiedNote}\` holds a note that replaced earlier content in this chat, not the content itself. Nothing was sent. Write the full ${copiedNote} again (read it back with a tool first if needed) and call ${toolUse.name} again.`,
-          }),
-          isError: true,
-        },
-      };
-    }
 
     const needsApproval = requiresApproval(tool);
     const body: AssistantToolCallBody = {

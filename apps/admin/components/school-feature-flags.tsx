@@ -32,6 +32,7 @@ import { LoaderCircle } from 'lucide-react';
 import Link from 'next/link';
 import { client, orpc } from '@/lib/orpc';
 import { DISABLE_WARNINGS } from './school-feature-warnings';
+import { SchoolBillingCard } from './school-billing/school-billing-card';
 import { SchoolPlanCard } from './school-plan-card';
 
 /** The features whose catalogue config is not `z.null()`, i.e. that have settings to edit. */
@@ -407,6 +408,7 @@ export function SchoolFeatureFlags({ schoolId }: { schoolId: string }) {
     <section className="mx-auto flex w-full max-w-4xl flex-col gap-5">
       <FeatureFlagsHeading />
       <SchoolPlanCard schoolId={schoolId} plan={state.data} />
+      <SchoolBillingCard schoolId={schoolId} defaultTier={state.data.period?.tier ?? state.data.subscribedTier ?? 'plus'} />
       {schoolFeatureEntries(features).map((entry) => (
         <FeatureFlagCard
           key={entry.feature}

@@ -86,9 +86,11 @@ async function findSchoolMember(
       ...staffIdentityColumns,
       profileImageS3Key: user.profileImageS3Key,
       addedAt: schoolMemberTable.addedAt,
+      isOwner: sql<boolean>`${schoolTable.ownerUserId} is not distinct from ${user.id}`,
     })
     .from(schoolMemberTable)
     .innerJoin(user, eq(schoolMemberTable.userId, user.id))
+    .innerJoin(schoolTable, eq(schoolMemberTable.schoolId, schoolTable.id))
     .where(
       and(
         eq(schoolMemberTable.schoolId, schoolId),
@@ -130,6 +132,23 @@ async function findSchoolMember(
     roles,
   });
 }
+
+/**
+ * Holds the school row for the transaction, against a concurrent owner change
+ * (`updateSchoolOwner` locks it to update): taken before reading whether a
+ * member is the owner, so the owner guards below see the owner that commits.
+ */
+async function lockSchoolOwner(db: DatabaseExecutor, schoolId: string) {
+  await db.select({ id: schoolTable.id }).from(schoolTable).where(eq(schoolTable.id, schoolId)).for("share");
+}
+
+/** Refusal for removing a school's owner, the owner included. */
+const SCHOOL_OWNER_CANNOT_BE_REMOVED_MESSAGE =
+  "The school's owner cannot be removed or leave the school. Contact CampusPilot to transfer ownership.";
+
+/** Refusal for taking the principal role away from a school's owner. */
+const SCHOOL_OWNER_KEEPS_PRINCIPAL_MESSAGE =
+  "The school's owner always keeps the principal role. Contact CampusPilot to transfer ownership.";
 
 export const schoolMemberRouter = {
   listMembers: protectedProcedure
@@ -232,9 +251,11 @@ export const schoolMemberRouter = {
               ...staffIdentityColumns,
               profileImageS3Key: user.profileImageS3Key,
               addedAt: schoolMemberTable.addedAt,
+              isOwner: sql<boolean>`${schoolTable.ownerUserId} is not distinct from ${user.id}`,
             })
             .from(schoolMemberTable)
             .innerJoin(user, eq(schoolMemberTable.userId, user.id))
+            .innerJoin(schoolTable, eq(schoolMemberTable.schoolId, schoolTable.id))
             .where(where)
             .orderBy(orderDirection(orderByColumn), orderDirection(user.id))
             .limit(pageSize)
@@ -585,12 +606,22 @@ export const schoolMemberRouter = {
     .handler(async ({ context, input, signal }) => {
       try {
         return await context.db.transaction(async (transaction) => {
+          await lockSchoolOwner(transaction, input.schoolId);
           const existingMember = await findSchoolMember(
             transaction,
             input.schoolId,
             input.userId,
           );
           if (!existingMember) throw rpcError.notFound("School member");
+          // The owner is accountable for the school (docs/school-creation.md):
+          // they keep the principal role, so nobody, the owner included, can
+          // demote them and leave the school without its owner in charge.
+          if (
+            existingMember.isOwner &&
+            !input.roles.some(({ role }) => role === "principal")
+          ) {
+            throw rpcError.forbidden(SCHOOL_OWNER_KEEPS_PRINCIPAL_MESSAGE);
+          }
           // A new principal holds password issuing, so appointing one needs
           // it too: a manager cannot promote themselves to take over staff
           // accounts.
@@ -663,12 +694,18 @@ export const schoolMemberRouter = {
     .handler(async ({ context, input }) => {
       try {
         return await context.db.transaction(async (transaction) => {
+          await lockSchoolOwner(transaction, input.schoolId);
           const member = await findSchoolMember(
             transaction,
             input.schoolId,
             input.userId,
           );
           if (!member) throw rpcError.notFound("School member");
+          // The owner cannot leave or be removed (docs/school-creation.md):
+          // otherwise a person could hand a school to someone else, step out
+          // and look like a newcomer. Only a platform administrator changes
+          // the owner.
+          if (member.isOwner) throw rpcError.forbidden(SCHOOL_OWNER_CANNOT_BE_REMOVED_MESSAGE);
 
           // The composite foreign key cascades only the school's role rows. The
           // global auth user remains because they may belong to other schools.

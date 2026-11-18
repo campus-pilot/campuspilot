@@ -328,8 +328,13 @@ allowlist. Inline `<svg>` limited to `svg g path circle ellipse line polyline po
 tspan` (not `title` or `desc`: the sanitiser drops them).
 
 - **Formulas** are an empty `<span data-math="LATEX">` (`data-display="true"` for a centred
-  equation). The model supplies only the LaTeX string; the server typesets it.
-- **Figures.** `<figure data-placeholder="description"></figure>` prints a labelled dashed box.
+  equation). The model supplies only the LaTeX string; the server typesets it. A model that
+  sends the paper as a JSON string sometimes escapes the LaTeX twice (`\\frac{4}{7}`), which
+  KaTeX would print as a line break and the italic letters "frac". The sanitiser halves the
+  backslashes of a formula when every run of them is even and one pair starts a command; a
+  formula with any single backslash is kept as written.
+- **Figures.** `<figure data-placeholder="description"></figure>` prints a labelled dashed box
+  (an empty description prints as "Figure").
   An uploaded image is `<img data-figure-id="asat_...|qpf_...">` (no `src`, ever) inside a
   `<figure>`; the renderer swaps in the stored image.
 - **Marks, numbering and labels** are plain text the author wrote.
@@ -501,15 +506,23 @@ one the URL names, else the paper's latest shared conversation).
     up the studio fills the window under the app's header (`APP_SHELL_FILL_HEIGHT_MD_CLASS`,
     which leaves room for the shell's alert rows): one header row (name, version, PDF,
     menu), then the assistant on the left and the paper on the right, each scrolling inside
-    its pane, so nothing is cut off on arrival and the page never scrolls. The paper is the
-    sandboxed preview in its `fill` form (`DocumentPreview`), scaled to the pane.
+    its pane, so nothing is cut off on arrival and the page never scrolls. A saved version
+    is shown as its PDF (`VersionPdf`): the file stored at save, the same one *Download PDF*
+    gives, streamed by `GET /api/blob/.../question-papers/{subject}/{mode}/versions/{n}/pdf`
+    (the checks of `getQuestionPaperDownload`; a removed PDF is printed again first) and
+    drawn page by page with pdf.js (`PdfPages`), so the printed page breaks show. Each page
+    is drawn at the pane's width times the screen's pixel ratio and only while it is near
+    the screen. The chat's version *Preview* shows the same. An unsaved draft has no PDF
+    and is not printed for the preview (that would mean a Gotenberg conversion on every
+    look): it stays the sandboxed HTML preview in its `fill` form (`DocumentPreview`),
+    scaled to the pane.
   - The **paper's side** shows the version the URL names; else the assistant's **unsaved
     draft** when the conversation holds one (`unsavedDraftOf`: the newest ready draft of
     this paper with no successful save after it); else the latest version. An unsaved
     draft has one action, *Save as version n*, which sends the same sentence as the draft
     card's Save in the chat (`saveDraftMessage`); the approval that follows is given in the
     assistant like every other change. Nothing on this side is editable: versions are
-    immutable and the preview frame stays sandboxed.
+    immutable, the PDF pages are pictures and the draft's frame stays sandboxed.
   - The header row also has an icon button beside *Download PDF*, named by its tooltip
     *View uploaded photos or file* (*Add photos or a file* while the paper has no photo):
     it opens the same card as the menu's *Add photos or a file*. It is shown when the paper
@@ -814,13 +827,33 @@ worker also needs the provider key, `katex` and `sharp`. Cost rows are written b
 and count toward AI usage by feature ("By feature" in the usage views); see
 [In-app assistant](assistant.md#cost-saved-never-recomputed).
 
-## Chat: attachments, tools, drafts, pruning
+**Figure route** (optional, worker only). A hand-drawn diagram (a strip divided into
+shaded parts, letters joined by lines) is left as a placeholder by the default model: on
+flash-lite, redrawing it went wrong in every try (wrong part counts, or the "correct"
+option drawn instead of the one on the page), and a wrong figure changes the question.
+`gemini-3.8-flash` copied the same diagrams exactly, at about INR 6 a page and 2 to 3
+minutes. So with `QUESTION_PAPER_STRONG_MODEL`, its four `QUESTION_PAPER_STRONG_PRICE_*`
+and `QUESTION_PAPER_DECISION_PRICE_INPUT_USD_PER_MTOK` set (all or none, Gemini only), the
+job adds a `route` step after `inputs`: Gemini's decision model
+(`QUESTION_PAPER_DECISION_MODEL`, default `gemini-decision-1`, `POST /v1beta/decisions`)
+reads the page photos and answers one yes or no question, `FIGURE_DECISION_QUESTION` in
+`prompt.ts`. From `FIGURE_DECISION_THRESHOLD` (0.2) up, the transcription and its repair
+run on the figure model with the redraw prompts (`QUESTION_PAPER_REDRAW_VOCABULARY_RULES`:
+simple diagrams become svg, each written as an aria-label reading of the photo first);
+below it the job runs as before. On 25 photographed papers (85 pages) the two with
+diagrams scored 0.87 and 0.28 and every other paper 0.12 or below; the call took 1 to
+4 seconds and cost about $0.01 for all of them. The decision is saved as request 0 of
+the job (`qp:{job}.{attempt}:model:0`, input tokens only). A decision that fails (a
+provider error, a page it cannot read) writes the paper as before; the step journals
+only `{ figures, probability }`. Chat keeps placeholders for hand-drawn figures.
+
+## Chat: attachments, tools, drafts, context
 
 **Attachments.** The assistant composer accepts up to 20 files per message, images and
 PDFs together (paperclip, drop or paste; JPEG, PNG, WebP, HEIC family up to 15 MB, PDF up
 to 10 MB; Word and other files are refused with a sentence that says to save them as PDF).
 What a file is comes from its bytes, never its name (`kind`: `image` or `document`; the
-canonical rules, limits and provider docs are in [In-app assistant](assistant.md#attachments-question-paper-tools-and-context-pruning)).
+canonical rules, limits and provider docs are in [In-app assistant](assistant.md#attachments-question-paper-tools-and-the-models-context)).
 Files are uploaded first (`POST /api/blob/schools/:schoolId/assistant/attachments`,
 browser session only, origin checked, 60 per minute per IP) and become
 `assistant_attachment` rows: an image with the same derivatives as pages, made by the
@@ -883,10 +916,8 @@ use the source's `qpf_` figure ids, which a save refuses).
   agent never to submit a paper edited from a cut one. Validate declares 40,000 (it is lean by
   construction); learn 40,000 (guide, limits and example are about 10 KB). The numbers live in
   `question-paper.dto.ts` and are derived from `QUESTION_PAPER_LIMITS`, so raising the fragment
-  limit raises the cap; `question-paper.dto.test.ts` pins the relation. Context pruning later
-  replaces a long result, and the long text a model wrote into an older tool call, by a stub
-  (see "Context pruning"), so a long paper does not stay in the context once it is two
-  human messages old.
+  limit raises the cap; `question-paper.dto.test.ts` pins the relation. The model keeps every
+  result and every paper it wrote for the whole conversation (see "Full context").
 - **Drafts** are not database rows. A draft is the input of a `validateQuestionPaperDraft`
   call in the conversation; the chat shows it as a card (ready or not, the problems in plain
   sentences, what the sanitiser removed behind a collapsed list, Preview, Save as new
@@ -895,13 +926,16 @@ use the source's `qpf_` figure ids, which a save refuses).
   visible next to the line); a later draft counts when it is ready by its stored check or, when that
   was cut at 4,000 characters, by the re-check the chat makes for it. "Save as new version" sends "Save draft {id} as a new version
   of {Subject (Mode), Class, Exam}." (a draft id hashes the text alone, so the message names the
-  paper, and the button is spent only by a request for its own paper). The approval card for
-  `saveQuestionPaperVersion` reads "Save Draft 2 as version 4 of ..." with ids, slugs and the version
+  paper, and the button is spent only by a request for its own paper). The save now runs without an
+  approval card (below), so its approval summary is not shown; it is kept and still
+  reads "Save Draft 2 as version 4 of ..." with ids, slugs and the version
   counter behind "Details" and the paper text never shown (`approval-summaries.ts`). Saving by `draftId` is accepted only from the in-app assistant, which
   finds the newest such call of *this conversation, school and user* whose canonical
-  html hashes to the id; other clients pass `html`. The agent proposes, the user
-  decides: nothing is saved until they ask, and saving creates a new version after the
-  usual approval card. Several drafts and older versions can be previewed in chat; the
+  html hashes to the id; other clients pass `html`. In the in-app chat the agent saves a
+  valid draft straight away, with no approval card (the save declares `skipsApproval`):
+  saving only creates a new version and the previous one stays, and the draft card then
+  reads "Saved as a new version." instead of offering Save. Other clients save when the
+  user asks. Several drafts and older versions can be previewed in chat; the
   `question_paper` view (`show_view`) shows a saved version with Preview and Download.
 - A chat attachment can be a **figure**: the agent puts its `asat_` id in `<img data-figure-id>`;
   validation and previews accept it only for the in-app assistant's own user, only when
@@ -921,26 +955,11 @@ use the source's `qpf_` figure ids, which a save refuses).
   refuses a seed that does not resolve to a paper of the school
   (`resolvePaperScope`) before it reaches the model, and the chip says so when the
   paper cannot be opened.
-- **Context pruning** (`runtime/context.ts`, applied to what the model sees only, never
-  to the stored transcript): only the last two human messages are sent in full. In older
-  turns a tool result of 8,000 characters or more is replaced by a short stub naming the
-  tool and the size, and an older attachment by a note that keeps its `asat_` id and says
-  the image or PDF is no longer visible (see "Attachment ids" below). The same applies to the
-  *inputs* of older tool calls: a top-level text field of 4,000 characters or more (the `html` the model
-  wrote into `validateQuestionPaperDraft` or `saveQuestionPaperVersion`) becomes a stub that names
-  the field, the tool and the size and points at what still works. The call, its id, its name and
-  its short fields are untouched, so every call keeps its result; the stored transcript keeps the
-  full text, which is what a `draftId` is resolved from when the user saves, and the stub names the way back
-  for the tool that wrote it: for a `validateQuestionPaperDraft` input, `getQuestionPaperDraft`
-  with the draft id in that call's result (an unsaved draft) or `getQuestionPaper` (saved since);
-  for a `saveQuestionPaperVersion` input, `getQuestionPaper`; for any other tool it only says to
-  write the text again and mentions no draft id. The stub also says it is not the content and
-  must never be sent as `html`; a model that copies a stub into any tool call is answered
-  `BAD_REQUEST` by the runtime before the call is recorded or approved (`findCopiedContextNote`,
-  see the Assistant guide). A validate result over 8,000 characters is itself stubbed
-  once old, so the draft id is then found by calling the tool again or re-validating. Fresh images and PDFs are sent newest first within one 16 MiB budget counted as base64 (4/3 of the file; `MODEL_REQUEST_ATTACHMENT_BUDGET_BYTES`, well under both providers' request limits); an image over the provider's own cap (5 MB on Claude) is reported as unreadable. The learn payload
-  counts as a long result, so after two more messages the agent calls the tool again.
-
+- **Full context** (`runtime/context.ts`, applied to what the model sees only, never
+  to the stored transcript): every message, tool result, tool call input and attachment is
+  sent in full for the whole conversation (images and PDFs newest first within the 16 MiB
+  request budget). Pruning older turns was removed on 2026-11-17 (see
+  [In-app assistant](assistant.md#attachments-question-paper-tools-and-the-models-context)).
 - **Attachment ids.** The model must be told each attachment's id or it cannot write a
   `data-figure-id`. Every image part is preceded by a server-built line
   `[Attachment asat_...: <sanitised file name>, image/png (1 of 2). Use this id as data-figure-id on an <img> to put the image in a question paper.]`
@@ -949,11 +968,28 @@ use the source's `qpf_` figure ids, which a save refuses).
   and the content type, never user free text. A PDF's line ends instead with "It is a PDF
   document: read it as source material. It is not an image and cannot be used as
   data-figure-id.", and the guide (`learn_question_paper_generation`) says the same. Notes for attachments that are not shown
-  (older than the window, over the image budget, unreadable, missing) keep the id too: an
+  (over the attachment budget, unreadable, missing) keep the id too: an
   `asat_` id stays valid for figures while the attachment exists for the same user, whether or
   not its pixels are still visible. An unusable figure id is a validation problem that names the allowed forms
   (`asat_` from an attachment line, or a `qpf_` already saved in the paper); a chat attachment
   is accepted only inside the in-app assistant, anywhere else the agent writes a placeholder.
+
+**Editing a saved paper.** `editQuestionPaper` (a write, module `exams`, the same class
+permission as a save) takes the paper key, `expectedVersionNo` and up to 40 `edits`, each a
+`find` copied from that version's html and its `replace`. `question-paper.edits.ts` applies
+them in order to the stored html of that version, each `find` exactly once (as written, or
+else with runs of whitespace inside it loosened and whitespace at its ends left out of the
+match; nothing else is loosened), all or nothing: a missing
+or repeated `find` is a BAD_REQUEST that names the edit and saves nothing. The result goes
+through `saveQuestionPaperVersion` like any save (sanitiser, limits, formulas, figures,
+CONFLICT on a stale number), so the edited version stays and the new one prints. The
+guide sends the model here for every change that leaves most of a saved paper as it is,
+because a model that writes the whole fragment again to change one line also changes
+lines nobody asked about (spacing, classes, formulas). There is no draft card in between,
+and no approval card either: like the save, the edit declares `skipsApproval`. Its approval
+summary ("Make 2 changes to version 3 of {paper} and save them as version 4.", with the
+edits listed, `approval-summaries.ts`) is kept but not shown. A draft that is not saved is still
+changed by writing it again and validating it.
 
 ## Where the code is
 
@@ -1037,7 +1073,7 @@ once the tab is visible).
   demo purge. The pages integration test replaces the workflow engine's sender with a failing
   fake, so it passes with or without a Restate running next to the database.
 - Providers and chat: `pnpm --filter @campuspilot/assistant exec vitest run --project unit`
-  and `--project integration` (text requests, attachments, context pruning).
+  and `--project integration` (text requests, attachments, the model's context).
 - `apps/server`: `src/mcp-catalog.test.ts`, `src/mcp.test.ts` (tool counts, approval,
   hidden procedures, output limits).
 - UI: `pnpm --filter @campuspilot/components test`; `apps/management` runs its tests with

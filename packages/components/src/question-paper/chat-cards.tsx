@@ -13,8 +13,9 @@ import type { DraftCardFacts } from './chat-cards-model';
  * Question paper cards inside a chat (decision D32): a draft the assistant
  * wrote and a saved version. Presentational only: the data arrives as props
  * and every action is a callback (the chat reads the API and opens the
- * preview). A draft is only a draft until the user explicitly asks to save
- * it; "Save as new version" sends that request as a chat message.
+ * preview). The assistant saves a valid draft by itself, after which the card
+ * says so; "Save as new version" stays for a draft it did not save, and sends
+ * that request as a chat message.
  */
 
 const MAX_LISTED_PROBLEMS = 3;
@@ -76,6 +77,8 @@ export type QuestionPaperDraftCardProps = DraftCardFacts & {
   onSave?: () => void;
   /** The user already asked to save this draft (a later message in the conversation says so): the button is spent, so a second click cannot queue a duplicate version. */
   saveRequested?: boolean;
+  /** A save of this draft went through later in the conversation: the card says it is saved and offers no Save. */
+  saved?: boolean;
   /**
    * "Draft 3": a later draft of the same paper was checked and is ready. The
    * card then shrinks to one quiet line, whether it was ready or not, so a
@@ -114,10 +117,11 @@ export function QuestionPaperDraftCard({
   preview,
   onSave,
   saveRequested = false,
+  saved = false,
   supersededBy,
   ...facts
 }: QuestionPaperDraftCardProps) {
-  const body = <DraftBody facts={facts} preview={preview} onSave={onSave} saveRequested={saveRequested} />;
+  const body = <DraftBody facts={facts} preview={preview} onSave={onSave} saveRequested={saveRequested} saved={saved} />;
   return (
     <AssistantViewFrame title={`Draft ${ordinal}`}>
       {supersededBy ? (
@@ -136,17 +140,19 @@ function DraftBody({
   preview,
   onSave,
   saveRequested,
+  saved,
 }: {
   facts: DraftCardFacts;
   preview: ReactNode;
   onSave?: () => void;
   saveRequested: boolean;
+  saved: boolean;
 }) {
   return (
     <div className="flex flex-col gap-3 rounded-xl assistant-well p-3">
       {facts.valid ? (
         <>
-          <p className="text-sm">Ready to preview and save.</p>
+          <p className="text-sm">{saved ? 'Saved as a new version.' : 'Ready to preview and save.'}</p>
           <PlaceholderNote count={facts.placeholderFigures} />
           <RemovedList lines={facts.removed} />
         </>
@@ -156,9 +162,11 @@ function DraftBody({
       {facts.valid ? (
         <CardActions>
           {preview}
-          <Button type="button" variant="ghost" size="sm" onClick={onSave} disabled={!onSave || saveRequested}>
-            <FilePlus2 data-icon="inline-start" aria-hidden /> {saveRequested ? 'Save requested' : 'Save as new version'}
-          </Button>
+          {saved ? null : (
+            <Button type="button" variant="ghost" size="sm" onClick={onSave} disabled={!onSave || saveRequested}>
+              <FilePlus2 data-icon="inline-start" aria-hidden /> {saveRequested ? 'Save requested' : 'Save as new version'}
+            </Button>
+          )}
         </CardActions>
       ) : null}
     </div>

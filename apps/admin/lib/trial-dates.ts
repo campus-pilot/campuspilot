@@ -1,10 +1,11 @@
 /**
- * Trial dates as the admin app shows and picks them (docs/school-trials.md).
+ * Trial dates as the admin app shows and picks them (docs/school-billing.md).
  * The platform runs on Indian time, so a trial end is picked as a calendar
  * day in IST and ends at the last second of that day there; the server
  * stores the instant in UTC.
  */
 
+import { BILLING_PERIOD_DAYS } from '@campuspilot/api/billing/billing.contract';
 import { MAX_TRIAL_DAYS } from '@campuspilot/api/routers/system-admin/school/school.dto';
 
 const IST = 'Asia/Kolkata';
@@ -19,16 +20,10 @@ export function istDay(instant: Date): string {
   return istDayFormatter.format(instant);
 }
 
-/**
- * The same day `months` calendar months later, as `YYYY-MM-DD`. A day the
- * target month lacks becomes its last day (31 Jan + 1 month is 28 or 29 Feb).
- */
-export function addCalendarMonths(day: string, months: number): string {
+/** The day `days` days later, as `YYYY-MM-DD`. */
+export function addDays(day: string, days: number): string {
   const [year, month, date] = day.split('-').map(Number);
-  const target = new Date(Date.UTC(year!, month! - 1 + months, 1));
-  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
-  target.setUTCDate(Math.min(date!, lastDay));
-  return target.toISOString().slice(0, 10);
+  return new Date(Date.UTC(year!, month! - 1, date! + days)).toISOString().slice(0, 10);
 }
 
 /** The last second of an IST day, as the ISO date-time the trial procedures take. */
@@ -36,9 +31,9 @@ export function endOfIstDay(day: string): string {
   return `${day}T23:59:59+05:30`;
 }
 
-/** The proposed end of a new trial: one calendar month from today, in IST. */
+/** The proposed end of a new trial: one billing period (28 days) from today, in IST (docs/school-billing.md). */
 export function defaultTrialEndDay(now: Date = new Date()): string {
-  return addCalendarMonths(istDay(now), 1);
+  return addDays(istDay(now), BILLING_PERIOD_DAYS);
 }
 
 /** "17 Dec 2026", in IST. */

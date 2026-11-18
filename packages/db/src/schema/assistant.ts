@@ -154,6 +154,8 @@ export type AssistantUserMessageBody = {
   seed?: AssistantMessageSeed;
   /** Who sent it, named as at sending: a conversation shared with a paper has several people in it. */
   author?: { userId: string; name: string };
+  /** `pro` when the user picked Pro for this message (see `AssistantModelTier`); absent means the standard model. */
+  tier?: 'pro';
 };
 
 export type AssistantAssistantMessageBody = {

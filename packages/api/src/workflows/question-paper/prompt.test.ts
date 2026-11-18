@@ -1,6 +1,7 @@
 import {
   QUESTION_PAPER_GUIDE,
   QUESTION_PAPER_NO_MOTION_RULE,
+  QUESTION_PAPER_REDRAW_VOCABULARY_RULES,
   QUESTION_PAPER_TEMPLATE_PRINTS_RULES,
   QUESTION_PAPER_TEMPLATE_PRINTS_UNKNOWN_RULE,
   QUESTION_PAPER_VOCABULARY_RULES,
@@ -11,7 +12,9 @@ import type { TextPart } from './model';
 import {
   buildGenerationParts,
   buildRepairParts,
+  QUESTION_PAPER_JOB_INSTRUCTED_REDRAW_SYSTEM_PROMPT,
   QUESTION_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT,
+  QUESTION_PAPER_JOB_REDRAW_SYSTEM_PROMPT,
   QUESTION_PAPER_JOB_SYSTEM_PROMPT,
   questionPaperJobSystemPrompt,
   TEACHER_INSTRUCTIONS_END,
@@ -188,5 +191,22 @@ describe("the teacher's instructions in the generation job prompt", () => {
     expect(instructed).toContain("already carries out the teacher's instructions");
     expect(instructed).toContain('do not apply the instructions again');
     expect(instructed.replace(/\n\nYour previous answer already carries out[^\n]*/, '')).toBe(plain);
+  });
+
+  it('the figure route differs only in how figures are written: redrawn instead of left as placeholders', () => {
+    expect(questionPaperJobSystemPrompt(null, { redrawFigures: true })).toBe(QUESTION_PAPER_JOB_REDRAW_SYSTEM_PROMPT);
+    expect(questionPaperJobSystemPrompt('Make it easier.', { redrawFigures: true })).toBe(QUESTION_PAPER_JOB_INSTRUCTED_REDRAW_SYSTEM_PROMPT);
+    expect(questionPaperJobSystemPrompt(null)).toBe(QUESTION_PAPER_JOB_SYSTEM_PROMPT);
+    expect(QUESTION_PAPER_JOB_REDRAW_SYSTEM_PROMPT.endsWith(QUESTION_PAPER_REDRAW_VOCABULARY_RULES)).toBe(true);
+    expect(QUESTION_PAPER_JOB_INSTRUCTED_REDRAW_SYSTEM_PROMPT.endsWith(QUESTION_PAPER_REDRAW_VOCABULARY_RULES)).toBe(true);
+    // Without the two Figures sections the prompts are the same text.
+    const withoutFigures = (prompt: string) => prompt.replace(/\n(## )?Figures\n(- [^\n]*\n?)+/g, '\n');
+    expect(withoutFigures(QUESTION_PAPER_JOB_REDRAW_SYSTEM_PROMPT)).toBe(withoutFigures(QUESTION_PAPER_JOB_SYSTEM_PROMPT));
+    expect(withoutFigures(QUESTION_PAPER_JOB_INSTRUCTED_REDRAW_SYSTEM_PROMPT)).toBe(withoutFigures(QUESTION_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT));
+    expect(QUESTION_PAPER_JOB_REDRAW_SYSTEM_PROMPT).toContain('Never draw what the answer should be');
+    expect(QUESTION_PAPER_JOB_SYSTEM_PROMPT).not.toContain('Never draw what the answer should be');
+    // Chat keeps placeholders for hand-drawn figures.
+    expect(QUESTION_PAPER_GUIDE).toContain(QUESTION_PAPER_VOCABULARY_RULES);
+    expect(QUESTION_PAPER_GUIDE).not.toContain('Never draw what the answer should be');
   });
 });

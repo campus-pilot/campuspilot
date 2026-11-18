@@ -27,7 +27,9 @@ describe('the learn guide', () => {
 
   it('names both ways to read a paper back for editing: a saved paper and an unsaved draft', () => {
     expect(QUESTION_PAPER_GUIDE).toContain('getQuestionPaperDraft with a draftId');
-    expect(QUESTION_PAPER_GUIDE).toContain('never send it as html');
+    expect(QUESTION_PAPER_GUIDE).toContain('Never edit from memory');
+    // Nothing in the chat is replaced by a note any more, so the guide does not warn about one.
+    expect(QUESTION_PAPER_GUIDE).not.toContain('replaced by a note');
   });
 
   it('says an attached PDF is source material to read, never a figure to print', () => {

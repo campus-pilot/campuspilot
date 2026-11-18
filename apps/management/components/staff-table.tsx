@@ -271,17 +271,20 @@ function StaffRowActions({
                 </DropdownMenuItem>
               </RequirePermissions>
             )}
-            <RequirePermissions
-              permissions={{ action: SCHOOL_ACTIONS.REMOVE_MEMBER, resource: scope }}
-            >
-              <DropdownMenuItem
-                variant="destructive"
-                onClick={() => onRemove(member)}
+            {/* The owner cannot be removed or leave (docs/school-creation.md). */}
+            {member.isOwner ? null : (
+              <RequirePermissions
+                permissions={{ action: SCHOOL_ACTIONS.REMOVE_MEMBER, resource: scope }}
               >
-                <UserMinus aria-hidden />
-                Remove from staff
-              </DropdownMenuItem>
-            </RequirePermissions>
+                <DropdownMenuItem
+                  variant="destructive"
+                  onClick={() => onRemove(member)}
+                >
+                  <UserMinus aria-hidden />
+                  Remove from staff
+                </DropdownMenuItem>
+              </RequirePermissions>
+            )}
           </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -331,6 +334,7 @@ function createStaffColumns(options: {
       enableSorting: false,
       cell: ({ row }) => (
         <div className="flex min-w-56 flex-wrap gap-1">
+          {row.original.isOwner ? <Badge>Owner</Badge> : null}
           {row.original.roles.map(({ role }) => (
             <Badge key={role} variant="secondary">
               {roleLabels[role]}

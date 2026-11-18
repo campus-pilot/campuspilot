@@ -696,29 +696,26 @@ export async function renderStoredVersionHtml(
 class PdfAlreadyStoredError extends Error {}
 
 /**
- * A short-lived download URL for a version's PDF. The PDF stored when the
- * version was saved is served; if its artifact was deleted (the pointer is
- * then null) the version is printed again from its fragment and its pinned
- * template, and the new artifact becomes its PDF. Two downloads racing to
- * restore the PDF keep the first and discard the second.
+ * The storage key of a version's PDF. The PDF stored when the version was
+ * saved is used; if its artifact was deleted (the pointer is then null) the
+ * version is printed again from its fragment and its pinned template, and the
+ * new artifact becomes its PDF. Two requests racing to restore the PDF keep
+ * the first and discard the second.
  */
-export async function downloadVersionPdf(
+export async function storedVersionPdfKey(
   db: Database,
   input: { scope: PaperScope; version: VersionRow; userId: string; signal?: AbortSignal },
-): Promise<{ url: string; fileName: string }> {
+): Promise<string> {
   const { scope } = input;
   let version = input.version;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     if (version.pdfArtifactId) {
       const [artifact] = await db
-        .select({ s3Key: artifactTable.s3Key, name: artifactTable.name, status: artifactTable.status })
+        .select({ s3Key: artifactTable.s3Key, status: artifactTable.status })
         .from(artifactTable)
         .where(and(eq(artifactTable.id, version.pdfArtifactId), eq(artifactTable.schoolId, scope.key.schoolId)))
         .limit(1);
-      if (artifact?.status === 'ready') {
-        const fileName = downloadFileName(scope, version.versionNo);
-        return { url: await documentDownloadUrl(artifact.s3Key, fileName), fileName: `${fileName}.pdf` };
-      }
+      if (artifact?.status === 'ready') return artifact.s3Key;
     }
     const restored = await restoreVersionPdf(db, { ...input, version }).catch((error: unknown) => {
       if (error instanceof PdfAlreadyStoredError) return null;
@@ -730,10 +727,21 @@ export async function downloadVersionPdf(
   throw rpcError.conflict('The PDF of this version is being restored. Try again.');
 }
 
-async function restoreVersionPdf(
+/** A short-lived download URL for a version's PDF ({@link storedVersionPdfKey}). */
+export async function downloadVersionPdf(
   db: Database,
   input: { scope: PaperScope; version: VersionRow; userId: string; signal?: AbortSignal },
 ): Promise<{ url: string; fileName: string }> {
+  const s3Key = await storedVersionPdfKey(db, input);
+  const fileName = downloadFileName(input.scope, input.version.versionNo);
+  return { url: await documentDownloadUrl(s3Key, fileName), fileName: `${fileName}.pdf` };
+}
+
+/** Prints the version again and stores the PDF as its artifact; answers with the new object's key. */
+async function restoreVersionPdf(
+  db: Database,
+  input: { scope: PaperScope; version: VersionRow; userId: string; signal?: AbortSignal },
+): Promise<string> {
   const { scope, version } = input;
   const { html } = await renderStoredVersionHtml(db, scope, version);
   const pdf = await convertDocumentPdf(html, 'question_paper', input.signal);
@@ -772,6 +780,5 @@ async function restoreVersionPdf(
       if (updated.length === 0) throw new PdfAlreadyStoredError();
     },
   );
-  const fileName = downloadFileName(scope, version.versionNo);
-  return { url: await documentDownloadUrl(s3Key, fileName), fileName: `${fileName}.pdf` };
+  return s3Key;
 }

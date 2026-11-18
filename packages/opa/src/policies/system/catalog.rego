@@ -155,3 +155,26 @@ actions contains {
   "key": "UPDATE_USER_SIGN_IN",
   "resourceKind": "system",
 } if { true }
+
+# Requests from staff to create more schools than their allowance
+# (docs/school-creation.md). Deciding one changes how many schools that
+# person may create, so it is granted separately from reading the list.
+actions contains {
+  "id": "system.school_creation_request.list",
+  "key": "LIST_SCHOOL_CREATION_REQUESTS",
+  "resourceKind": "system",
+} if { true }
+
+actions contains {
+  "id": "system.school_creation_request.decide",
+  "key": "DECIDE_SCHOOL_CREATION_REQUEST",
+  "resourceKind": "system",
+} if { true }
+
+# The price of a 28-day billing period per tier (docs/school-billing.md):
+# platform-wide, so it is granted apart from changing one school.
+actions contains {
+  "id": "system.subscription_price.update",
+  "key": "UPDATE_SUBSCRIPTION_PRICES",
+  "resourceKind": "system",
+} if { true }

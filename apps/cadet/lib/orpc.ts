@@ -27,7 +27,7 @@ export const orpc = createTanstackQueryUtils(client);
 /**
  * The portal's query client. A change the server refuses because the
  * school is read-only (the suspended-school or no-plan error, see
- * docs/school-suspension.md and docs/school-trials.md) means the school this
+ * docs/school-suspension.md and docs/school-billing.md) means the school this
  * app holds is out of date: it is read again at once, so the read-only
  * notice appears in a portal that was open when the school was suspended or
  * its plan ended. The refused change

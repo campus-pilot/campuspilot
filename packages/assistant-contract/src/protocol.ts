@@ -9,6 +9,8 @@ export const ASSISTANT_TOOL_META = {
   module: 'campuspilot/module',
   /** Present only on tools that declare `outputChars` in their MCP metadata. */
   outputChars: 'campuspilot/output-chars',
+  /** `true` only on writes that declare `skipsApproval`: the assistant runs them without the approval card. */
+  skipsApproval: 'campuspilot/skips-approval',
   /**
    * The school features the tool's procedure is gated on (a list of feature
    * keys, possibly empty). The assistant offers a tool only while its
