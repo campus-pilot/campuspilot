@@ -383,6 +383,30 @@ from the enrollment's placement plus any class whose plans hold the student's
 results, so a student moved mid-session keeps the class they sat the exam in.
 Remark, attendance and activities attach only to the record holding the results.
 
+**Which examinations a class record lists.** Two independent facts decide it
+(`sitsCadetExam` in `cadet-academics.service.ts`): whether the record's class
+**takes part** in the examination (`exam_class`, chosen when the plan is
+generated and changed with `updateExamClasses`) and whether the class **has
+plans** in it. Once the examination has any plans, a record lists it only when
+its class both takes part and has plans. A class can take part without plans
+(its last single plan deleted, or recorded by migration 0076's backfill
+because a timetable column scheduled it); its results can never be released,
+so listing it would show "awaiting release" forever. Before any plan exists,
+a record lists the examination when its class takes part or when no class
+takes part yet (an examination not planned at all is listed for everyone).
+
+**Which timetables a student sees.** A published exam timetable
+(`listTimetables`, `getTimetable`, `cadet-timetables.service.ts`) is visible
+when the student's **current** placement in the timetable's session
+(`student.class_id`) is a class taking part in the examination; plans are not
+needed, so a class taking part without plans sees the timetable. This differs
+from the exam list, results and remarks, which follow the class
+**record** the results were made in: a student moved mid-session to a class
+that does not take part loses the timetable at once (it is no longer their
+schedule) but keeps the examination and its released results under the
+earlier class record. The timetable is examination-wide: once visible it shows
+every class taking part.
+
 **Release and averages.** Results are visible only after the school's explicit
 `releaseExamToCadet` (staff, exam transition permission, and the school's
 `cadet` feature), which needs a completed exam and blocks reopening and legacy plan changes until

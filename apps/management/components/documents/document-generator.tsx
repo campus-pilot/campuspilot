@@ -84,18 +84,11 @@ function DocumentGeneratorData({
       input: { schoolId: scope.schoolId, documentType },
     }),
   );
-  const classes = useQuery(
-    orpc.school.listClasses.queryOptions({
-      input: { schoolId: scope.schoolId },
-    }),
-  );
-  if (template.isPending || classes.isPending) return <DocumentLoading />;
+  if (template.isPending) return <DocumentLoading />;
   if (template.isError)
     return (
       <DocumentReadError error={template.error} retry={template.refetch} />
     );
-  if (classes.isError)
-    return <DocumentReadError error={classes.error} retry={classes.refetch} />;
   if (!template.data)
     return (
       <DocumentPanel
@@ -118,7 +111,6 @@ function DocumentGeneratorData({
         id: template.data.artifact.id,
         name: template.data.artifact.name,
       }}
-      classes={classes.data}
       onHistory={onHistory}
     />
   );
@@ -301,14 +293,12 @@ function GenerationForm({
   documentType,
   initial,
   template,
-  classes,
   onHistory,
 }: {
   scope: DocumentScope;
   documentType: AcademicDocumentType;
   initial: DocumentInitialSelection;
   template: { id: string; name: string };
-  classes: { id: string; label: string }[];
   onHistory: () => void;
 }) {
   const { form, sourceFor } = useDocumentGeneration({
@@ -336,50 +326,37 @@ function GenerationForm({
             void form.handleSubmit();
           }}
         >
-          {documentType !== "timetable" ? (
-            <form.Field name="classId">
+          {documentType !== "id_card" && (
+            <form.Field name="examSlug">
               {(field) => (
-                <DocumentSelect
-                  field={{
-                    name: field.name,
-                    state: field.state,
-                    handleBlur: field.handleBlur,
-                    handleChange: (value) => {
-                      field.handleChange(value);
-                      form.setFieldValue("studentIds", []);
-                    },
+                <ExamSelector
+                  scope={scope}
+                  field={field}
+                  onValueChange={() => {
+                    // The class choice belongs to the examination: another
+                    // examination may not include the chosen class.
+                    form.setFieldValue("classId", "");
+                    form.setFieldValue("studentIds", []);
                   }}
-                  label={
-                    documentType === "report_card" ||
-                    documentType === "admit_card"
-                      ? "Classes"
-                      : "Class"
-                  }
-                  options={[
-                    {
-                      value: "",
-                      label:
-                        documentType === "report_card" ||
-                        documentType === "admit_card"
-                          ? "All examination classes"
-                          : "Choose a class",
-                    },
-                    ...classes.map((schoolClass) => ({
-                      value: schoolClass.id,
-                      label: schoolClass.label,
-                    })),
-                  ]}
                 />
               )}
             </form.Field>
-          ) : (
-            <DocumentNotice>
-              The timetable PDF includes every classroom in this examination.
-            </DocumentNotice>
           )}
-          {documentType !== "id_card" && (
-            <form.Field name="examSlug">
-              {(field) => <ExamSelector scope={scope} field={field} />}
+          {documentType === "timetable" ? (
+            <DocumentNotice>
+              The timetable PDF includes every class taking part in this
+              examination.
+            </DocumentNotice>
+          ) : (
+            <form.Field name="classId">
+              {(field) => (
+                <ClassSelector
+                  scope={scope}
+                  documentType={documentType}
+                  form={form}
+                  field={field}
+                />
+              )}
             </form.Field>
           )}
           {documentType !== "timetable" && (
@@ -569,12 +546,128 @@ function GenerationActions({
     </form.Subscribe>
   );
 }
-function ExamSelector({
+type StringField =
+  import("@campuspilot/components/documents/document-controls").DocumentStringField;
+/**
+ * The class picker. An examination document (admit card, report card) offers
+ * only the classes taking part in the chosen examination (`getExamContext`),
+ * so a class excluded from it is never offered; an ID card offers every class
+ * of the school. Changing the class clears the chosen students.
+ */
+function ClassSelector({
   scope,
+  documentType,
+  form,
   field,
 }: {
   scope: DocumentScope;
-  field: import("@campuspilot/components/documents/document-controls").DocumentStringField;
+  documentType: Exclude<AcademicDocumentType, "timetable">;
+  form: GenerationFormApi;
+  field: StringField;
+}) {
+  const clearStudents = () => form.setFieldValue("studentIds", []);
+  if (documentType === "id_card")
+    return (
+      <SchoolClassSelect
+        scope={scope}
+        field={field}
+        onValueChange={clearStudents}
+      />
+    );
+  return (
+    <form.Subscribe selector={(state) => state.values.examSlug}>
+      {(examSlug) => (
+        <ExamClassSelect
+          scope={scope}
+          examSlug={examSlug}
+          field={field}
+          onValueChange={clearStudents}
+        />
+      )}
+    </form.Subscribe>
+  );
+}
+function SchoolClassSelect({
+  scope,
+  field,
+  onValueChange,
+}: {
+  scope: DocumentScope;
+  field: StringField;
+  onValueChange: () => void;
+}) {
+  const classes = useQuery(
+    orpc.school.listClasses.queryOptions({
+      input: { schoolId: scope.schoolId },
+    }),
+  );
+  if (classes.isPending)
+    return <DocumentNotice>Loading classes…</DocumentNotice>;
+  if (classes.isError)
+    return <DocumentReadError error={classes.error} retry={classes.refetch} />;
+  return (
+    <DocumentSelect
+      field={field}
+      label="Class"
+      onValueChange={onValueChange}
+      options={[
+        { value: "", label: "Choose a class" },
+        ...classes.data.map((entry) => ({
+          value: entry.id,
+          label: entry.label,
+        })),
+      ]}
+    />
+  );
+}
+/** Classes of an examination document: "all" plus each class taking part in
+ * the chosen examination. Before an examination is chosen only "all" is
+ * offered, and the picker stays disabled. */
+function ExamClassSelect({
+  scope,
+  examSlug,
+  field,
+  onValueChange,
+}: {
+  scope: DocumentScope;
+  examSlug: string;
+  field: StringField;
+  onValueChange: () => void;
+}) {
+  const context = useQuery({
+    ...orpc.school.getExamContext.queryOptions({
+      input: { ...scope, examSlug },
+    }),
+    enabled: Boolean(examSlug),
+  });
+  if (examSlug && context.isPending)
+    return <DocumentNotice>Loading classes…</DocumentNotice>;
+  if (context.isError)
+    return <DocumentReadError error={context.error} retry={context.refetch} />;
+  return (
+    <DocumentSelect
+      field={field}
+      label="Classes"
+      disabled={!examSlug}
+      onValueChange={onValueChange}
+      options={[
+        { value: "", label: "All examination classes" },
+        ...(context.data?.classes ?? []).map((entry) => ({
+          value: entry.id,
+          label: entry.label,
+        })),
+      ]}
+    />
+  );
+}
+function ExamSelector({
+  scope,
+  field,
+  onValueChange,
+}: {
+  scope: DocumentScope;
+  field: StringField;
+  onValueChange?: () => void;
 }) {
   const session = useQuery(
     orpc.school.getSession.queryOptions({ input: scope }),
@@ -590,6 +683,7 @@ function ExamSelector({
     <DocumentSelect
       field={field}
       label="Examination"
+      onValueChange={onValueChange}
       options={[
         { value: "", label: "Choose an examination" },
         ...exams.map(([slug, exam]) => ({ value: slug, label: exam.name })),

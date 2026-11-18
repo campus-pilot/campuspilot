@@ -102,7 +102,7 @@ disabled with "Withdraw from Cadet Portal before reopening." beside it instead o
 opening a dialog that can only fail.
 
 Settings holds
-working days, lifecycle and Cadet Portal release controls. Keep the immediate task visible in context: Create plan in an empty state,
+the classes taking part, working days, lifecycle and Cadet Portal release controls. Keep the immediate task visible in context: Create plan in an empty state,
 Enter results in a student preview, and Save in an editor. Avoid a row of competing
 buttons. Menu entries must preserve the underlying shared component's required
 group/context hierarchy; inspect the actual wrapper before composing its parts.
@@ -136,7 +136,10 @@ For an examination without plans, show the examination name followed by a dashed
 container with “No plans yet”, a short muted explanation, and Create plan.
 
 Create plan opens a concise review dialog. Summarize classes, enrolled student
-counts, subjects and modes. Clicking a class row expands its subject/mode breakdown
+counts, subjects and modes, with a checkbox per class choosing whether it takes
+part in the examination (every class with subjects selected by default, Select
+all / Deselect all, at least one class required before Create is enabled). The
+same table edits the classes later from Settings ("Classes taking part"). Clicking a class row expands its subject/mode breakdown
 as a sub-table directly underneath it; do not add a separate all-classes accordion.
 Do not ask users to re-enter facts that already exist in session/class configuration.
 The server validates the reviewed configuration and creates the plans atomically.

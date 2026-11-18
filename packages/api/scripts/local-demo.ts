@@ -21,6 +21,7 @@ import type { ClassConfig } from '@campuspilot/db/schema/jsonb/class-config';
 import { createContextFromHeaders } from '../src/context';
 import { appRouter } from '../src/routers';
 import type { DocumentType, DocumentSource } from '../src/routers/school/document/document.dto';
+import { selectableExamClassIds } from '../src/routers/school/exam/exam.dto';
 
 const root = new URL('../../../', import.meta.url);
 const local = new URL('tmp/local-demo/', root);
@@ -151,7 +152,7 @@ for (let examIndex = 0; examIndex < 4; examIndex++) {
   if (overview.status === 'completed') continue;
   if (overview.planCount === 0) {
     const preview = await rpc.school.getExamPlanPreview(exam);
-    await rpc.school.generateExamPlan({ ...exam, configurationVersion: preview.configurationVersion });
+    await rpc.school.generateExamPlan({ ...exam, configurationVersion: preview.configurationVersion, classIds: selectableExamClassIds(preview) });
   }
   await rpc.school.updateExamAssessmentSettings({ ...exam, totalWorkingDays: [58, 60, 55, 57][examIndex]! });
   const existingTimetable = await rpc.school.getExamTimetable(exam);

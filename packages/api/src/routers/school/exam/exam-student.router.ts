@@ -1,4 +1,4 @@
-import { assessmentWhere, examWhere, settingsWhere } from './exam.scope';
+import { assessmentWhere, examClassWhere, examWhere, settingsWhere } from './exam.scope';
 import { transitionExam } from './exam-lifecycle.service';
 import { z } from 'zod';
 import { and, asc, count, eq, exists, inArray, sql } from 'drizzle-orm';
@@ -6,6 +6,7 @@ import { classTable, sectionTable } from '@campuspilot/db/schema/class';
 import { studentTable } from '@campuspilot/db/schema/student';
 import { admissionTable } from '@campuspilot/db/schema/admission';
 import {
+  examClassTable,
   examPlanTable,
   examAssessmentSettingsTable,
   examStudentAssessmentTable,
@@ -32,7 +33,7 @@ export const schoolExamStudentRouter = {
     .route(
       route(
         'List examination classes',
-        'Paginated classes with saved exam plans, enrolled student counts, sections, subject/mode counts and lifecycle states.',
+        'Paginated classes taking part in the exam that have saved exam plans, with enrolled student counts, sections, subject/mode counts and lifecycle states.',
       ),
     )
     .meta({
@@ -49,11 +50,24 @@ export const schoolExamStudentRouter = {
     .handler(async ({ context, input }) => {
       try {
         await getExam(context.db, input);
+        // Two independent facts: the class takes part (its `exam_class` row)
+        // and it has subject plans to enter results for.
         const where = and(
           eq(classTable.schoolId, input.schoolId),
           input.filters?.classId
             ? eq(classTable.id, input.filters.classId)
             : undefined,
+          exists(
+            context.db
+              .select({ classId: examClassTable.classId })
+              .from(examClassTable)
+              .where(
+                and(
+                  examClassWhere(input),
+                  eq(examClassTable.classId, classTable.id),
+                ),
+              ),
+          ),
           exists(
             context.db
               .select({ id: examPlanTable.id })

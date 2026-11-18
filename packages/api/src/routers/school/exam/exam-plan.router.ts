@@ -29,14 +29,20 @@ import { deleteObjectsBestEffort } from '../question-paper/question-paper.storag
 import {
   prepareExamPlan,
   assertCreatableExamPlan,
+  resolveExamPlanClassIds,
 } from './exam-plan-generation';
+import {
+  includeExamClass,
+  recordGeneratedExamClasses,
+  updateExamClasses,
+} from './exam-class.service';
 
 export const schoolExamPlanRouter = {
   getExamPlanPreview: protectedProcedure
     .route(
       route(
         'Preview automatic exam plan',
-        'Review every school class, subject and configured assessment mode before generating the initial plan. No data is written.',
+        'Review every school class, subject and configured assessment mode, and whether each class currently takes part, before generating the plan or changing its classes. No data is written.',
       ),
     )
     .meta({
@@ -61,7 +67,7 @@ export const schoolExamPlanRouter = {
     .route(
       route(
         'Generate an exam plan from class configuration',
-        'Atomically create a ready-to-start plan for every configured class subject using its assessment modes and 100 total marks. Reject existing plans, invalid configuration or a changed preview. Timetable creation is a separate step.',
+        'Atomically record the selected classes as taking part and create a ready-to-start plan for each of their configured subjects using its assessment modes and 100 total marks. Omit classIds to include every class that has subjects; when sent, at least one class is required. A selected class needs subjects with valid modes. Reject existing plans or a changed preview. Timetable creation is a separate step.',
       ),
     )
     .meta({
@@ -79,13 +85,29 @@ export const schoolExamPlanRouter = {
       try {
         return await context.db.transaction(async (tx) => {
           const prepared = await prepareExamPlan(tx, input, true);
-          assertCreatableExamPlan(prepared, input.configurationVersion);
+          const plans = assertCreatableExamPlan(
+            prepared,
+            input.configurationVersion,
+            input.classIds,
+          );
+          // Participation is recorded first: every plan references its class's row.
+          await recordGeneratedExamClasses(
+            tx,
+            input,
+            resolveExamPlanClassIds(prepared, input.classIds),
+            new Map(
+              prepared.preview.classes.map((entry) => [
+                entry.classId,
+                entry.label,
+              ]),
+            ),
+          );
           // Chunk within the same transaction to stay below PostgreSQL's bind
           // parameter limit even for a large school. Any failure rolls back all rows.
-          for (let offset = 0; offset < prepared.plans.length; offset += 100) {
+          for (let offset = 0; offset < plans.length; offset += 100) {
             await tx
               .insert(examPlanTable)
-              .values(prepared.plans.slice(offset, offset + 100));
+              .values(plans.slice(offset, offset + 100));
           }
           await tx
             .insert(examLifecycleTable)
@@ -102,8 +124,46 @@ export const schoolExamPlanRouter = {
               ],
               set: { status: 'ready', startedAt: null, completedAt: null },
             });
-          return { createdCount: prepared.plans.length };
+          return { createdCount: plans.length };
         });
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+  updateExamClasses: protectedProcedure
+    .route(
+      route(
+        'Change the classes taking part in an exam',
+        'Set the complete list of classes taking part in an exam whose plan exists. Added classes get plans from their class settings; removed classes lose their plans. Refused once the exam has ended or is released to the Cadet Portal, for a stale preview, and for a removed class with saved results, attendance, activities, remarks, question papers, a published timetable including it or a draft timetable scheduling it.',
+      ),
+    )
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'write',
+        destructive: true,
+        module: 'exams',
+      },
+    })
+    .input(dto.updateExamClassesInputSchema)
+    /**
+     * Deliberately the plan **update** permission alone, although adding a
+     * class creates plans and removing one deletes them: changing the classes
+     * is one edit of an existing plan, reviewed as a whole. Every role holding
+     * it also holds plan create and delete (`grants.rego`, exam
+     * administration); if those grants ever diverge, require them here for
+     * added and removed classes.
+     */
+    .use(requireSchoolPermission(SCHOOL_ACTIONS.UPDATE_EXAM_PLAN))
+    .output(dto.updateExamClassesOutputSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        const { result, questionPaperObjects } = await context.db.transaction(
+          (tx) => updateExamClasses(tx, input),
+        );
+        // Storage is outside the transaction: removed once it has committed.
+        await deleteObjectsBestEffort(questionPaperObjects);
+        return result;
       } catch (error) {
         throw toRpcError(error);
       }
@@ -200,7 +260,7 @@ export const schoolExamPlanRouter = {
     .route(
       route(
         'Create an exam plan',
-        'Create a draft plan with assessment modes derived from the class subject or explicitly customized percentages.',
+        'Create a draft plan with assessment modes derived from the class subject or explicitly customized percentages. Creating it makes the class take part in the exam if it did not already.',
       ),
     )
     .meta({
@@ -219,10 +279,15 @@ export const schoolExamPlanRouter = {
         return await context.db.transaction(async (tx) => {
           const { session } = await getExam(tx, input, 'share');
           await requireNotReleasedToCadet(tx, input);
+          // FOR SHARE serialises with deleteClass (which locks the class FOR
+          // UPDATE before refusing a class taking part): a class deleted
+          // meanwhile is NOT_FOUND here instead of a foreign key error when
+          // its participation and plan are inserted.
           const schoolClass = await getExamClass(
             tx,
             input.schoolId,
             input.classId,
+            'share',
           );
           const subject = Object.hasOwn(
             schoolClass.config.subjects,
@@ -246,6 +311,7 @@ export const schoolExamPlanRouter = {
             subject.examModes,
             input.modeConfig,
           );
+          await includeExamClass(tx, input, input.classId);
           const [plan] = await tx
             .insert(examPlanTable)
             .values({ ...input, modeConfig })

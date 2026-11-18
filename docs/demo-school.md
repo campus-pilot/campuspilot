@@ -93,7 +93,9 @@ classes → students (with illustrated photos) → exams → finance → templat
 notices → credentials. The seed and `asOf` are drawn once and stored on the job, so a
 retry rebuilds the same plan and every idempotent step finds its earlier work.
 Exam state and billing months follow from `asOf` (see `dates.ts`, `plan.ts`).
-The exams step also writes a teacher remark for every registered student of
+The exams step generates each exam's plan for every demo class (all of them
+have subjects, so all take part; `generateExamPlan` needs the classes named
+explicitly) and also writes a teacher remark for every registered student of
 each completed exam and then releases completed exams to the Cadet Portal:
 all but the latest completed one (which stays "awaiting release"), or the only
 one when just one is completed. The session step turns on the school's
@@ -219,7 +221,8 @@ and the admin follows it through `watchDemoSchoolPurge`:
    records the manifest (`object_keys`, `demo_user_ids`), runs
    `purge_demo_school(schoolId)` (every row the school owns, including the
    in-app assistant's conversations, runs, saved costs, chat images and role list, its
-   question papers with their pages, jobs, versions and figures, and its
+   question papers with their pages, jobs, versions and figures, the classes
+   taking part in its examinations (`exam_class`, since 0076) and its
    demo-only users) and sets `data_deleted_at`; a replay after commit does nothing.
    Finance trigger functions allow those `DELETE`s only for a demo school
    (`is_demo`, immutable after insert since 0027) that has a

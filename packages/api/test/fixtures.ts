@@ -10,6 +10,7 @@ import { admissionTable } from '@campuspilot/db/schema/admission';
 import { studentTable } from '@campuspilot/db/schema/student';
 import { user } from '@campuspilot/db/schema/auth';
 import { classTable, sectionTable } from '@campuspilot/db/schema/class';
+import { examClassTable } from '@campuspilot/db/schema/exam';
 import type { Role, RoleMeta } from '@campuspilot/db/schema/jsonb/role';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
@@ -556,4 +557,19 @@ export async function createTestStudent(overrides: {
     .returning();
 
   return student!;
+}
+
+/**
+ * Records that classes take part in examinations (`exam_class`), for tests
+ * that insert subject plans directly: every plan references its class's row.
+ * Already recorded classes are left as they are.
+ */
+export async function includeTestExamClasses(
+  rows: Array<{ schoolId: string; sessionId: string; examSlug: string; classId: string }>,
+) {
+  if (!rows.length) return;
+  await db
+    .insert(examClassTable)
+    .values(rows.map(({ schoolId, sessionId, examSlug, classId }) => ({ schoolId, sessionId, examSlug, classId })))
+    .onConflictDoNothing();
 }

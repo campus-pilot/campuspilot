@@ -3,7 +3,7 @@ import {
   financeLedgerEntryTable,
   financeNumberCounterTable,
 } from '@campuspilot/db/schema/finance';
-import { examPlanTable, examTimetableTable } from '@campuspilot/db/schema/exam';
+import { examClassTable, examPlanTable, examTimetableTable } from '@campuspilot/db/schema/exam';
 import { sessionConfigSchema } from '@campuspilot/db/schema/jsonb/session-config';
 import { resolveSessionExamPermission } from '../../../permissions/session-exams';
 import { schoolTable } from '@campuspilot/db/schema/school';
@@ -360,6 +360,19 @@ export const schoolSessionRouter = {
               throw rpcError.conflict(
                 'Exam definitions with existing plans or timetables cannot be removed.',
               );
+            // A removed exam's class selection goes with it, as in deleteExam.
+            const removedExamSlugs = Object.keys(previous.examConfig).filter(
+              (slug) => !Object.hasOwn(next.examConfig, slug),
+            );
+            if (removedExamSlugs.length)
+              await transaction
+                .delete(examClassTable)
+                .where(
+                  and(
+                    eq(examClassTable.sessionId, sessionId),
+                    inArray(examClassTable.examSlug, removedExamSlugs),
+                  ),
+                );
           }
           const [session] = await transaction
             .update(schoolSessionTable)

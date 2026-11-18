@@ -13,6 +13,7 @@ import {
   createTestSchool,
   createTestSession,
 } from '../../../../test/fixtures';
+import { selectableExamClassIds } from './exam.dto';
 
 describe('automatic exam plan generation', () => {
   let scope: { schoolId: string; sessionId: string; examSlug: string };
@@ -99,6 +100,7 @@ describe('automatic exam plan generation', () => {
       await manager.school.generateExamPlan({
         ...scope,
         configurationVersion: preview.configurationVersion,
+        classIds: selectableExamClassIds(preview),
       }),
     ).toEqual({ createdCount: 2 });
     expect(await rows()).toEqual(
@@ -127,6 +129,7 @@ describe('automatic exam plan generation', () => {
       manager.school.generateExamPlan({
         ...scope,
         configurationVersion: preview.configurationVersion,
+        classIds: selectableExamClassIds(preview),
       }),
     ).rejects.toMatchObject({ code: 'CONFLICT' });
     expect(await rows()).toHaveLength(2);
@@ -162,6 +165,7 @@ describe('automatic exam plan generation', () => {
       manager.school.generateExamPlan({
         ...scope,
         configurationVersion: preview.configurationVersion,
+        classIds: selectableExamClassIds(preview),
       }),
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
     expect(await rows()).toHaveLength(0);
@@ -176,12 +180,14 @@ describe('automatic exam plan generation', () => {
       manager.school.generateExamPlan({
         ...scope,
         configurationVersion: preview.configurationVersion,
+        classIds: selectableExamClassIds(preview),
       }),
     ).rejects.toMatchObject({ code: 'CONFLICT' });
     await expect(
       manager.school.generateExamPlan({
         ...scope,
         configurationVersion: 'bad',
+        classIds: [classId],
       }),
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
     await expect(
@@ -199,6 +205,7 @@ describe('automatic exam plan generation', () => {
       manager.school.generateExamPlan({
         ...scope,
         configurationVersion: empty.configurationVersion,
+        classIds: [classId],
       }),
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
     expect(await rows()).toHaveLength(0);
@@ -209,10 +216,12 @@ describe('automatic exam plan generation', () => {
       manager.school.generateExamPlan({
         ...scope,
         configurationVersion: preview.configurationVersion,
+        classIds: selectableExamClassIds(preview),
       }),
       manager.school.generateExamPlan({
         ...scope,
         configurationVersion: preview.configurationVersion,
+        classIds: selectableExamClassIds(preview),
       }),
     ]);
     expect(
@@ -249,6 +258,7 @@ describe('automatic exam plan generation', () => {
       manager.school.generateExamPlan({
         ...scope,
         configurationVersion: preview.configurationVersion,
+        classIds: selectableExamClassIds(preview),
       }),
     ).rejects.toMatchObject({ code: 'CONFLICT' });
     // Database rows hold Dates; the API returns them as JSON strings.
@@ -265,6 +275,7 @@ describe('automatic exam plan generation', () => {
         await client.school.generateExamPlan({
           ...scope,
           configurationVersion: preview.configurationVersion,
+          classIds: selectableExamClassIds(preview),
         }),
       ).toEqual({ createdCount: 2 });
       expect(await rows()).toHaveLength(2);
@@ -281,6 +292,7 @@ describe('automatic exam plan generation', () => {
         client.school.generateExamPlan({
           ...scope,
           configurationVersion: preview.configurationVersion,
+          classIds: selectableExamClassIds(preview),
         }),
       ).rejects.toMatchObject({ code: 'FORBIDDEN' });
     }
@@ -290,6 +302,7 @@ describe('automatic exam plan generation', () => {
       admin.school.generateExamPlan({
         ...scope,
         configurationVersion: preview.configurationVersion,
+        classIds: selectableExamClassIds(preview),
       }),
     ).rejects.toMatchObject({ code: 'FORBIDDEN' });
     for (const client of [
@@ -309,6 +322,7 @@ describe('automatic exam plan generation', () => {
         client.school.generateExamPlan({
           ...scope,
           configurationVersion: preview.configurationVersion,
+          classIds: selectableExamClassIds(preview),
         }),
       ).rejects.toMatchObject({ code: 'FORBIDDEN' });
     }
@@ -319,6 +333,7 @@ describe('automatic exam plan generation', () => {
       createTestClient(null).school.generateExamPlan({
         ...scope,
         configurationVersion: preview.configurationVersion,
+        classIds: selectableExamClassIds(preview),
       }),
     ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
     await db
@@ -329,6 +344,7 @@ describe('automatic exam plan generation', () => {
       manager.school.generateExamPlan({
         ...scope,
         configurationVersion: preview.configurationVersion,
+        classIds: selectableExamClassIds(preview),
       }),
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
     expect(await rows()).toHaveLength(0);
