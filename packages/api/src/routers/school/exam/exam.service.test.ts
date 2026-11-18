@@ -1,5 +1,26 @@
-import { sessionConfigSchema } from '@campuspilot/db/schema/jsonb/session-config';
+import {
+  examNameKey,
+  examNameSchema,
+  examSlugSchema,
+  findExamNameClash,
+  findIntroducedBlankExamNames,
+  findIntroducedExamNameClashes,
+  nextExamOrder,
+  sessionConfigSchema,
+} from '@campuspilot/db/schema/jsonb/session-config';
 import { describe, expect, it } from 'vitest';
+import { ORPCError } from '@orpc/server';
+
+import { toRpcError } from '../../../errors';
+import {
+  EXAM_NAME_TAKEN_MESSAGE,
+  EXAM_NAME_TAKEN_REASON,
+  EXAM_SLUG_TAKEN_MESSAGE,
+  EXAM_SLUG_TAKEN_REASON,
+  isExamNameTakenError,
+  isExamSlugTakenError,
+} from './exam-definition.contract';
+import { examNameTakenError } from './exam.service';
 
 import type { resultValuesSchema } from './exam.dto';
 import {
@@ -274,5 +295,245 @@ describe('exam service validation', () => {
         validateResult(plan(), sessionConfigSchema.parse({}), result()),
       ).not.toThrow();
     });
+  });
+});
+
+describe('new exam order and slug rules', () => {
+  it('lists a new exam after the highest order, which is n + 1 for contiguous orders', () => {
+    expect(nextExamOrder({})).toBe(1);
+    expect(
+      nextExamOrder({ a: { order: 1 }, b: { order: 2 }, c: { order: 3 } }),
+    ).toBe(4);
+  });
+
+  it('does not reuse an order when stored orders have a gap, are unsorted or tie', () => {
+    expect(nextExamOrder({ a: { order: 1 }, b: { order: 3 } })).toBe(4);
+    expect(nextExamOrder({ a: { order: 5 }, b: { order: 2 } })).toBe(6);
+    expect(nextExamOrder({ a: { order: 2 }, b: { order: 2 } })).toBe(3);
+  });
+
+  it('accepts slugs in the session settings format only, trimmed, reporting an empty one once', () => {
+    expect(examSlugSchema.parse('  unit_test_1 ')).toBe('unit_test_1');
+    for (const slug of ['Unit', 'unit-test', 'unit test', 'é', 'a'.repeat(101)])
+      expect(examSlugSchema.safeParse(slug).success).toBe(false);
+    const empty = examSlugSchema.safeParse('  ');
+    expect(empty.success).toBe(false);
+    expect(empty.error?.issues.map((issue) => issue.message)).toEqual([
+      'Exam slug is required',
+    ]);
+  });
+
+  it('refuses the slugs a plain object already answers for, which record parsing would drop', () => {
+    for (const slug of ['__proto__', 'constructor', 'prototype', ' __proto__ ']) {
+      const result = examSlugSchema.safeParse(slug);
+      expect(result.success).toBe(false);
+      expect(result.error?.issues.map((issue) => issue.message)).toEqual([
+        'This slug is reserved. Choose another slug.',
+      ]);
+    }
+    // Only the exact names are reserved.
+    for (const slug of ['proto', '_proto_', 'constructor_1', 'prototypes'])
+      expect(examSlugSchema.parse(slug)).toBe(slug);
+  });
+});
+
+describe('isExamSlugTakenError', () => {
+  it('is false for the CONFLICTs the shared error mapping makes from database failures', () => {
+    for (const code of ['23505', '40001', '40P01']) {
+      const mapped = toRpcError({ message: 'database', cause: { code } });
+      expect(mapped.code).toBe('CONFLICT');
+      expect(isExamSlugTakenError(mapped)).toBe(false);
+    }
+  });
+
+  it('is true only for CONFLICT carrying the taken-slug reason', () => {
+    const taken = new ORPCError('CONFLICT', {
+      message: EXAM_SLUG_TAKEN_MESSAGE,
+      data: { reason: EXAM_SLUG_TAKEN_REASON },
+    });
+    expect(isExamSlugTakenError(taken)).toBe(true);
+    expect(isExamSlugTakenError(toRpcError(taken))).toBe(true);
+    expect(
+      isExamSlugTakenError(
+        new ORPCError('FORBIDDEN', { data: { reason: EXAM_SLUG_TAKEN_REASON } }),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe('exam name rule', () => {
+  it('compares names trimmed and ignoring case, with whitespace runs collapsed', () => {
+    expect(examNameKey('  Unit Test 1 ')).toBe('unit test 1');
+    expect(examNameKey('UNIT TEST 1')).toBe(examNameKey(' unit test 1 '));
+    // Unicode spaces are trimmed too.
+    expect(examNameKey('\u00a0Final\u2003')).toBe('final');
+    // Inner runs of any whitespace are one space.
+    expect(examNameKey('Unit  Test')).toBe(examNameKey('Unit Test'));
+    expect(examNameKey('Unit\t\n Test')).toBe('unit test');
+    expect(examNameKey('Unit\u00a0\u3000Test')).toBe('unit test');
+    // Removing a space is still another name.
+    expect(examNameKey('UnitTest')).not.toBe(examNameKey('Unit Test'));
+  });
+
+  it('ignores invisible format characters', () => {
+    for (const invisible of ['\u200b', '\u200c', '\u200d', '\u2060', '\ufeff', '\u00ad', '\u202e'])
+      expect(examNameKey(`Fi${invisible}nal`)).toBe('final');
+    expect(examNameKey('\u200bFinal\u200b')).toBe('final');
+    // A format character between spaces leaves one space.
+    expect(examNameKey('Unit \u200b Test')).toBe('unit test');
+    expect(examNameKey('\u200b\u200d \ufeff')).toBe('');
+  });
+
+  it('compares Unicode compatibility forms as the same name', () => {
+    // Full-width letters and digits.
+    expect(examNameKey('\uff26\uff49\uff4e\uff41\uff4c \uff11')).toBe('final 1');
+    // The fi ligature.
+    expect(examNameKey('\ufb01nal')).toBe('final');
+    // A superscript digit is its digit.
+    expect(examNameKey('Unit Test \u00b9')).toBe('unit test 1');
+  });
+
+  it('folds case without depending on the runtime locale, and composes Unicode first', () => {
+    // A Turkish locale would give dotless ı; the fixed locale keeps i.
+    expect(examNameKey('FINAL I')).toBe('final i');
+    expect(examNameKey('ÉPREUVE')).toBe('épreuve');
+    // Precomposed é and e + combining acute are the same name.
+    expect(examNameKey('Examen e\u0301crit')).toBe(examNameKey('Examen \u00e9crit'));
+    // Scripts without case are compared as written.
+    expect(examNameKey(' परीक्षा ')).toBe('परीक्षा');
+  });
+
+  it('finds another exam with the name, never the exam being renamed', () => {
+    const exams = {
+      unit_test_1: { name: 'Unit Test 1' },
+      annual: { name: 'Annual' },
+    };
+    expect(findExamNameClash(exams, ' unit test 1 ')).toBe('unit_test_1');
+    expect(findExamNameClash(exams, 'Unit Test 2')).toBeUndefined();
+    expect(findExamNameClash(exams, 'UNIT TEST 1', 'unit_test_1')).toBeUndefined();
+    expect(findExamNameClash(exams, 'annual', 'unit_test_1')).toBe('annual');
+    expect(findExamNameClash({}, 'Annual')).toBeUndefined();
+  });
+
+  it('answers the first clashing slug in slug order when stored duplicates exist', () => {
+    expect(
+      findExamNameClash({ b: { name: 'Final' }, a: { name: 'final' } }, 'FINAL'),
+    ).toBe('a');
+  });
+
+  it('reports a clash a full replacement introduces with a new or renamed exam', () => {
+    const stored = { first: { name: 'First Term' }, second: { name: 'Second Term' } };
+    expect(
+      findIntroducedExamNameClashes(stored, { ...stored, extra: { name: ' first term' } }),
+    ).toEqual([['extra', 'first']]);
+    expect(
+      findIntroducedExamNameClashes(stored, { ...stored, second: { name: 'FIRST TERM' } }),
+    ).toEqual([['first', 'second']]);
+    // Renaming the slug of an exam makes it a new exam.
+    expect(
+      findIntroducedExamNameClashes(
+        { a: { name: 'Final' }, b: { name: 'Final' } },
+        { a: { name: 'Final' }, c: { name: 'Final' } },
+      ),
+    ).toEqual([['a', 'c']]);
+  });
+
+  it('keeps accepting duplicates that were already stored, including case-only changes', () => {
+    const stored = { a: { name: 'Final' }, b: { name: 'final ' }, c: { name: 'Annual' } };
+    expect(findIntroducedExamNameClashes(stored, stored)).toEqual([]);
+    expect(
+      findIntroducedExamNameClashes(stored, {
+        a: { name: 'FINAL' },
+        b: { name: 'final' },
+        c: { name: 'Annual Exam' },
+        d: { name: 'Unit Test' },
+      }),
+    ).toEqual([]);
+    expect(findIntroducedExamNameClashes({}, {})).toEqual([]);
+  });
+
+  it('reports a new or renamed exam whose name is only invisible characters, not one stored that way', () => {
+    const stored = { ghost: { name: '\u200b' }, final: { name: 'Final' } };
+    expect(findIntroducedBlankExamNames(stored, stored)).toEqual([]);
+    // Kept under its slug with the same key (empty), it is not judged.
+    expect(findIntroducedBlankExamNames(stored, { ...stored, ghost: { name: ' \u200d ' } })).toEqual([]);
+    expect(
+      findIntroducedBlankExamNames(stored, {
+        ...stored,
+        final: { name: '\u2060' },
+        added: { name: '\ufeff' },
+        moved: { name: '\u200b' },
+        fine: { name: 'Unit Test' },
+      }),
+    ).toEqual(['added', 'final', 'moved']);
+    expect(findIntroducedBlankExamNames({}, { a: { name: '\u200b' } })).toEqual(['a']);
+  });
+
+  it('treats every exam of a new session as new', () => {
+    expect(
+      findIntroducedExamNameClashes({}, { a: { name: 'Final' }, b: { name: 'FINAL' } }),
+    ).toEqual([['a', 'b']]);
+  });
+});
+
+describe('exam name schema', () => {
+  it('trims a name and keeps its case and inner spacing as given', () => {
+    expect(examNameSchema.parse('  Unit  Test 1 ')).toBe('Unit  Test 1');
+  });
+
+  it('refuses an empty name once, as required', () => {
+    for (const name of ['', '   ']) {
+      const result = examNameSchema.safeParse(name);
+      expect(result.error?.issues.map((issue) => issue.message)).toEqual([
+        'Exam name is required',
+      ]);
+    }
+  });
+
+  it('refuses a name made only of invisible characters', () => {
+    for (const name of ['\u200b', ' \u200b\u200d ', '\ufeff\u2060']) {
+      const result = examNameSchema.safeParse(name);
+      expect(result.error?.issues.map((issue) => issue.message)).toEqual([
+        'Exam name must contain visible characters',
+      ]);
+    }
+  });
+
+  it('accepts up to 200 characters', () => {
+    expect(examNameSchema.safeParse('a'.repeat(200)).success).toBe(true);
+    expect(
+      examNameSchema.safeParse('a'.repeat(201)).error?.issues.map((issue) => issue.message),
+    ).toEqual(['Exam name must be 200 characters or fewer']);
+  });
+});
+
+describe('isExamNameTakenError', () => {
+  it('is true only for CONFLICT carrying the taken-name reason', () => {
+    const taken = examNameTakenError();
+    expect(taken).toMatchObject({
+      code: 'CONFLICT',
+      message: EXAM_NAME_TAKEN_MESSAGE,
+      data: { reason: EXAM_NAME_TAKEN_REASON },
+    });
+    expect(isExamNameTakenError(taken)).toBe(true);
+    expect(isExamNameTakenError(toRpcError(taken))).toBe(true);
+    expect(isExamSlugTakenError(taken)).toBe(false);
+    expect(
+      isExamNameTakenError(
+        new ORPCError('CONFLICT', {
+          message: EXAM_SLUG_TAKEN_MESSAGE,
+          data: { reason: EXAM_SLUG_TAKEN_REASON },
+        }),
+      ),
+    ).toBe(false);
+    for (const code of ['23505', '40001', '40P01'])
+      expect(
+        isExamNameTakenError(toRpcError({ message: 'database', cause: { code } })),
+      ).toBe(false);
+    expect(
+      isExamNameTakenError(
+        new ORPCError('BAD_REQUEST', { data: { reason: EXAM_NAME_TAKEN_REASON } }),
+      ),
+    ).toBe(false);
   });
 });

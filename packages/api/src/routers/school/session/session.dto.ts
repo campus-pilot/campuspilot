@@ -83,14 +83,38 @@ export const createSchoolSessionInputSchema = z
     },
   );
 
+/**
+ * The optimistic-concurrency token of `updateSession`: the session's
+ * `updatedAt` (from `getSession` or `listSessions`) as the caller last read
+ * it, as an ISO 8601 UTC instant, or null when that read had no `updatedAt`.
+ * Optional so callers that do not edit a copy (MCP clients, the assistant,
+ * scripts) keep working unchanged; a caller that submits a configuration it
+ * edited from an earlier read must send it (see `session.contract.ts`).
+ * Compared as an instant at millisecond precision, the precision the API
+ * returns `updatedAt` in, so `2026-04-01T10:00:00Z` and
+ * `2026-04-01T10:00:00.000Z` are the same token.
+ */
+const expectedUpdatedAtSchema = z.iso
+  .datetime()
+  .nullable()
+  .optional()
+  .describe(
+    "updatedAt of the session as you last read it (getSession). When given and the session was changed since, the update is refused with CONFLICT (data.reason 'SESSION_STALE') and nothing is written; read the session again and resubmit. Recommended whenever sessionConfig is sent, because sessionConfig replaces every exam definition.",
+  );
+
 export const updateSchoolSessionInputSchema = schoolSessionIdInputSchema
   .extend({
     sessionStartYear: sessionStartYearSchema.optional(),
     sessionEndYear: sessionEndYearSchema.optional(),
     sessionConfig: sessionConfigSchema.nullable().optional(),
+    expectedUpdatedAt: expectedUpdatedAtSchema,
   })
   .refine(
-    ({ schoolId: _schoolId, sessionId: _sessionId, ...changes }) =>
-      Object.values(changes).some((value) => value !== undefined),
+    ({
+      schoolId: _schoolId,
+      sessionId: _sessionId,
+      expectedUpdatedAt: _expectedUpdatedAt,
+      ...changes
+    }) => Object.values(changes).some((value) => value !== undefined),
     { message: "At least one session field must be provided." },
   );

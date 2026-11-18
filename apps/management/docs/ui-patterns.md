@@ -174,6 +174,10 @@ feedback for successful saves. Shell setup warnings are not a general error log.
 Use TanStack Form `useForm` for all input workflows, with Zod through `validators`,
 adjacent field errors and `form.Subscribe` for submit availability/progress. Do not
 introduce standalone `useState` input/submission state or unapproved `useEffect`.
+A request refusal shown as a form-level `onSubmit` error must be cleared before
+the next `handleSubmit` (as `startCreateExamAttempt` does): without a submit
+validator to replace it, TanStack Form keeps the form invalid and never calls
+`onSubmit` again, so clearing it inside `onSubmit` does nothing.
 Keep reusable presentation in `@campuspilot/components`, with props and callbacks;
 API orchestration belongs in the management app.
 
@@ -212,8 +216,27 @@ The [feature guide](../components/exam/README.md) and
 [backend contract](../../../packages/api/src/routers/school/exam/README.md) describe
 the implementation and APIs in more detail.
 
-- Session configuration defines examinations. There is no Create Exam action in
-  the examination workspace. Plan creation snapshots the existing subjects/modes.
+- Session configuration defines examinations. The Examinations list offers one
+  Create examination action (navbar, and the empty state), with no standard/custom
+  distinction: a name and a slug derived from it with the session settings rule,
+  saved by `school.createExam` into the session configuration and listed last. It
+  needs `CREATE_EXAM` and an active session, like every other exam mutation. Exam
+  names are unique in a session (`examNameKey`: ignoring case, spacing
+  differences, invisible characters and Unicode compatibility forms): the Create
+  examination dialog and the session settings Add/Edit examination dialog
+  (`exam-dialog-model.ts`) show a clash beside the name field, and the server
+  refuses it. Both dialogs share the name rule (`examNameSchema`, up to 200
+  characters) and the slug rule (`examSlugSchema`). Changing an exam's slug in
+  session settings makes it a new exam and removes the old slug, which the server
+  refuses while the old slug has plans, results or other recorded data. There
+  is no Create Exam action inside an examination's workspace. Plan creation
+  snapshots the existing subjects/modes.
+- Session settings save the whole configuration with the `updatedAt` it was
+  loaded from (`expectedUpdatedAt`). A save refused as stale (an exam was created
+  from the Examinations list meanwhile) keeps the edits on screen, disables Save
+  and offers "Load latest settings" next to it; the view never replaces the
+  edits by itself. Every save refusal is shown next to the Save control
+  (`session-save-model.ts`).
 - Generating plans leaves the examination Not started. Starting it is a separate,
   explicit school governance action. Completing and reopening are exam-wide.
   The normal UI has no per-subject plan approval prerequisite.

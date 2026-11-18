@@ -74,6 +74,31 @@ export interface SchoolSessionDto {
   updatedAt: Date | string | null;
 }
 
+/**
+ * What the session settings view asks the app to save: the edited
+ * configuration, and `basedOnUpdatedAt`, the `updatedAt` of the session the
+ * edit was started from. The app sends it as `updateSession`'s
+ * `expectedUpdatedAt`, so a save based on an outdated read is refused instead
+ * of replacing exams created or changed elsewhere meanwhile.
+ */
+export interface SessionSaveRequest {
+  sessionConfig: SessionConfig | null;
+  basedOnUpdatedAt: Date | string | null;
+}
+
+/**
+ * What became of a save, as the app reports it to the view (the view never
+ * calls the API itself). `saved` carries the session as stored by the save.
+ * `refused` carries the message shown next to the Save control;
+ * `reviewLatest` is true when the stored session differs from the one the
+ * edit started from (the save was refused as stale, or its outcome is
+ * unknown): the app has read the session again, and the user must load the
+ * latest settings before saving again. The edits stay on screen until they do.
+ */
+export type SessionSaveResult =
+  | { status: 'saved'; session: SchoolSessionDto }
+  | { status: 'refused'; message: string; reviewLatest: boolean };
+
 /** Default IANA time zone offered for newly configured school billing. */
 export const DEFAULT_FINANCE_TIME_ZONE = 'Asia/Kolkata';
 

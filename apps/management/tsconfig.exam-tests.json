@@ -11,6 +11,8 @@
     "components/question-paper/**/*.tsx",
     "components/school-creation/**/*.ts",
     "components/school-creation/**/*.tsx",
+    "components/session/session-save-model.ts",
+    "components/session/session-save-model.test.ts",
     "components/assistant/assistant-gate-model.ts",
     "lib/navigation-guard.ts",
     "../../packages/**/*.ts",

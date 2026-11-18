@@ -3,8 +3,21 @@ import {
   financeLedgerEntryTable,
   financeNumberCounterTable,
 } from '@campuspilot/db/schema/finance';
-import { examClassTable, examPlanTable, examTimetableTable } from '@campuspilot/db/schema/exam';
-import { sessionConfigSchema } from '@campuspilot/db/schema/jsonb/session-config';
+import { examClassTable } from '@campuspilot/db/schema/exam';
+import {
+  findIntroducedBlankExamNames,
+  findIntroducedExamNameClashes,
+  sessionConfigSchema,
+} from '@campuspilot/db/schema/jsonb/session-config';
+import { examNameTakenError } from '../exam/exam.service';
+import { ORPCError } from '@orpc/server';
+import {
+  SESSION_STALE_MESSAGE,
+  SESSION_STALE_REASON,
+  sessionVersionToken,
+  type SessionStaleData,
+} from './session.contract';
+import { assertNoExamWithDataRemoved } from './session-exam-removal';
 import { resolveSessionExamPermission } from '../../../permissions/session-exams';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
@@ -69,6 +82,39 @@ async function assertStudentSessionSettingsUnchanged(
   const next = sessionConfigSchema.parse(submitted ?? {});
   if (STUDENT_SESSION_SETTINGS.every((key) => isDeepStrictEqual(previous[key], next[key]))) return;
   await assertSchoolFeatureEnabled(db, schoolId, 'studentManagement');
+}
+
+/**
+ * Refuses a session configuration whose exams introduce a name clash (exam
+ * names are unique within a session, `examNameKey`) with the taken-name
+ * CONFLICT (`isExamNameTakenError`). `stored` is the configuration being
+ * replaced, or null for a new session, where every exam is new.
+ *
+ * The rule lives here, where configurations are written, rather than as a
+ * refinement of `examConfigSchema`: that schema also parses configurations
+ * read from the database and the session DTOs, and sessions saved before
+ * names had to be unique may hold duplicates. A refinement would make them
+ * unreadable, and would refuse every save of such a session, even of
+ * unrelated settings. Comparing with the stored configuration instead refuses
+ * only clashes the submission introduces (an exam that is new or renamed,
+ * `findIntroducedExamNameClashes`), so stored duplicates keep saving.
+ *
+ * With the same grandfathering it also refuses, with BAD_REQUEST, a new or
+ * renamed exam whose name is only invisible characters (an empty
+ * `examNameKey`, `findIntroducedBlankExamNames`), the rule `examNameSchema`
+ * applies to `createExam` and `updateExam`.
+ */
+function assertIntroducedExamNamesAllowed(stored: unknown, submitted: unknown) {
+  const previous = sessionConfigSchema.parse(stored ?? {});
+  const next = sessionConfigSchema.parse(submitted ?? {});
+  // Checked first: two blank names would otherwise be reported as a clash.
+  const blank = findIntroducedBlankExamNames(previous.examConfig, next.examConfig);
+  if (blank.length)
+    throw rpcError.badRequest(
+      `Exam name must contain visible characters (${blank.join(', ')}).`,
+    );
+  if (findIntroducedExamNameClashes(previous.examConfig, next.examConfig).length)
+    throw examNameTakenError();
 }
 
 export const schoolSessionRouter = {
@@ -229,6 +275,7 @@ export const schoolSessionRouter = {
           .limit(1);
         if (!school) throw rpcError.notFound('School');
         await assertStudentSessionSettingsUnchanged(context.db, schoolId, null, values.sessionConfig);
+        assertIntroducedExamNamesAllowed(null, values.sessionConfig);
 
         const [session] = await context.db
           .insert(schoolSessionTable)
@@ -245,7 +292,7 @@ export const schoolSessionRouter = {
     .route({
       summary: 'Update a school session',
       description:
-        'Update explicitly supplied fields on the active academic session while validating year boundaries against stored values. Inactive sessions are read-only.',
+        "Update explicitly supplied fields on the active academic session while validating year boundaries against stored values. Inactive sessions are read-only. sessionConfig replaces the whole configuration, including every exam definition: an exam left out is removed, which is refused (CONFLICT) for an exam with plans, a timetable, results, question papers or other recorded data. Send expectedUpdatedAt (the session's updatedAt from getSession) to have the update refused with CONFLICT (data.reason 'SESSION_STALE') instead of overwriting changes made since that read; it is optional, and without it the update applies to whatever is stored.",
       tags: ['School', 'Sessions'],
     })
     .meta({
@@ -261,7 +308,7 @@ export const schoolSessionRouter = {
     .use(resolveSessionExamPermission(SCHOOL_ACTIONS.UPDATE_EXAM))
     .output(schoolSessionDtoSchema)
     .handler(async ({ context, input }) => {
-      const { schoolId, sessionId, ...changes } = input;
+      const { schoolId, sessionId, expectedUpdatedAt, ...changes } = input;
       try {
         return await context.db.transaction(async (transaction) => {
           const [existingSession] = await transaction
@@ -280,6 +327,26 @@ export const schoolSessionRouter = {
             throw rpcError.conflict(
               'Only the active academic session can be updated.',
             );
+          // Optimistic concurrency, checked first, against the row read under
+          // the lock that every exam definition write (`createExam`,
+          // `updateExam`, `deleteExam`) also takes and that each of them
+          // bumps `updatedAt` under. Optional: without the token the update
+          // applies to whatever is stored (MCP and other callers that do not
+          // edit an earlier copy). Because it is checked before every other
+          // rule, any later refusal (a taken name, an exam with data) is about
+          // the caller's own edit of the current configuration, not about a
+          // change made elsewhere. Two writes within one millisecond would
+          // share a token; every writer sets `updatedAt` from the clock under
+          // this lock, so that needs two writes in the same millisecond.
+          if (
+            expectedUpdatedAt !== undefined &&
+            sessionVersionToken(expectedUpdatedAt) !==
+              sessionVersionToken(existingSession.updatedAt)
+          )
+            throw new ORPCError('CONFLICT', {
+              message: SESSION_STALE_MESSAGE,
+              data: { reason: SESSION_STALE_REASON } satisfies SessionStaleData,
+            });
           const sessionStartYear =
             changes.sessionStartYear ?? existingSession.sessionStartYear;
           const sessionEndYear =
@@ -342,28 +409,27 @@ export const schoolSessionRouter = {
               existingSession.sessionConfig,
               changes.sessionConfig,
             );
-            // The exclusive session lock prevents concurrent plan/timetable creation
-            // while a legacy full-config replacement validates retained exam slugs.
-            const plans = await transaction
-              .select({ examSlug: examPlanTable.examSlug })
-              .from(examPlanTable)
-              .where(eq(examPlanTable.sessionId, sessionId));
-            const timetables = await transaction
-              .select({ examSlug: examTimetableTable.examSlug })
-              .from(examTimetableTable)
-              .where(eq(examTimetableTable.sessionId, sessionId));
-            if (
-              [...plans, ...timetables].some(
-                (row) => !Object.hasOwn(next.examConfig, row.examSlug),
-              )
-            )
-              throw rpcError.conflict(
-                'Exam definitions with existing plans or timetables cannot be removed.',
-              );
-            // A removed exam's class selection goes with it, as in deleteExam.
-            const removedExamSlugs = Object.keys(previous.examConfig).filter(
-              (slug) => !Object.hasOwn(next.examConfig, slug),
+            // Compared with the configuration read under the session row lock,
+            // which `createExam` and `updateExam` also take.
+            assertIntroducedExamNamesAllowed(
+              existingSession.sessionConfig,
+              changes.sessionConfig,
             );
+            // A full replacement removes every exam it leaves out, including
+            // the old slug of an exam whose slug was changed in settings.
+            // Refused while the removed slug has recorded data; checked under
+            // the session row lock taken above.
+            const removedExamSlugs = await assertNoExamWithDataRemoved(
+              transaction,
+              sessionId,
+              previous.examConfig,
+              next.examConfig,
+            );
+            // A removed exam's class selection goes with it, as in deleteExam.
+            // Runs only after the guard above passed. `exam_class` rows do not
+            // block a removal: they exist alongside plans (which do), except
+            // for a legacy exam whose plans were deleted, where they are
+            // leftovers of the selection, not recorded data.
             if (removedExamSlugs.length)
               await transaction
                 .delete(examClassTable)
