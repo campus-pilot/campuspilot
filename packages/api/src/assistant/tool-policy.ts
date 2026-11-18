@@ -40,12 +40,12 @@ function isAssistantModule(module: McpModule): module is AssistantToolModule {
 
 /**
  * Approval policy: every write waits for the user's explicit confirmation,
- * whether or not it is destructive; reads run immediately. Kept as one
- * function so a later, finer policy (for example, auto-approving additive
- * writes) changes exactly here.
+ * whether or not it is destructive, unless it declares `skipsApproval` (an
+ * additive write the user can undo, such as a new question paper version);
+ * reads run immediately. Kept as one function so the policy changes exactly here.
  */
 export function assistantToolRequiresApproval(meta: McpProcedureMeta): boolean {
-  return meta.access === 'write';
+  return meta.access === 'write' && meta.skipsApproval !== true;
 }
 
 /**

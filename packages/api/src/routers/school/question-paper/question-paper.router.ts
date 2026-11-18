@@ -15,6 +15,7 @@ import {
   QUESTION_PAPER_PAPER_OUTPUT_CHARS,
   QUESTION_PAPER_VALIDATE_OUTPUT_CHARS,
 } from './question-paper.dto';
+import { applyQuestionPaperEdits } from './question-paper.edits';
 import { leanLines } from './question-paper.lean';
 import { buildQuestionPaperContext } from './question-paper.context';
 import { requireQuestionPaperAssistantAccess } from './question-paper.access';
@@ -57,9 +58,11 @@ const route = (summary: string, description: string) => ({ summary, description,
  * are `advanced` (the core listing is a fixed, tested budget) in the `exams`
  * module, which the in-app assistant already may use. The ones that return a
  * whole paper or the guide declare a larger `outputChars` so the model is not
- * handed a truncated document (design G6).
+ * handed a truncated document (design G6). Saving a version, whole or by
+ * edits, skips the assistant's approval card: it only adds a version, and the
+ * previous one stays to go back to.
  */
-const tool = (access: 'read' | 'write', options: { destructive?: boolean; outputChars?: number } = {}) =>
+const tool = (access: 'read' | 'write', options: { destructive?: boolean; outputChars?: number; skipsApproval?: true } = {}) =>
   ({
     mcp: {
       exposure: 'advanced',
@@ -67,6 +70,7 @@ const tool = (access: 'read' | 'write', options: { destructive?: boolean; output
       destructive: options.destructive ?? false,
       module: 'exams',
       ...(options.outputChars ? { outputChars: options.outputChars } : {}),
+      ...(options.skipsApproval ? { skipsApproval: true as const } : {}),
     },
   }) as const;
 /** Human actions: still on RPC and OpenAPI, never offered to MCP clients or the assistant (D44). */
@@ -245,8 +249,8 @@ export const schoolQuestionPaperRouter = {
     }),
 
   saveQuestionPaperVersion: protectedProcedure
-    .route(route('Save a question paper version', "Call learn_question_paper_generation first. Save a question paper as a NEW version (an existing version is never edited); the user is asked to approve this. Send the HTML as html, or the draftId of a draft you validated earlier in this chat. expectedVersionNo must be latestVersionNo from getQuestionPaper (0 for a first version); if the paper changed meanwhile the call fails with CONFLICT. Only save when the user asked you to. Figures you cannot provide stay <figure data-placeholder> placeholders. The PDF is printed with the school's question paper template."))
-    .meta(tool('write'))
+    .route(route('Save a question paper version', "Call learn_question_paper_generation first. Save a question paper as a NEW version (an existing version is never edited, so the previous one stays). Send the HTML as html, or the draftId of a draft you validated earlier in this chat. expectedVersionNo must be latestVersionNo from getQuestionPaper (0 for a first version); if the paper changed meanwhile the call fails with CONFLICT. In the in-app chat, save a valid draft straight away without asking the user first: they are not asked to approve it. Figures you cannot provide stay <figure data-placeholder=\"what the figure shows\"></figure> placeholders. The PDF is printed with the school's question paper template."))
+    .meta(tool('write', { skipsApproval: true }))
     .input(dto.saveVersionInputSchema)
     .use(manageClass)
     .use(requireQuestionPaperAssistantAccess())
@@ -269,6 +273,36 @@ export const schoolQuestionPaperRouter = {
           userId: user,
           expectedVersionNo: input.expectedVersionNo,
           html: html!,
+          source: { kind: 'agent', conversationId: chat?.conversationId ?? null },
+          signal,
+        });
+        const { replayed: _replayed, ...result } = saved;
+        return result;
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
+  editQuestionPaper: protectedProcedure
+    .route(route('Edit a question paper', "Call learn_question_paper_generation first. Change part of a saved paper and save the result as a NEW version (the edited version stays), without writing the whole paper again. Use it for every change that leaves most of the paper as it is: a word, an option, marks, a formula, a figure, one question added or removed. Each edit's find is text copied exactly from the html getQuestionPaper returned for expectedVersionNo (its latestVersionNo), long enough to occur once; replace is the new text and follows the same rules as a whole paper (data-math formulas, figures, classes). Edits apply in order and all or nothing: if a find is missing or occurs more than once nothing is saved, and the error says which edit to fix. The result is checked like any save. The PDF is printed with the school's question paper template."))
+    .meta(tool('write', { skipsApproval: true }))
+    .input(dto.editVersionInputSchema)
+    .use(manageClass)
+    .use(requireQuestionPaperAssistantAccess())
+    .output(dto.saveVersionOutputSchema)
+    .handler(async ({ context, input, signal }) => {
+      try {
+        const scope = await resolvePaperScope(context.db, input);
+        const { version } = await getQuestionPaper(context.db, scope, input.expectedVersionNo);
+        if (!version) throw rpcError.notFound('Question paper version');
+        const edited = applyQuestionPaperEdits(version.html, input.edits);
+        if (!edited.ok) throw rpcError.badRequest(`Nothing was saved. ${edited.problems.join(' ')}`);
+        const chat = context.principal.authMethod === 'assistant' ? context.principal.assistantRun : null;
+        const saved = await saveQuestionPaperVersion(context.db, {
+          scope,
+          userId: userId(context),
+          expectedVersionNo: input.expectedVersionNo,
+          html: edited.html,
           source: { kind: 'agent', conversationId: chat?.conversationId ?? null },
           signal,
         });

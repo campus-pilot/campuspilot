@@ -57,6 +57,15 @@ export const assistantToolErrorSchema = z.object({
   message: z.string(),
 });
 
+/**
+ * Which model answers a message, as the user picked it in the chat: `standard`
+ * (the provider's own model) or `pro` (its stronger model, which costs more).
+ * The server decides what each means: without a stronger model configured,
+ * `pro` is answered by the standard one.
+ */
+export const assistantModelTierSchema = z.enum(['standard', 'pro']);
+export type AssistantModelTier = z.infer<typeof assistantModelTierSchema>;
+
 export const assistantUserMessageItemSchema = z.object({
   ...itemBaseShape,
   kind: z.literal('user_message'),
@@ -68,6 +77,8 @@ export const assistantUserMessageItemSchema = z.object({
     attachments: z.array(assistantAttachmentRefSchema).optional(),
     /** The screen the conversation was started from, on its first message. */
     seed: assistantMessageSeedSchema.optional(),
+    /** `pro` when the message was sent with Pro picked; absent for the standard model. */
+    tier: z.literal('pro').optional(),
     /**
      * Who sent the message, as they were named when they sent it. A
      * conversation shared with a question paper is continued by several
@@ -354,6 +365,8 @@ export const sendAssistantMessageInputSchema = z.object({
    * a seed alone keeps the conversation private.
    */
   shareWithPaper: z.boolean().default(false),
+  /** The model the user picked for this message (see `assistantModelTierSchema`). */
+  tier: assistantModelTierSchema.default('standard'),
 }).superRefine((value, ctx) => {
   if (value.text.length === 0 && value.attachmentIds.length === 0) {
     ctx.addIssue({ code: 'custom', path: ['text'], message: 'Write a message or attach an image.' });

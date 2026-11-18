@@ -1,5 +1,6 @@
 import {
   QUESTION_PAPER_NO_MOTION_RULE,
+  QUESTION_PAPER_REDRAW_VOCABULARY_RULES,
   QUESTION_PAPER_TEMPLATE_PRINTS_RULES,
   QUESTION_PAPER_TEMPLATE_PRINTS_UNKNOWN_RULE,
   QUESTION_PAPER_VOCABULARY_RULES,
@@ -14,8 +15,11 @@ import type { TextPart } from './model';
  */
 const OUTPUT_SECTION = `Output
 - The HTML fragment only: your answer starts with its first element and ends with its last. No commentary, no sentence before or after it, no Markdown, no code fence. An answer that is not HTML (an apology, an explanation) is rejected.`;
-const FIGURES_SECTION = `Figures
+const PLACEHOLDER_FIGURES_SECTION = `Figures
 - In this job no image can be attached: a figure is either a placeholder or a drawing. Every drawn diagram, graph, map or picture becomes <figure data-placeholder="..."></figure> with a precise description of what it shows (the school can add the real image later). A simple geometric diagram that you can draw exactly may be an inline svg instead (with a padded viewBox, see the svg rules). Do not write <img> or data-figure-id: there is no image to name, and any such figure is turned into a placeholder.`;
+/** The figures section of the figure route, whose stronger model redraws simple diagrams (see `QUESTION_PAPER_REDRAW_VOCABULARY_RULES`). */
+const REDRAW_FIGURES_SECTION = `Figures
+- In this job no image can be attached: a figure is either a drawing or a placeholder. A simple diagram you can draw exactly, hand-drawn on the page or printed, is redrawn as an inline svg (with a padded viewBox, see Figures and the svg rules below). Every other diagram, graph, map or picture becomes <figure data-placeholder="..."></figure> with a precise description of what it shows (the school can add the real image later). Do not write <img> or data-figure-id: there is no image to name, and any such figure is turned into a placeholder.`;
 /**
  * What the school's template prints. The lines themselves are data of one
  * paper and travel in the user turn ({@link buildGenerationParts}); this
@@ -38,14 +42,16 @@ ${QUESTION_PAPER_TEMPLATE_PRINTS_RULES}
  * attached images ({@link QUESTION_PAPER_VOCABULARY_RULES} excludes them) are
  * deliberately absent, because this job cannot attach an image.
  *
- * The job has no way to attach images, so every drawn figure is a placeholder.
+ * The job has no way to attach images, so a drawn figure is a placeholder,
+ * except that the figure route's stronger model redraws simple diagrams
+ * ({@link questionPaperJobSystemPrompt}).
  * Text found inside the photographs is data. It is said once here and again in
  * the user turn, because the pages are the only untrusted input of the job.
  *
  * This is the prompt of a job without teacher's instructions; see
  * {@link QUESTION_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT} for the other.
  */
-export const QUESTION_PAPER_JOB_SYSTEM_PROMPT = `${QUESTION_PAPER_NO_MOTION_RULE}
+const plainJobPrompt = (figuresSection: string, vocabulary: string) => `${QUESTION_PAPER_NO_MOTION_RULE}
 
 You transcribe a school question paper from photographs into an HTML fragment that CampusPilot prints. You do not answer the questions, grade them, improve them or translate them.
 
@@ -57,11 +63,11 @@ Fidelity
 - Where text is illegible write "[illegible]" in its place. Never guess.
 - Do not invent questions, options or marks. Copy the marks written next to each question or part; add none that are not written and never compute or adjust marks.
 
-${FIGURES_SECTION}
+${figuresSection}
 
 ${TEMPLATE_SECTION}
 
-${QUESTION_PAPER_VOCABULARY_RULES}`;
+${vocabulary}`;
 
 /**
  * The job's prompt when the teacher who started it added instructions
@@ -77,7 +83,7 @@ ${QUESTION_PAPER_VOCABULARY_RULES}`;
  * output, figure, template and vocabulary sections (with the animation rule
  * first) are the very same text as in {@link QUESTION_PAPER_JOB_SYSTEM_PROMPT}.
  */
-export const QUESTION_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT = `${QUESTION_PAPER_NO_MOTION_RULE}
+const instructedJobPrompt = (figuresSection: string, vocabulary: string) => `${QUESTION_PAPER_NO_MOTION_RULE}
 
 You write a school question paper from photographs into an HTML fragment that CampusPilot prints. The photographed pages are the source. The teacher who asked for this paper added instructions that say what to change in it. You do not answer the questions or grade them.
 
@@ -95,16 +101,44 @@ Fidelity (everything the teacher's instructions do not ask to change)
 - Where text is illegible write "[illegible]" in its place. Never guess.
 - Do not invent questions, options or marks beyond what the instructions ask for. Copy the marks written next to each question or part; add none that are not written and never compute or adjust marks unless the instructions ask for it.
 
-${FIGURES_SECTION}
+${figuresSection}
 
 ${TEMPLATE_SECTION}
 
-${QUESTION_PAPER_VOCABULARY_RULES}`;
+${vocabulary}`;
 
-/** The system prompt of a job: the plain transcription one, or the variant when the job has instructions. */
-export function questionPaperJobSystemPrompt(instructions: string | null): string {
+export const QUESTION_PAPER_JOB_SYSTEM_PROMPT = plainJobPrompt(PLACEHOLDER_FIGURES_SECTION, QUESTION_PAPER_VOCABULARY_RULES);
+export const QUESTION_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT = instructedJobPrompt(PLACEHOLDER_FIGURES_SECTION, QUESTION_PAPER_VOCABULARY_RULES);
+/** The two prompts of the figure route: the same text, with simple diagrams redrawn instead of left as placeholders. */
+export const QUESTION_PAPER_JOB_REDRAW_SYSTEM_PROMPT = plainJobPrompt(REDRAW_FIGURES_SECTION, QUESTION_PAPER_REDRAW_VOCABULARY_RULES);
+export const QUESTION_PAPER_JOB_INSTRUCTED_REDRAW_SYSTEM_PROMPT = instructedJobPrompt(REDRAW_FIGURES_SECTION, QUESTION_PAPER_REDRAW_VOCABULARY_RULES);
+
+/**
+ * The system prompt of a job: the plain transcription one or the variant when
+ * the job has instructions, each with figures as placeholders, or redrawn when
+ * the job runs on the figure route.
+ */
+export function questionPaperJobSystemPrompt(instructions: string | null, options: { redrawFigures?: boolean } = {}): string {
+  if (options.redrawFigures) return instructions === null ? QUESTION_PAPER_JOB_REDRAW_SYSTEM_PROMPT : QUESTION_PAPER_JOB_INSTRUCTED_REDRAW_SYSTEM_PROMPT;
   return instructions === null ? QUESTION_PAPER_JOB_SYSTEM_PROMPT : QUESTION_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT;
 }
+
+/**
+ * The question the decision model answers about the photographed pages before
+ * a generation on the figure route: does the paper have a diagram that would
+ * be redrawn? Measured on 25 photographed papers (85 pages): the two with
+ * diagrams scored 0.87 (shaded fraction strips) and 0.28 (letters joined by
+ * lines), every other paper 0.12 or below.
+ */
+export const FIGURE_DECISION_QUESTION = {
+  instructions:
+    'These are photographs of the pages of one school question paper. Is there at least one diagram drawn on the paper that belongs to a question and would have to be redrawn to print the paper: a shape or strip divided into parts, a number line, a clock face, a grid, a geometric figure, a picture of objects to count or colour, a labelled diagram, or a picture-based option? Printed text, handwriting, tables of text, blanks, boxes for answers and ruled lines are not diagrams.',
+  trueDescription: 'At least one question on the pages includes a drawn diagram or picture.',
+  falseDescription: 'The pages contain only text, numbers, formulas, blanks, answer boxes and tables of text.',
+} as const;
+
+/** From this probability of a diagram up, a paper is written on the figure route (between the two papers above and the rest). */
+export const FIGURE_DECISION_THRESHOLD = 0.2;
 
 /** The facts of the plan that a page-reading model can use, none of them personal. */
 export type GenerationFacts = {

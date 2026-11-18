@@ -11,7 +11,7 @@ vi.mock('./runtime/providers/config', async (importOriginal) => ({
   configuredProviderSettings: () => new Map([['gemini', { id: 'gemini' }]]),
 }));
 vi.mock('./runtime/providers/registry', () => ({
-  providerRegistry: () => ({ current: null, unavailableReason: 'test', get: () => null, prices: () => null }),
+  providerRegistry: () => ({ current: null, unavailableReason: 'test', get: () => null, prices: () => null, pro: () => null }),
 }));
 
 const { createAssistantWorkerServices } = await import('./worker');

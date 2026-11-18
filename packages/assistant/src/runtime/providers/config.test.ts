@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { readProviderSettings, readQuestionPaperSettings } from './config';
+import { readProviderSettings, readQuestionPaperStrongSettings, readQuestionPaperSettings } from './config';
 
 const GEMINI = {
   GEMINI_API_KEY: 'key',
@@ -69,5 +69,31 @@ describe('readQuestionPaperSettings', () => {
   it('takes the provider from QUESTION_PAPER_PROVIDER', () => {
     const anthropic = Object.fromEntries(Object.entries(GEMINI).map(([key, value]) => [key.replace('GEMINI', 'ANTHROPIC'), value]));
     expect(readQuestionPaperSettings({ ...GEMINI, ...anthropic, QUESTION_PAPER_PROVIDER: 'anthropic' }, 'gemini')?.id).toBe('anthropic');
+  });
+});
+
+describe('readQuestionPaperStrongSettings', () => {
+  const FIGURE = {
+    QUESTION_PAPER_STRONG_MODEL: 'gemini-3.8-flash',
+    QUESTION_PAPER_STRONG_PRICE_INPUT_USD_PER_MTOK: '0.75',
+    QUESTION_PAPER_STRONG_PRICE_OUTPUT_USD_PER_MTOK: '3.75',
+    QUESTION_PAPER_STRONG_PRICE_CACHE_READ_USD_PER_MTOK: '0.075',
+    QUESTION_PAPER_STRONG_PRICE_CACHE_WRITE_USD_PER_MTOK: '0',
+    QUESTION_PAPER_DECISION_PRICE_INPUT_USD_PER_MTOK: '0.1',
+  };
+
+  it('reads the figure model with its own prices and the decision model with its input price, on the Gemini key', () => {
+    expect(readQuestionPaperStrongSettings({ ...GEMINI, ...FIGURE }, 'gemini')).toEqual({
+      strong: { id: 'gemini', apiKey: 'key', model: 'gemini-3.8-flash', prices: { inputUsdPerMtok: '0.75', outputUsdPerMtok: '3.75', cacheReadUsdPerMtok: '0.075', cacheWriteUsdPerMtok: '0' } },
+      decision: { apiKey: 'key', model: 'gemini-decision-1', inputUsdPerMtok: '0.1' },
+    });
+    expect(readQuestionPaperStrongSettings({ ...GEMINI, ...FIGURE, QUESTION_PAPER_DECISION_MODEL: 'gemini-decision-2' }, 'gemini')?.decision.model).toBe('gemini-decision-2');
+  });
+
+  it('is off without the figure model, with a setting missing, or off Gemini', () => {
+    expect(readQuestionPaperStrongSettings(GEMINI, 'gemini')).toBeNull();
+    expect(readQuestionPaperStrongSettings({ ...GEMINI, ...FIGURE, QUESTION_PAPER_DECISION_PRICE_INPUT_USD_PER_MTOK: undefined }, 'gemini')).toBeNull();
+    expect(readQuestionPaperStrongSettings({ ...GEMINI, ...FIGURE }, 'anthropic')).toBeNull();
+    expect(readQuestionPaperStrongSettings({ ...GEMINI, ...FIGURE, QUESTION_PAPER_PROVIDER: 'anthropic' }, 'gemini')).toBeNull();
   });
 });

@@ -7,6 +7,7 @@ import {
   approvalsByDecider,
   assistantAnnouncement,
   buildAssistantTimeline,
+  conversationModelTier,
   pendingApprovals,
   queuedMessages,
   summarizeActivity,
@@ -268,5 +269,15 @@ describe('approvalsByDecider', () => {
   it('says “someone else” for a turn whose message does not name its sender', () => {
     const unnamed = [sentBy('m2', 'r2', undefined), asking('c2', 'r2')];
     expect(approvalsByDecider(unnamed, runs, 'me').waitingFor).toEqual(['someone else']);
+  });
+});
+
+describe('conversationModelTier', () => {
+  it('reads the tier of the latest message and counts the messages, with no tier meaning Fast', () => {
+    const pro = { ...user('u3', 5, 'r3'), body: { text: 'q', tier: 'pro' as const } } as AssistantItemDto;
+    expect(conversationModelTier([])).toEqual({ tier: null, userMessages: 0 });
+    expect(conversationModelTier([user('u1', 1), reply('a1', 2, 'ok')])).toEqual({ tier: 'standard', userMessages: 1 });
+    expect(conversationModelTier([user('u1', 1), user('u2', 3, 'r2'), pro])).toEqual({ tier: 'pro', userMessages: 3 });
+    expect(conversationModelTier([pro, user('u4', 7, 'r4')])).toEqual({ tier: 'standard', userMessages: 2 });
   });
 });

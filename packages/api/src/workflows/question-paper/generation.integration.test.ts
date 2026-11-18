@@ -24,8 +24,16 @@ import { handleQuestionPaperPageUpload } from '../../routers/school/question-pap
 import { getObjectBytes } from '../../routers/school/question-paper/question-paper.storage';
 import { QUESTION_PAPER_JOB_FAILURES } from './constants';
 import { defaultGenerationDeps, runQuestionPaperGeneration, type GenerationDeps, type StepRunner } from './generation';
-import { QUESTION_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT, QUESTION_PAPER_JOB_SYSTEM_PROMPT, TEACHER_INSTRUCTIONS_END, TEACHER_INSTRUCTIONS_START, TEMPLATE_PRINTS_START } from './prompt';
-import type { ModelUsage, QuestionPaperModel, TextPart, TextResult } from './model';
+import {
+  FIGURE_DECISION_QUESTION,
+  QUESTION_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT,
+  QUESTION_PAPER_JOB_REDRAW_SYSTEM_PROMPT,
+  QUESTION_PAPER_JOB_SYSTEM_PROMPT,
+  TEACHER_INSTRUCTIONS_END,
+  TEACHER_INSTRUCTIONS_START,
+  TEMPLATE_PRINTS_START,
+} from './prompt';
+import type { ModelUsage, QuestionPaperDecisionModel, QuestionPaperFigureRoute, QuestionPaperModel, TextPart, TextResult } from './model';
 
 /** The worker's image job runs inline (`test/image-derivatives.ts`): a job reads only pages whose copies exist. */
 vi.mock('../image-derivatives/outbox', async (importOriginal) => ({
@@ -658,5 +666,94 @@ describe('question paper generation job', () => {
     expect(await runQuestionPaperGeneration({ jobId: job.id, attempt: 1 }, direct, depsFor(model, { save: sweptDuringSave }))).toEqual({ status: 'skipped' });
     expect(await db.select().from(examQuestionPaperVersionTable).where(eq(examQuestionPaperVersionTable.paperId, paper.id))).toHaveLength(0);
     expect(await jobOf(job.id)).toMatchObject({ status: 'failed', errorCode: 'not_finished' });
+  });
+});
+
+describe('the figure route', () => {
+  const DECISION_PRICES = { inputUsdPerMtok: '0.1', outputUsdPerMtok: '0', cacheReadUsdPerMtok: '0', cacheWriteUsdPerMtok: '0' };
+
+  /** A decision model that answers with `probability`, or throws it; it records what it was shown. */
+  function decisionModel(probability: number | Error) {
+    const asked: Array<Parameters<QuestionPaperDecisionModel['decide']>[0]> = [];
+    const decision: QuestionPaperDecisionModel = {
+      provider: 'gemini',
+      model: 'fake-decision-model',
+      prices: DECISION_PRICES,
+      decide: async (input) => {
+        asked.push(input);
+        if (probability instanceof Error) throw probability;
+        return { probability, usage: { inputTokens: 2400, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 }, answeredModel: 'fake-decision-model' };
+      },
+    };
+    return { decision, asked };
+  }
+
+  async function runWithRoute(probability: number | Error) {
+    const world = await createQuestionPaperWorld();
+    const { job, pages } = await queueJob(world);
+    const text = scriptedModel([answer(ENGLISH_SCIENCE)]);
+    const figure = scriptedModel([answer(ENGLISH_SCIENCE, { answeredModel: 'fake-figure-model' })]);
+    const { decision, asked } = decisionModel(probability);
+    const route: QuestionPaperFigureRoute = { model: { ...figure.model, model: 'fake-figure-model' }, decision };
+    const outcome = await runQuestionPaperGeneration({ jobId: job.id, attempt: 1 }, direct, depsFor(text.model, { getFigureRoute: () => route }));
+    return { job, pages, outcome, text, figure, asked };
+  }
+
+  it('writes a paper with a diagram with the figure model, asked to redraw it, and bills the decision as request 0', async () => {
+    const { job, pages, outcome, text, figure, asked } = await runWithRoute(0.87);
+    expect(outcome).toEqual({ status: 'succeeded', versionNo: 1 });
+
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.question).toEqual(FIGURE_DECISION_QUESTION);
+    expect(asked[0]!.images).toHaveLength(pages.length);
+    expect(asked[0]!.images.every((image) => image.type === 'image' && image.mimeType === 'image/jpeg' && image.data.byteLength > 0)).toBe(true);
+
+    expect(text.requests).toHaveLength(0);
+    expect(figure.requests).toHaveLength(1);
+    expect(figure.requests[0]!.system).toBe(QUESTION_PAPER_JOB_REDRAW_SYSTEM_PROMPT);
+
+    const rows = await requestsOf(job.id);
+    expect(rows.map((row) => [row.requestKey, row.requestedModel, row.answeredModel])).toEqual([
+      [`qp:${job.id}.1:model:0`, 'fake-decision-model', 'fake-decision-model'],
+      [`qp:${job.id}.1:model:1`, 'fake-figure-model', 'fake-figure-model'],
+    ]);
+    // 2,400 input tokens at 0.1 USD per million.
+    expect(rows[0]).toMatchObject({ inputTokens: 2400, outputTokens: 0, inputUsdPerMtok: '0.100000', costUsd: '0.00024000' });
+    expect(await jobOf(job.id)).toMatchObject({ status: 'succeeded', model: 'fake-figure-model', modelRequestCount: 2 });
+  });
+
+  it('writes a paper without a diagram with the question paper model and the usual prompt', async () => {
+    const { job, outcome, text, figure } = await runWithRoute(0.08);
+    expect(outcome).toEqual({ status: 'succeeded', versionNo: 1 });
+    expect(figure.requests).toHaveLength(0);
+    expect(text.requests).toHaveLength(1);
+    expect(text.requests[0]!.system).toBe(QUESTION_PAPER_JOB_SYSTEM_PROMPT);
+    expect((await requestsOf(job.id)).map((row) => row.requestedModel)).toEqual(['fake-decision-model', 'fake-configured-model']);
+  });
+
+  it('writes the paper as before when the decision cannot be made, and bills nothing for it', async () => {
+    const { job, outcome, text, figure, asked } = await runWithRoute(new Error('decisions unavailable'));
+    expect(outcome).toEqual({ status: 'succeeded', versionNo: 1 });
+    expect(asked).toHaveLength(1);
+    expect(figure.requests).toHaveLength(0);
+    expect(text.requests[0]!.system).toBe(QUESTION_PAPER_JOB_SYSTEM_PROMPT);
+    expect((await requestsOf(job.id)).map((row) => row.requestedModel)).toEqual(['fake-configured-model']);
+  });
+});
+
+describe('a paper the job wrote with class names the page reserves', () => {
+  it('is saved with its own styling, its class names renamed instead of stripped', async () => {
+    const world = await createQuestionPaperWorld();
+    const { job, paper } = await queueJob(world);
+    const reserved = `<style>.qp-question{display:flex;gap:2mm}.qp-marks{margin-left:auto}</style>
+<div class="qp-question"><span>1) A book has 274 pages. How many pages do 3 such books have?</span><span class="qp-marks">[2]</span></div>
+<div class="qp-question"><span>2) Divide 48 by 3.</span><span class="qp-marks">[2]</span></div>`;
+    const { model } = scriptedModel([answer(reserved)]);
+
+    expect(await runQuestionPaperGeneration({ jobId: job.id, attempt: 1 }, direct, depsFor(model))).toEqual({ status: 'succeeded', versionNo: 1 });
+    const [version] = await db.select().from(examQuestionPaperVersionTable).where(eq(examQuestionPaperVersionTable.paperId, paper.id));
+    expect(version!.contentHtml).toContain('.qp-body .x-qp-question{display:flex;gap:2mm}');
+    expect((version!.contentHtml.match(/class="x-qp-question"/g) ?? []).length).toBe(2);
+    expect(version!.warnings).toEqual([]);
   });
 });

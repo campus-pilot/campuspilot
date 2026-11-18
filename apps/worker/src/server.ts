@@ -12,14 +12,14 @@ import {
   questionPaperControlService,
   questionPaperGenerationWorkflow,
 } from '@campuspilot/api/workflows/question-paper';
-import { configureQuestionPaperModel } from '@campuspilot/api/workflows/question-paper/model';
+import { configureQuestionPaperFigureRoute, configureQuestionPaperModel } from '@campuspilot/api/workflows/question-paper/model';
 import { imageDerivativeControlService } from '@campuspilot/api/workflows/image-derivatives';
 import {
   notificationControlService,
   notificationDispatchWorkflow,
   notificationSenderObject,
 } from '@campuspilot/api/workflows/notification';
-import { createQuestionPaperModel } from '@campuspilot/assistant/question-paper-model';
+import { createQuestionPaperFigureRoute, createQuestionPaperModel } from '@campuspilot/assistant/question-paper-model';
 import { createAssistantWorkerServices } from '@campuspilot/assistant/worker';
 import { env } from '@campuspilot/env/worker';
 import { startRuntimeMonitor } from '@campuspilot/logger/perf';
@@ -45,6 +45,9 @@ export function startWorker() {
   configureQuestionPaperModel(questionPaperModel);
   if (questionPaperModel) log.info({ provider: questionPaperModel.provider, model: questionPaperModel.model }, 'question-paper.model');
   else log.warn('question-paper.not-configured');
+  const figureRoute = createQuestionPaperFigureRoute();
+  configureQuestionPaperFigureRoute(figureRoute);
+  if (figureRoute) log.info({ figureModel: figureRoute.model.model, decisionModel: figureRoute.decision.model }, 'question-paper.figure-route');
   const handler = createEndpointHandler({
     services: [
       demoSchoolControlService,

@@ -55,6 +55,15 @@ export type McpProcedureMeta = {
    * the tool's name or output type.
    */
   outputChars?: number;
+  /**
+   * The in-app assistant runs this write without asking the user to approve
+   * it first. Only for a write that adds and never overwrites or removes
+   * (`destructive: false`), whose result the user can see and undo themselves,
+   * such as a new question paper version (the previous one stays and can be
+   * saved again). An explicit fact, never inferred; every other write keeps
+   * the approval.
+   */
+  skipsApproval?: true;
 };
 
 /** Metadata carried by every CampusPilot procedure. */

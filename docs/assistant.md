@@ -260,16 +260,35 @@ that provider's key and a model (its own or `QUESTION_PAPER_MODEL`), or
 startup is refused. `QUESTION_PAPER_MAX_OUTPUT_TOKENS` (default 32000) bounds
 one request; `QUESTION_PAPER_JOB_TIMEOUT_MINUTES` (default 40) is how long a
 running job may take before the API's sweep fails it (read by the API server);
+`QUESTION_PAPER_STRONG_MODEL` with its four `QUESTION_PAPER_STRONG_PRICE_*` and
+`QUESTION_PAPER_DECISION_PRICE_INPUT_USD_PER_MTOK` (all or none, Gemini only) switch on the
+stronger question paper model. It writes a paper whose photos have a diagram to redraw
+([Question papers](question-papers.md), "Figure route"), and it is the chat's **Pro**
+model unless `ASSISTANT_PRO_PROVIDER` names another provider, which then answers Pro on its own
+`<P>_MODEL` and prices (for example Fast on Gemini Flash-Lite, Pro on Claude Sonnet). A
+conversation then has turns from two providers, each stored in its own format. Following
+T3 Code's provider switching, every request keeps the calling provider's own turns exactly as
+stored and turns the other provider answered become a handoff (`runtime/handoff.ts`): the
+user's message in this provider's format, files included, then a plain note built from the
+turn's items (its tool calls, briefly, and its reply), never a summary written by a model. The
+chat never switches model by itself: the user picks Fast or Pro under the message
+box, each send carries it (`tier`, saved as `tier: 'pro'` on the user message), and a paper
+chat that has had three messages on Fast suggests Pro once, saying it uses more of the school's
+budget. With no stronger model configured, Pro is answered by the standard model; the app is
+not told which. `beginRun` makes the choice from the message's `tier`, journals it with the
+run (`RunFacts.model`), and each step resolves the provider and its prices by that model
+(`ProviderRegistry.get` and `prices` with a model), so every cost row carries the model it
+called and that model's prices.
 `QUESTION_PAPER_MAX_RUNNING_JOBS_PER_SCHOOL` (default 3) caps the jobs (queued plus
 running) one school may have at once, which bounds how many run at the same time (not how far
 the cached spend check can be overshot by jobs started one after another).
 The worker needs the same `QUESTION_PAPER_*` values as the API server.
 
-### Attachments, question paper tools and context pruning
+### Attachments, question paper tools and the model's context
 
 Chat can carry images and PDFs: photographs of a handwritten question paper, an
 existing paper, a syllabus or notes as a PDF
-(feature guide: [Question papers](question-papers.md#chat-attachments-tools-drafts-pruning)).
+(feature guide: [Question papers](question-papers.md#chat-attachments-tools-drafts-context)).
 
 - **Kinds.** An attachment is an `image` (JPEG, PNG, WebP or the HEIC family) or a
   `document` (a PDF). The kind is its own fact (`assistant_attachment.kind`, migration
@@ -359,7 +378,7 @@ existing paper, a syllabus or notes as a PDF
   `inlineData` with `mimeType: 'application/pdf'` (`geminiDocumentPart`), Claude a
   `document` block with a base64 `application/pdf` source (`anthropicDocumentBlock`).
   Old or unshown attachments keep the id in their note; see
-  [Question papers](question-papers.md#chat-attachments-tools-drafts-pruning).
+  [Question papers](question-papers.md#chat-attachments-tools-drafts-context).
   `AssistantUserMessageBody` carries `attachments` and an optional `seed` (the
   question paper context, accepted only on a new conversation).
 - **Never a figure.** A PDF's `asat_` id as a `data-figure-id` is a validation problem
@@ -369,8 +388,10 @@ existing paper, a syllabus or notes as a PDF
 - **Tools.** The question paper tools are ordinary advanced MCP tools of module
   `exams` (`listQuestionPapers`, `getQuestionPaper`, `listQuestionPaperVersions`,
   `getQuestionPaperDraft` (reads an unsaved draft back by `draftId`; in-app only),
-  `learn_question_paper_generation`, `validateQuestionPaperDraft` and
-  `saveQuestionPaperVersion`, the only write and so the usual approval card). The prompt
+  `learn_question_paper_generation`, `validateQuestionPaperDraft`, and the two writes,
+  which run without an approval card (see "Approval policy"): `saveQuestionPaperVersion` and
+  `editQuestionPaper` (find-and-replace edits to the latest version, saved as the next one;
+  see "Editing a saved paper" in [question-papers.md](question-papers.md))). The prompt
   has one bullet that sends the model to the learn tool first (Anthropic reaches it
   through tool search, Gemini has every tool declared). `ASSISTANT_TOOL_META.outputChars`
   lets a tool raise the 24,000 character cap on its result, carried end to end
@@ -380,32 +401,35 @@ existing paper, a syllabus or notes as a PDF
   `school.validateQuestionPaperDraft`) that the app renders as a draft card (the problems
   in plain sentences, or: a collapsed "what was removed" list, a placeholder-figure note,
   Preview and *Save as new version*, which sends the plain message "Save draft {id} as
-  a new version of {paper}."; a draft replaced by a later ready draft of the same paper shrinks to a
+  a new version of {paper}."; once a save of the draft's id for its paper went through,
+  the card reads "Saved as a new version." and offers no Save (`draftSaved`); a draft replaced by a later ready draft of the same paper shrinks to a
   collapsed "Replaced by Draft N" line). No marks are shown anywhere. The `question_paper` view shows a saved version with Preview and
   Download (see Views below). Drafts exist only in the conversation.
-- **Context pruning** (`runtime/context.ts`, `buildModelContext`, applied after the
+- **Full context** (`runtime/context.ts`, `buildModelContext`, applied after the
   transcript is read and before the provider adapter; the stored transcript and the UI
-  are never changed). The window is the last two human messages. Outside it a tool
-  result of 8,000 characters or more is replaced by a stub naming the tool and its size
-  ("Call the tool again if you need it"), a top-level text field of 4,000 characters or more in
-  the input of an older tool call (the paper `html` of a draft or save call) by a stub naming
-  the field, the tool and the size (`stubToolInputs` of the adapter). The stub (`toolInputStub`)
-  names the way back per tool: `getQuestionPaperDraft` with the result's draft id (unsaved draft)
-  or `getQuestionPaper` (saved) for a validate input, `getQuestionPaper` for a save input, and no
-  draft id for any other tool; it says it is not the content. A model can copy a stub into a
-  new call anyway (it once sent one as a school template's `content`, which would have saved as
-  plain text), so before a call is recorded or put to the user for approval the runtime looks for
-  either stub's fixed wording in any string of the input (`findCopiedContextNote`) and answers
-  `BAD_REQUEST` naming the field, without running the tool; and an attachment by a note
-  that keeps its id and says the image or document is no longer visible (a document's note
-  also says it is not a figure). The stored transcript keeps the
-  full text: a draft id is resolved from it when the user saves. Inside it, images and PDFs are materialised newest first within one 16 MiB
-  budget counted as base64, with a note for any that are missing, unreadable or omitted. Entry count,
-  order, tool call ids and thought signatures are never touched, and the function is
-  pure and idempotent. Each provider supplies a `ContextAdapter` (`anthropicContext`,
-  `geminiContext`, `fakeContext`) for its own message format. One threshold per kind (results,
-  inputs) applies to every tool, so the learn payload (about 10 KB) is pruned too and the agent calls it
-  again when it needs it.
+  are never changed). Nothing the model was given is taken away later in the conversation:
+  every tool result (the paper's html, the learn guide), every tool call input (the html of
+  every draft and save), the page each message was sent from and every attachment stay in
+  full for as long as the chat lasts. Context pruning (a window of the last two human
+  messages, with stubs for long results, long inputs, older attachments and older page text)
+  was removed on 2026-11-17: the model lost the guide and the paper it was editing two
+  messages in, could not see an image it had been shown, and rewrote papers from memory.
+  Images and PDFs are materialised newest first within one 16 MiB budget counted as base64
+  (the providers' request limit), with a note for any that are missing, unreadable or left
+  out over the budget. Entry count, order, tool call ids and thought signatures are never
+  touched, and the function is pure. Each provider supplies a `ContextAdapter`
+  (`anthropicContext`, `geminiContext`, `fakeContext`) that shows an attachment in its own
+  message format.
+- **The paper's photos in its chat.** A conversation shared with a question paper
+  (`sharedPaperOf`, carried on the run as `RunFacts.paper`) shows the paper's photographed
+  pages before its first message on every request: each page's model copy (the upright JPEG
+  of at most 1800 px the generation job reads), in page order, labelled
+  `[Page N of M of this question paper as photographed (qpg_...)...]` (`paperPageLabel`).
+  They are loaded by `loadPaperPagePhotos` (`src/paper-pages.ts`, injected by `apps/worker`
+  as `loadPaperPages`, so the turn loop reads no school table) and take the request's
+  attachment budget first; a page over the budget or in a type the provider cannot read is a
+  note instead. Before this the chat never saw the photos: asked to fix a question or add a
+  figure "from the image", it could only guess.
 
 ### Cost: saved, never recomputed
 
@@ -512,7 +536,11 @@ the worker logs a warning when it is on in production.
   every type, bills, receipts and statements included, follow the user's own
   document permissions. The assistant cannot widen any of this.
 - **Approval policy, owned by the assistant** (`packages/assistant/src/runtime/tools.ts`,
-  `requiresApproval`): every write waits for the user. Reads run immediately. The approval
+  `requiresApproval`): every write waits for the user, except a write whose procedure declares
+  `skipsApproval` in its MCP metadata (carried as `_meta['campuspilot/skips-approval']`, and
+  honoured by the API's own `assistantToolRequiresApproval` too). Only a write that is not
+  destructive may declare it, which the catalog checks; today that is `saveQuestionPaperVersion`
+  alone, because a save only adds a version and the previous one stays. Reads run immediately. The approval
   request lists the tool's input as labelled values; a tool whose input cannot be checked by a
   person (ids, a draft hash, a whole paper) has an entry in the approval summary registry
   (`packages/components/src/assistant/approval-summaries.ts`, keyed by the MCP tool name): one

@@ -76,9 +76,9 @@ export const QUESTION_PAPER_VALIDATE_LISTED = 40;
 export const QUESTION_PAPER_VALIDATE_LINE_CHARS = 400;
 /**
  * The same for `learn_question_paper_generation`: the guide, the limits and one
- * full example are about 10 KB. It is a one-off call per paper (and pruned from
- * the context afterwards), so it gets room for the whole payload rather than a
- * guide without its example.
+ * full example are about 10 KB. It is a one-off call per paper that stays in the
+ * context for the rest of the chat, so it gets room for the whole payload rather
+ * than a guide without its example.
  */
 export const QUESTION_PAPER_LEARN_OUTPUT_CHARS = 40_000;
 
@@ -129,6 +129,9 @@ export const learnInputSchema = z.object({ schoolId: id });
  * check, not by this transport schema; the length bound is only the largest
  * text the sanitiser will look at (the product limit is lower and reported as a problem).
  */
+/** The most find-and-replace edits one `editQuestionPaper` call takes; more changes than this are a rewrite. */
+export const QUESTION_PAPER_MAX_EDITS = 40;
+
 const paperHtmlInput = z
   .string()
   .min(1)
@@ -159,6 +162,33 @@ export const saveVersionInputSchema = paperKeySchema
   .refine((value) => value.html !== undefined || value.draftId !== undefined, {
     message: 'Send html or draftId.',
   });
+
+/**
+ * `editQuestionPaper`: find-and-replace edits to one saved version, saved as a
+ * new version (`question-paper.edits.ts`). There is no draft in between: the
+ * edits name the version they apply to, and the save checks the result.
+ */
+export const editVersionInputSchema = paperKeySchema.extend({
+  expectedVersionNo: z
+    .number()
+    .int()
+    .min(1)
+    .describe('latestVersionNo from getQuestionPaper: the saved version the edits apply to. If a newer version was saved meanwhile the call fails with CONFLICT.'),
+  edits: z
+    .array(
+      z.object({
+        find: z
+          .string()
+          .min(1)
+          .max(QUESTION_PAPER_LIMITS.parseChars)
+          .describe("Text copied exactly from that version's html (as changed by the edits before this one), long enough to occur only once."),
+        replace: z.string().max(QUESTION_PAPER_LIMITS.parseChars).describe('The text that takes its place, following the same rules as a whole paper; empty to delete it.'),
+      }),
+    )
+    .min(1)
+    .max(QUESTION_PAPER_MAX_EDITS)
+    .describe('Applied in order, all or nothing: if one cannot be applied, nothing is saved.'),
+});
 
 /**
  * `copyQuestionPaperVersion`: the target paper's key, the version of an earlier

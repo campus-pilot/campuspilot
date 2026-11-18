@@ -7,7 +7,7 @@ import {
   type AssistantAttachmentRef,
   type QuestionPaperSeed,
 } from '@campuspilot/assistant-contract/attachments';
-import type { AssistantSurface, AssistantToolCallItemDto, AssistantUserMessageItemDto, AssistantViewItemDto } from '@campuspilot/assistant-contract/dto';
+import type { AssistantModelTier, AssistantSurface, AssistantToolCallItemDto, AssistantUserMessageItemDto, AssistantViewItemDto } from '@campuspilot/assistant-contract/dto';
 import {
   ASSISTANT_LANE_CLASS,
   ASSISTANT_SURFACE_PROPS,
@@ -17,6 +17,8 @@ import {
   AssistantConversationUnavailable,
   AssistantConversationUsage,
   AssistantLiveStatus,
+  AssistantModelSwitch,
+  AssistantProSuggestion,
   AssistantQueuedMessages,
   AssistantReply,
   AssistantSuggestions,
@@ -35,7 +37,7 @@ import {
   type AssistantApprovalDecision,
   type AssistantSuggestion,
 } from '@campuspilot/components/assistant';
-import { draftSaveSpent, saveEventsOf, supersededDrafts } from '@campuspilot/components/question-paper/chat-cards-model';
+import { draftSaved, draftSaveSpent, saveEventsOf, supersededDrafts } from '@campuspilot/components/question-paper/chat-cards-model';
 import { Button } from '@campuspilot/ui/components/button';
 import { Spinner } from '@campuspilot/ui/components/spinner';
 import { TooltipProvider } from '@campuspilot/ui/components/tooltip';
@@ -76,6 +78,7 @@ import {
   useAssistantStatus,
   useAssistantTimeline,
   useConfirmedItemIds,
+  useConversationModelTier,
   useLastUserText,
   useOptimisticMessages,
   useRespondToApproval,
@@ -150,6 +153,8 @@ export type AssistantChatProps = {
   seedText?: string;
   /** The welcome's words, for a surface about one thing; the general welcome otherwise. */
   welcome?: { title: string; text: string };
+  /** The quiet line under the message box about what the assistant asks before; a surface whose changes are saved without asking says so. */
+  trustCue?: string;
   /** The message box's hint, for a surface about one thing. While a turn works the box says it queues a follow-up, whatever this is. */
   placeholder?: string;
   /**
@@ -181,6 +186,9 @@ export type AssistantChatProps = {
    */
   overlay?: Required<Pick<VoiceHandlers, 'open' | 'openLink'>>;
 };
+
+/** A paper chat suggests Pro once the user has sent this many messages on Fast. */
+const PRO_SUGGESTION_AFTER_MESSAGES = 3;
 
 /**
  * The chip over the message box: which paper this conversation is about.
@@ -381,6 +389,7 @@ function ConversationTimeline({
           onSendMessage={onSendMessage}
           supersededBy={superseded.get(row.call.id)}
           saveRequested={(request) => draftSaveSpent(saveEventsOf(rows), request)}
+          saved={(paper, draftId) => draftSaved(rows, paper, draftId)}
         />
       )}
     />
@@ -388,15 +397,26 @@ function ConversationTimeline({
 }
 
 /**
- * The composer toolbar's left side: a quiet trust cue, then the
- * conversation's developer diagnostics when the service sends them.
+ * The composer toolbar's left side: the Fast / Pro switch, a quiet trust cue,
+ * then the conversation's developer diagnostics when the service sends them.
  */
-function ComposerToolbar({ schoolId, conversationId }: { schoolId: string; conversationId: string | null }) {
+function ComposerToolbar({
+  schoolId,
+  conversationId,
+  trustCue,
+  modelSwitch,
+}: {
+  schoolId: string;
+  conversationId: string | null;
+  trustCue: string;
+  modelSwitch: ReactNode;
+}) {
   const usage = useAssistantConversationUsage(schoolId, conversationId);
   return (
     <>
+      {modelSwitch}
       <ShieldCheck className="size-3.5 shrink-0" aria-hidden />
-      <span className="min-w-0 flex-1 truncate">Asks before changing anything</span>
+      <span className="min-w-0 flex-1 truncate">{trustCue}</span>
       {usage ? <AssistantConversationUsage totals={usage} /> : null}
     </>
   );
@@ -585,6 +605,7 @@ export function AssistantChat({
   onSeedRemoved,
   seedText = QUESTION_PAPER_SEED_DRAFT,
   welcome: welcomeWords,
+  trustCue = 'Asks before changing anything',
   placeholder,
   suggestions,
   shareWithPaper = false,
@@ -623,6 +644,11 @@ export function AssistantChat({
   const confirmed = useConfirmedItemIds(schoolId, conversationId);
   const optimistic = useOptimisticMessages(schoolId, conversationId, confirmed);
   const lastSentText = useLastUserText(schoolId, conversationId);
+  // Fast or Pro for the next message: what the user picked here, else what the conversation's latest message used.
+  const modelTier = useConversationModelTier(schoolId, conversationId);
+  const [pickedTier, setPickedTier] = useState<AssistantModelTier | null>(null);
+  const tier = pickedTier ?? modelTier.tier ?? 'standard';
+  const [proSuggestionDismissed, setProSuggestionDismissed] = useState(false);
   const connection = useAssistantConnection(schoolId, conversationId);
   const failure = useAssistantConversationFailure(schoolId, conversationId);
   const draft = useAssistantDraft(schoolId, conversationId);
@@ -662,10 +688,18 @@ export function AssistantChat({
     composer.current?.clearTextIf(seedText);
     onSeedRemoved?.();
   };
+  // A paper chat still on Fast after three messages (the teacher is likely correcting it) suggests Pro once; it never switches by itself.
+  const proSuggestion =
+    shareWithPaper && canWrite && tier === 'standard' && !proSuggestionDismissed && modelTier.userMessages >= PRO_SUGGESTION_AFTER_MESSAGES ? (
+      <AssistantProSuggestion onUsePro={() => setPickedTier('pro')} onDismiss={() => setProSuggestionDismissed(true)} />
+    ) : null;
+  const seedChip = activeSeed && onSeedRemoved ? <SeedChip paper={seedPaper.paper} failed={seedPaper.failed} onRemove={removeSeed} /> : null;
+  // Null when there is nothing to show: the composer draws its request sections only then.
   const requests =
-    activeSeed && onSeedRemoved ? (
+    seedChip || proSuggestion ? (
       <>
-        <SeedChip paper={seedPaper.paper} failed={seedPaper.failed} onRemove={removeSeed} />
+        {seedChip}
+        {proSuggestion}
         {tray}
       </>
     ) : (
@@ -681,6 +715,7 @@ export function AssistantChat({
       attachments,
       seed: seedPaper.usableSeed,
       shareWithPaper,
+      tier,
     }).catch((error: unknown) => {
       const missing = missingAttachmentIdsOf(error);
       // The composer marks these tiles, so the failed copy of the message is dropped: its Retry would name the same missing files.
@@ -710,7 +745,7 @@ export function AssistantChat({
       // A new request brings the panel back: its answer is about to appear there.
       if (overlay) setOverlayPanelOpen(true);
       // The overlay sits over the page the user is asking about, so its requests carry what that page shows.
-      const result = await send(request, intoConversationId, { seed: seedPaper.usableSeed, shareWithPaper, screen: Boolean(overlay) }).catch((error: unknown) => {
+      const result = await send(request, intoConversationId, { seed: seedPaper.usableSeed, shareWithPaper, screen: Boolean(overlay), tier }).catch((error: unknown) => {
         throw new Error(refusalMessage(error) ?? 'The request could not be sent. Check your connection.');
       });
       return { conversationId: result.conversation.id, runId: result.run.id };
@@ -882,7 +917,14 @@ export function AssistantChat({
                     requests
                   )
                 }
-                leading={<ComposerToolbar schoolId={schoolId} conversationId={conversationId} />}
+                leading={
+                  <ComposerToolbar
+                    schoolId={schoolId}
+                    conversationId={conversationId}
+                    trustCue={trustCue}
+                    modelSwitch={<AssistantModelSwitch tier={tier} onChange={setPickedTier} disabled={!canWrite} />}
+                  />
+                }
                 trailing={voiceOffered ? <AssistantVoiceButton onStart={chatVoice.start} /> : null}
                 stopping={stopping}
                 onStop={
