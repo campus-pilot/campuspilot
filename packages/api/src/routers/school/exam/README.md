@@ -27,25 +27,55 @@ exam-governance boundary, including full-config replacements.
 1. Configure exam definitions in session settings, or create one with
    `createExam` (the management Examinations list does). `createExam` takes a
    slug in the settings format (`examSlugSchema`: lowercase letters, digits and
-   underscores, up to 100 characters; older stored slugs are not re-checked) and a
-   name, refuses a slug the session already has with `CONFLICT` carrying
+   underscores, up to 100 characters; `__proto__`, `constructor` and `prototype`
+   are reserved, because Zod's record parsing drops a `__proto__` key and the exam
+   would be stored but never read back; older stored slugs are not re-checked) and
+   a name (`examNameSchema`: up to 200 characters, not only invisible characters),
+   refuses a slug the session already has with `CONFLICT` carrying
    `data.reason: 'EXAM_SLUG_TAKEN'` (`exam-definition.contract.ts`; clients check
    `isExamSlugTakenError`, never the bare code, which database conflicts share),
    and lists the exam
    after the highest existing order (`nextExamOrder`) unless `order` is given. It
    reads and writes the configuration under the session row lock that the
    full-config `updateSession` save also takes, so a creation never drops another
-   exam. The reverse is not guarded: `updateSession` replaces the whole exam map
-   with what its editor submitted, so a settings form loaded before a creation can
-   still remove that exam on save (unless it already has plans or a timetable).
+   exam.
 
-   **Exam names are unique within a session**, compared trimmed and ignoring case
-   (`examNameKey` in `session-config.ts`: Unicode NFC, `trim()`, then lowercase
-   with the fixed `en` locale; inner whitespace is kept, so `Unit  Test` and
-   `Unit Test` differ). `createExam` refuses a name another exam has (after the
-   slug check, so a request whose slug is also taken is refused as a taken slug),
-   and `updateExam` refuses a new name another exam has; keeping an exam's own
-   name or changing only its case or surrounding whitespace is allowed. Both answer
+   `updateSession` replaces the whole exam map with what its caller submitted, so
+   two guards keep a save from silently dropping exams:
+   - **Stale saves.** `expectedUpdatedAt` (optional) is the session's `updatedAt`
+     the caller's copy was read from. When the row read under the lock has another
+     `updatedAt` (every exam definition write bumps it), the save is refused with
+     `CONFLICT` carrying `data.reason: 'SESSION_STALE'` (`session.contract.ts`,
+     `isSessionStaleError`) and nothing is written. It is checked before every
+     other rule. The session settings screens always send it; MCP and other
+     callers that do not edit an earlier copy may leave it out, and then the save
+     applies to whatever is stored.
+   - **Exams with data.** Removing an exam slug that has recorded data is refused
+     with `CONFLICT` naming the exam (`session-exam-removal.ts`): plans (and their
+     results), a timetable, a working-day limit that is set, student assessments,
+     student remarks, a lifecycle that records anything beyond the bare `ready`
+     row plan generation writes, a results notification record, or question
+     papers. Generated document artifacts and assistant conversations do not
+     block it. Only slugs the stored configuration defines and the submission
+     leaves out are checked, so data under a slug deleted earlier never blocks
+     unrelated saves.
+
+   **Changing an exam's slug in session settings makes it a new exam**: the save
+   adds the exam under the new slug and removes the old slug. The old slug's
+   plans, results and other data are not moved, so the change is refused while the
+   old slug has recorded data, like any removal.
+
+   **Exam names are unique within a session**, compared by `examNameKey` in
+   `session-config.ts`: Unicode NFKC (so compatibility forms such as full-width
+   letters match), invisible format characters (`\p{Cf}`: zero-width spaces and
+   joiners, bidirectional controls, soft hyphens) removed, every whitespace run
+   collapsed to one space (`Unit  Test` and `Unit Test` are the same name), trimmed,
+   then lowercased with the fixed `en` locale. A name whose key is empty (only
+   invisible characters) is refused (`examNameSchema`). `createExam` refuses a
+   name another exam has (after the slug check, so a request whose slug is also
+   taken is refused as a taken slug), and `updateExam` refuses a new name another
+   exam has; keeping an exam's own name or changing only what the key ignores is
+   allowed. Both answer
    `CONFLICT` with `data.reason: 'EXAM_NAME_TAKEN'` (`isExamNameTakenError`).
    `createSession` and `updateSession` refuse, with the same error, a submitted
    exam map that *introduces* a clash (`findIntroducedExamNameClashes`): a group of

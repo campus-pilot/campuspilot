@@ -3,12 +3,19 @@ import {
   financeLedgerEntryTable,
   financeNumberCounterTable,
 } from '@campuspilot/db/schema/finance';
-import { examPlanTable, examTimetableTable } from '@campuspilot/db/schema/exam';
 import {
   findIntroducedExamNameClashes,
   sessionConfigSchema,
 } from '@campuspilot/db/schema/jsonb/session-config';
 import { examNameTakenError } from '../exam/exam.service';
+import { ORPCError } from '@orpc/server';
+import {
+  SESSION_STALE_MESSAGE,
+  SESSION_STALE_REASON,
+  sessionVersionToken,
+  type SessionStaleData,
+} from './session.contract';
+import { assertNoExamWithDataRemoved } from './session-exam-removal';
 import { resolveSessionExamPermission } from '../../../permissions/session-exams';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
@@ -272,7 +279,7 @@ export const schoolSessionRouter = {
     .route({
       summary: 'Update a school session',
       description:
-        'Update explicitly supplied fields on the active academic session while validating year boundaries against stored values. Inactive sessions are read-only.',
+        "Update explicitly supplied fields on the active academic session while validating year boundaries against stored values. Inactive sessions are read-only. sessionConfig replaces the whole configuration, including every exam definition: an exam left out is removed, which is refused (CONFLICT) for an exam with plans, a timetable, results, question papers or other recorded data. Send expectedUpdatedAt (the session's updatedAt from getSession) to have the update refused with CONFLICT (data.reason 'SESSION_STALE') instead of overwriting changes made since that read; it is optional, and without it the update applies to whatever is stored.",
       tags: ['School', 'Sessions'],
     })
     .meta({
@@ -288,7 +295,7 @@ export const schoolSessionRouter = {
     .use(resolveSessionExamPermission(SCHOOL_ACTIONS.UPDATE_EXAM))
     .output(schoolSessionDtoSchema)
     .handler(async ({ context, input }) => {
-      const { schoolId, sessionId, ...changes } = input;
+      const { schoolId, sessionId, expectedUpdatedAt, ...changes } = input;
       try {
         return await context.db.transaction(async (transaction) => {
           const [existingSession] = await transaction
@@ -307,6 +314,26 @@ export const schoolSessionRouter = {
             throw rpcError.conflict(
               'Only the active academic session can be updated.',
             );
+          // Optimistic concurrency, checked first, against the row read under
+          // the lock that every exam definition write (`createExam`,
+          // `updateExam`, `deleteExam`) also takes and that each of them
+          // bumps `updatedAt` under. Optional: without the token the update
+          // applies to whatever is stored (MCP and other callers that do not
+          // edit an earlier copy). Because it is checked before every other
+          // rule, any later refusal (a taken name, an exam with data) is about
+          // the caller's own edit of the current configuration, not about a
+          // change made elsewhere. Two writes within one millisecond would
+          // share a token; every writer sets `updatedAt` from the clock under
+          // this lock, so that needs two writes in the same millisecond.
+          if (
+            expectedUpdatedAt !== undefined &&
+            sessionVersionToken(expectedUpdatedAt) !==
+              sessionVersionToken(existingSession.updatedAt)
+          )
+            throw new ORPCError('CONFLICT', {
+              message: SESSION_STALE_MESSAGE,
+              data: { reason: SESSION_STALE_REASON } satisfies SessionStaleData,
+            });
           const sessionStartYear =
             changes.sessionStartYear ?? existingSession.sessionStartYear;
           const sessionEndYear =
@@ -375,24 +402,16 @@ export const schoolSessionRouter = {
               existingSession.sessionConfig,
               changes.sessionConfig,
             );
-            // The exclusive session lock prevents concurrent plan/timetable creation
-            // while a legacy full-config replacement validates retained exam slugs.
-            const plans = await transaction
-              .select({ examSlug: examPlanTable.examSlug })
-              .from(examPlanTable)
-              .where(eq(examPlanTable.sessionId, sessionId));
-            const timetables = await transaction
-              .select({ examSlug: examTimetableTable.examSlug })
-              .from(examTimetableTable)
-              .where(eq(examTimetableTable.sessionId, sessionId));
-            if (
-              [...plans, ...timetables].some(
-                (row) => !Object.hasOwn(next.examConfig, row.examSlug),
-              )
-            )
-              throw rpcError.conflict(
-                'Exam definitions with existing plans or timetables cannot be removed.',
-              );
+            // A full replacement removes every exam it leaves out, including
+            // the old slug of an exam whose slug was changed in settings.
+            // Refused while the removed slug has recorded data; checked under
+            // the session row lock taken above.
+            await assertNoExamWithDataRemoved(
+              transaction,
+              sessionId,
+              previous.examConfig,
+              next.examConfig,
+            );
           }
           const [session] = await transaction
             .update(schoolSessionTable)

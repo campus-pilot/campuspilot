@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { db } from '@campuspilot/db';
 import { schoolSessionTable } from '@campuspilot/db/schema/session';
+import {
+  examAssessmentSettingsTable,
+  examLifecycleTable,
+  examStudentAssessmentTable,
+  examStudentRemarkTable,
+  examTimetableTable,
+} from '@campuspilot/db/schema/exam';
+import { examQuestionPaperTable } from '@campuspilot/db/schema/exam-question-paper';
+import { examResultPublicationTable } from '@campuspilot/db/schema/exam-result-publication';
 import { sessionConfigSchema } from '@campuspilot/db/schema/jsonb/session-config';
 import { eq } from 'drizzle-orm';
 import {
@@ -16,7 +25,16 @@ import {
   isExamSlugTakenError,
 } from './exam-definition.contract';
 import {
+  SESSION_STALE_MESSAGE,
+  SESSION_STALE_REASON,
+  isSessionStaleError,
+  sessionVersionToken,
+} from '../session/session.contract';
+import {
   createAdminSession,
+  createTestAdmission,
+  createTestClass,
+  createTestStudent,
   createSchoolStaffSession,
   createTestClient,
   createTestSchool,
@@ -201,8 +219,28 @@ describe('school.createExam', () => {
       expect(isExamSlugTakenError(error)).toBe(false);
     }
     expect(await storedExamConfig(scope.sessionId)).toEqual(before);
-    // Inner whitespace is part of the name, so this is another name.
-    await manager.school.createExam({ ...scope, examSlug: 'ut_two', name: 'Unit  Test 1' });
+    // Removing a space makes another name.
+    await manager.school.createExam({ ...scope, examSlug: 'ut_two', name: 'UnitTest 1' });
+  });
+
+  it('refuses a name that differs only by spacing, invisible characters or compatibility forms', async () => {
+    const { scope, manager } = await schoolWithActiveSession({
+      unit_test_1: { name: 'Unit Test 1', order: 1 },
+    });
+    const before = await storedExamConfig(scope.sessionId);
+    for (const name of [
+      'Unit  Test 1',
+      'Unit\tTest\u00a01',
+      'Unit\u200b Test 1',
+      'Un\u2060it Te\u200dst 1',
+      '\uff35nit \uff34est \uff11',
+    ]) {
+      const error = await rejection(
+        manager.school.createExam({ ...scope, examSlug: 'ut_one', name }),
+      );
+      expect(isExamNameTakenError(error)).toBe(true);
+    }
+    expect(await storedExamConfig(scope.sessionId)).toEqual(before);
   });
 
   it('refuses a slug outside the session settings format, an empty name and an inactive session', async () => {
@@ -211,9 +249,16 @@ describe('school.createExam', () => {
       await expect(
         manager.school.createExam({ ...scope, examSlug, name: 'Unit Test' }),
       ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
-    await expect(
-      manager.school.createExam({ ...scope, examSlug: 'unit_test', name: '   ' }),
-    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    // A reserved slug would become a ghost exam: Zod's record parsing drops `__proto__`.
+    for (const examSlug of ['__proto__', 'constructor', 'prototype'])
+      await expect(
+        manager.school.createExam({ ...scope, examSlug, name: 'Reserved' }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    // Empty, invisible-only and over-long names.
+    for (const name of ['   ', '\u200b', ' \u200b\u200d\ufeff ', 'a'.repeat(201)])
+      await expect(
+        manager.school.createExam({ ...scope, examSlug: 'unit_test', name }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
     expect(await storedExamConfig(scope.sessionId)).toEqual({});
 
     const inactive = await createTestSession({
@@ -308,6 +353,24 @@ describe('school.updateExam names', () => {
       data: { reason: EXAM_NAME_TAKEN_REASON },
     });
     expect(isExamNameTakenError(error)).toBe(true);
+    expect(await storedExamConfig(scope.sessionId)).toEqual(before);
+  });
+
+  it('refuses a new name that differs from another exam’s only by spacing or invisible characters, and an invisible-only name', async () => {
+    const { scope, manager } = await schoolWithActiveSession({
+      unit_test_1: { name: 'Unit Test 1', order: 1 },
+      annual: { name: 'Annual', order: 2 },
+    });
+    const before = await storedExamConfig(scope.sessionId);
+    for (const name of ['Unit   Test 1', 'Unit\u200b Test 1'])
+      expect(
+        isExamNameTakenError(
+          await rejection(manager.school.updateExam({ ...scope, examSlug: 'annual', name })),
+        ),
+      ).toBe(true);
+    await expect(
+      manager.school.updateExam({ ...scope, examSlug: 'annual', name: '\u200b\u200b' }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
     expect(await storedExamConfig(scope.sessionId)).toEqual(before);
   });
 
@@ -413,5 +476,316 @@ describe('school.updateSession exam names', () => {
     );
     expect(isExamNameTakenError(error)).toBe(true);
     expect(await storedExamConfig(scope.sessionId)).toEqual(next);
+  });
+});
+
+/** The session's configuration with `examConfig` replacing its exams, as the settings screen submits it. */
+function withExams(
+  session: { sessionConfig: { examConfig?: unknown } | null },
+  examConfig: Record<string, { name: string; order: number }>,
+) {
+  return { ...sessionConfigSchema.parse(session.sessionConfig ?? {}), examConfig };
+}
+
+describe('school.updateSession stale saves (expectedUpdatedAt)', () => {
+  it('refuses a configuration edited from a read made before an exam was created elsewhere, and keeps that exam', async () => {
+    const stored = { first_term: { name: 'First Term', order: 1 } };
+    const { scope, manager } = await schoolWithActiveSession(stored);
+    const loaded = await manager.school.getSession(scope);
+    // Meanwhile the Examinations list (or an MCP client) creates an exam.
+    await manager.school.createExam({ ...scope, examSlug: 'unit_test_1', name: 'Unit Test 1' });
+    const afterCreate = await storedExamConfig(scope.sessionId);
+
+    // The settings screen saves its copy, which does not have the new exam.
+    const error = await rejection(
+      manager.school.updateSession({
+        ...scope,
+        sessionConfig: withExams(loaded, { first_term: { name: 'First Term Exam', order: 1 } }),
+        expectedUpdatedAt: sessionVersionToken(loaded.updatedAt),
+      }),
+    );
+    expect(error).toMatchObject({
+      code: 'CONFLICT',
+      message: SESSION_STALE_MESSAGE,
+      data: { reason: SESSION_STALE_REASON },
+    });
+    expect(isSessionStaleError(error)).toBe(true);
+    expect(isExamNameTakenError(error)).toBe(false);
+    expect(await storedExamConfig(scope.sessionId)).toEqual(afterCreate);
+    expect(afterCreate).toHaveProperty('unit_test_1');
+
+    // Saving again from the latest read applies, and moves the token on.
+    const latest = await manager.school.getSession(scope);
+    const saved = await manager.school.updateSession({
+      ...scope,
+      sessionConfig: withExams(latest, {
+        ...afterCreate,
+        first_term: { name: 'First Term Exam', order: 1 },
+      }),
+      expectedUpdatedAt: sessionVersionToken(latest.updatedAt),
+    });
+    expect(saved.sessionConfig?.examConfig).toEqual({
+      ...afterCreate,
+      first_term: { name: 'First Term Exam', order: 1 },
+    });
+    // The read the save was based on is now outdated too.
+    expect(
+      isSessionStaleError(
+        await rejection(
+          manager.school.updateSession({
+            ...scope,
+            sessionEndYear: 2028,
+            expectedUpdatedAt: sessionVersionToken(latest.updatedAt),
+          }),
+        ),
+      ),
+    ).toBe(true);
+    await manager.school.updateSession({
+      ...scope,
+      sessionEndYear: 2028,
+      expectedUpdatedAt: sessionVersionToken(saved.updatedAt),
+    });
+  });
+
+  it('is refused as stale after a rename or deletion elsewhere too, before any other rule is checked', async () => {
+    const stored = {
+      first_term: { name: 'First Term', order: 1 },
+      annual: { name: 'Annual', order: 2 },
+    };
+    const { scope, manager } = await schoolWithActiveSession(stored);
+    const loaded = await manager.school.getSession(scope);
+    await manager.school.updateExam({ ...scope, examSlug: 'annual', name: 'Annual Exam' });
+    // The stale copy also introduces a name clash; the stale refusal wins, so
+    // the clash a client is told about is always one of its own edit.
+    const error = await rejection(
+      manager.school.updateSession({
+        ...scope,
+        sessionConfig: withExams(loaded, { ...stored, term_one: { name: 'First Term', order: 3 } }),
+        expectedUpdatedAt: sessionVersionToken(loaded.updatedAt),
+      }),
+    );
+    expect(isSessionStaleError(error)).toBe(true);
+
+    const reread = await manager.school.getSession(scope);
+    await manager.school.deleteExam({ ...scope, examSlug: 'annual' });
+    expect(
+      isSessionStaleError(
+        await rejection(
+          manager.school.updateSession({
+            ...scope,
+            sessionConfig: reread.sessionConfig,
+            expectedUpdatedAt: sessionVersionToken(reread.updatedAt),
+          }),
+        ),
+      ),
+    ).toBe(true);
+    expect(await storedExamConfig(scope.sessionId)).toEqual({
+      first_term: { name: 'First Term', order: 1 },
+    });
+  });
+
+  it('applies to whatever is stored when the token is left out, as callers without an edited copy send it', async () => {
+    const { scope, manager } = await schoolWithActiveSession({
+      first_term: { name: 'First Term', order: 1 },
+    });
+    const loaded = await manager.school.getSession(scope);
+    await manager.school.createExam({ ...scope, examSlug: 'unit_test_1', name: 'Unit Test 1' });
+    const saved = await manager.school.updateSession({
+      ...scope,
+      sessionConfig: withExams(loaded, { first_term: { name: 'First Term', order: 1 } }),
+    });
+    // Without the token the submitted map replaces the stored one (an exam
+    // without recorded data may be removed this way, as before).
+    expect(saved.sessionConfig?.examConfig).toEqual({
+      first_term: { name: 'First Term', order: 1 },
+    });
+  });
+
+  it('treats a null token as a read of a session whose updatedAt was never set', async () => {
+    const { scope, manager } = await schoolWithActiveSession();
+    await db
+      .update(schoolSessionTable)
+      .set({ updatedAt: null })
+      .where(eq(schoolSessionTable.id, scope.sessionId));
+    const saved = await manager.school.updateSession({
+      ...scope,
+      sessionEndYear: 2028,
+      expectedUpdatedAt: null,
+    });
+    expect(saved.updatedAt).not.toBeNull();
+    expect(
+      isSessionStaleError(
+        await rejection(
+          manager.school.updateSession({ ...scope, sessionEndYear: 2029, expectedUpdatedAt: null }),
+        ),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe('school.updateSession exam removal', () => {
+  type Scope = { schoolId: string; sessionId: string };
+
+  /** Saves the latest configuration without `examSlug`, as the settings screen does after a removal. */
+  async function removeExam(client: Client, scope: Scope, examSlug: string) {
+    const session = await client.school.getSession(scope);
+    const { [examSlug]: _removed, ...kept } = sessionConfigSchema.parse(
+      session.sessionConfig ?? {},
+    ).examConfig;
+    return client.school.updateSession({
+      ...scope,
+      sessionConfig: withExams(session, kept),
+      expectedUpdatedAt: sessionVersionToken(session.updatedAt),
+    });
+  }
+
+  async function testStudent(scope: Scope) {
+    const admission = await createTestAdmission({ schoolId: scope.schoolId });
+    const student = await createTestStudent({
+      schoolId: scope.schoolId,
+      admissionId: admission.id,
+      sessionId: scope.sessionId,
+    });
+    return { admission, student };
+  }
+
+  /** Each kind of recorded data that keeps an exam from being removed, written for `examSlug`. */
+  const recordedData: Array<[string, (scope: Scope, examSlug: string) => Promise<unknown>]> = [
+    [
+      'a timetable',
+      (scope, examSlug) =>
+        db.insert(examTimetableTable).values({ ...scope, examSlug, config: { columns: [], rows: [] } }),
+    ],
+    [
+      'a working-day limit',
+      (scope, examSlug) =>
+        db.insert(examAssessmentSettingsTable).values({ ...scope, examSlug, totalWorkingDays: 20 }),
+    ],
+    [
+      'a student assessment',
+      async (scope, examSlug) => {
+        const { student } = await testStudent(scope);
+        await db
+          .insert(examStudentAssessmentTable)
+          .values({ ...scope, examSlug, studentId: student.id, daysAttended: 18 });
+      },
+    ],
+    [
+      'a student remark',
+      async (scope, examSlug) => {
+        const { student } = await testStudent(scope);
+        await db
+          .insert(examStudentRemarkTable)
+          .values({ ...scope, examSlug, studentId: student.id, text: 'Steady progress.' });
+      },
+    ],
+    [
+      'a started lifecycle',
+      (scope, examSlug) =>
+        db
+          .insert(examLifecycleTable)
+          .values({ ...scope, examSlug, status: 'active', startedAt: new Date() }),
+    ],
+    [
+      'a results notification record',
+      async (scope, examSlug) => {
+        const { admission } = await testStudent(scope);
+        await db.insert(examResultPublicationTable).values({
+          ...scope,
+          examSlug,
+          examName: 'Unit Test 1',
+          admissionIds: [admission.id],
+          snapshot: { recipientCount: 1, channels: {} },
+        });
+      },
+    ],
+    [
+      'a question paper',
+      async (scope, examSlug) => {
+        const { schoolClass } = await createTestClass({ schoolId: scope.schoolId });
+        await db.insert(examQuestionPaperTable).values({
+          ...scope,
+          examSlug,
+          classId: schoolClass.id,
+          subjectSlug: 'maths',
+          modeSlug: 'written',
+        });
+      },
+    ],
+  ];
+
+  for (const [label, write] of recordedData)
+    it(`refuses removing an exam with ${label}, naming it, and leaves the session unchanged`, async () => {
+      const stored = {
+        first_term: { name: 'First Term', order: 1 },
+        unit_test_1: { name: 'Unit Test 1', order: 2 },
+      };
+      const { scope, manager } = await schoolWithActiveSession(stored);
+      await write(scope, 'unit_test_1');
+      const error = await rejection(removeExam(manager, scope, 'unit_test_1'));
+      expect(error).toMatchObject({ code: 'CONFLICT' });
+      expect(String((error as Error).message)).toContain('“Unit Test 1” (unit_test_1)');
+      expect(isSessionStaleError(error)).toBe(false);
+      expect(await storedExamConfig(scope.sessionId)).toEqual(stored);
+      // The exam without data can still be removed.
+      await removeExam(manager, scope, 'first_term');
+      expect(await storedExamConfig(scope.sessionId)).toEqual({
+        unit_test_1: { name: 'Unit Test 1', order: 2 },
+      });
+    });
+
+  it('refuses changing the slug of an exam with recorded data, which removes the old slug', async () => {
+    const stored = { unit_test_1: { name: 'Unit Test 1', order: 1 } };
+    const { scope, manager } = await schoolWithActiveSession(stored);
+    await db
+      .insert(examAssessmentSettingsTable)
+      .values({ ...scope, examSlug: 'unit_test_1', totalWorkingDays: 20 });
+    const session = await manager.school.getSession(scope);
+    const error = await rejection(
+      manager.school.updateSession({
+        ...scope,
+        sessionConfig: withExams(session, { unit_test_one: { name: 'Unit Test 1', order: 1 } }),
+        expectedUpdatedAt: sessionVersionToken(session.updatedAt),
+      }),
+    );
+    expect(error).toMatchObject({ code: 'CONFLICT' });
+    expect(String((error as Error).message)).toContain('slug cannot be changed');
+    expect(await storedExamConfig(scope.sessionId)).toEqual(stored);
+  });
+
+  it('allows removing an exam whose rows only record nothing: a bare ready lifecycle and a cleared working-day limit', async () => {
+    const { scope, manager } = await schoolWithActiveSession({
+      unit_test_1: { name: 'Unit Test 1', order: 1 },
+    });
+    // What deleting every plan and clearing the working-day limit leave behind.
+    await db.insert(examLifecycleTable).values({ ...scope, examSlug: 'unit_test_1' });
+    await db
+      .insert(examAssessmentSettingsTable)
+      .values({ ...scope, examSlug: 'unit_test_1', totalWorkingDays: null });
+    await removeExam(manager, scope, 'unit_test_1');
+    expect(await storedExamConfig(scope.sessionId)).toEqual({});
+  });
+
+  it('does not let data under a slug the configuration no longer defines block saving other settings', async () => {
+    const stored = { first_term: { name: 'First Term', order: 1 } };
+    const { scope, manager } = await schoolWithActiveSession(stored);
+    // Left by an exam deleted earlier.
+    const { student } = await testStudent(scope);
+    await db
+      .insert(examStudentRemarkTable)
+      .values({ ...scope, examSlug: 'old_exam', studentId: student.id, text: 'Kept.' });
+    const session = await manager.school.getSession(scope);
+    await manager.school.updateSession({
+      ...scope,
+      sessionConfig: withExams(session, {
+        ...stored,
+        annual: { name: 'Annual', order: 2 },
+      }),
+      expectedUpdatedAt: sessionVersionToken(session.updatedAt),
+    });
+    expect(Object.keys(await storedExamConfig(scope.sessionId)).sort()).toEqual([
+      'annual',
+      'first_term',
+    ]);
   });
 });
