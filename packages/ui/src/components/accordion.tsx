@@ -55,6 +55,15 @@ function AccordionTrigger({
   )
 }
 
+/**
+ * A panel of an accordion item. Radix measures the content's height into
+ * `--radix-accordion-content-height` only when the item opens or closes, and
+ * the outer element animates its own height to that value (the keyframes do
+ * not hold it afterwards). The inner wrapper is deliberately left at its
+ * natural height: pinning it to the measured value would clip rows added, or
+ * leave a gap for rows removed, while the item stays open (a filter, polling,
+ * a resize).
+ */
 function AccordionContent({
   className,
   children,
@@ -68,7 +77,7 @@ function AccordionContent({
     >
       <div
         className={cn(
-          "h-(--radix-accordion-content-height) pt-0 pb-4 [&_a]:underline [&_a]:underline-offset-3 [&_a]:hover:text-foreground [&_p:not(:last-child)]:mb-4",
+          "pt-0 pb-4 [&_a]:underline [&_a]:underline-offset-3 [&_a]:hover:text-foreground [&_p:not(:last-child)]:mb-4",
           className
         )}
       >

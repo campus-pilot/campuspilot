@@ -1,10 +1,17 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { FileText, Home, Settings } from 'lucide-react';
+import { FileText, Home, NotebookPen, Settings } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { AppShell, AppShellAlert, type AppShellLinkProps } from './app-shell';
+import {
+  AppShell,
+  AppShellAlert,
+  AppShellSidebarSubLink,
+  useAppShellCloseMobileSidebar,
+  type AppShellLinkProps,
+  type AppShellNavigationDisclosure,
+} from './app-shell';
 import { installPopupDomStubs } from './documents/combobox-test-setup';
 
 /** Sets the window width the sidebar's `useIsMobile` reads (mobile is below 768px). */
@@ -146,5 +153,116 @@ describe('page alerts', () => {
     expect(shown).toHaveLength(2);
     expect(shown[0]).toContain('This school is suspended');
     expect(shown[1]).toContain('First page alert');
+  });
+});
+
+/** App-owned disclosure content: a link and a control that navigates in code. */
+function PapersContent({ onPick }: { onPick: () => void }) {
+  const closeMobileSidebar = useAppShellCloseMobileSidebar();
+  return (
+    <ul>
+      <li>
+        <AppShellSidebarSubLink href="/papers/new">Add examination</AppShellSidebarSubLink>
+      </li>
+      <li>
+        <button
+          type="button"
+          onClick={() => {
+            closeMobileSidebar();
+            onPick();
+          }}
+        >
+          Class 8
+        </button>
+      </li>
+    </ul>
+  );
+}
+
+function renderDisclosureShell(
+  disclosure: Partial<AppShellNavigationDisclosure> = {},
+  onPick: () => void = () => undefined,
+  currentPath = '/home',
+) {
+  return render(
+    <AppShell
+      currentPath={currentPath}
+      navigation={[
+        { type: 'item', id: 'home', label: 'Home', href: '/home', icon: Home },
+        {
+          type: 'group',
+          id: 'academics',
+          label: 'Academics',
+          items: [
+            {
+              type: 'disclosure',
+              id: 'papers',
+              label: 'Question papers',
+              icon: NotebookPen,
+              content: <PapersContent onPick={onPick} />,
+              ...disclosure,
+            },
+          ],
+        },
+      ]}
+      breadcrumbs={[]}
+      sidebarHeader={<span>School</span>}
+      search={null}
+      user={{ name: 'Test User', secondaryLabel: 'Principal' }}
+      renderLink={renderLink}
+    >
+      <p>Page</p>
+    </AppShell>,
+  );
+}
+
+const papersTrigger = () => screen.getByRole('button', { name: 'Question papers' });
+
+describe('a disclosure entry in the sidebar', () => {
+  it('mounts its app-owned content only while open', () => {
+    setViewportWidth(1280);
+    renderDisclosureShell();
+    expect(papersTrigger().getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByText('Class 8')).toBeNull();
+
+    fireEvent.click(papersTrigger());
+    expect(papersTrigger().getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByText('Class 8')).toBeTruthy();
+
+    fireEvent.click(papersTrigger());
+    expect(screen.queryByText('Class 8')).toBeNull();
+  });
+
+  it('renders content links with the app link and highlights the trigger as the app says', () => {
+    setViewportWidth(1280);
+    renderDisclosureShell({ isActive: (path) => path.startsWith('/papers') }, undefined, '/papers/one');
+    expect(papersTrigger().getAttribute('data-active')).toBe('true');
+    fireEvent.click(papersTrigger());
+    fireEvent.click(sidebarLink('Add examination'));
+    expect(followed).toEqual(['/papers/new']);
+  });
+
+  it('is left out entirely when the app gate renders nothing', () => {
+    setViewportWidth(1280);
+    renderDisclosureShell({ wrap: () => null });
+    expect(screen.queryByRole('button', { name: 'Question papers' })).toBeNull();
+  });
+
+  it('works in the mobile sheet, which closes on a content link or a choice made in code', () => {
+    setViewportWidth(390);
+    const onPick = vi.fn();
+    renderDisclosureShell({}, onPick);
+
+    openSidebar();
+    fireEvent.click(papersTrigger());
+    fireEvent.click(sidebarLink('Add examination'));
+    expect(followed).toEqual(['/papers/new']);
+    expect(sidebarSheet()).toBeNull();
+
+    openSidebar();
+    fireEvent.click(papersTrigger());
+    fireEvent.click(screen.getByRole('button', { name: 'Class 8' }));
+    expect(onPick).toHaveBeenCalledTimes(1);
+    expect(sidebarSheet()).toBeNull();
   });
 });
