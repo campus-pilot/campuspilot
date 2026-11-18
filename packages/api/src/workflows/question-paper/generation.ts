@@ -16,14 +16,15 @@ import { readTemplatePrints } from '../../routers/school/question-paper/question
 import { assertPaperWritable, isPaperLockedError, isPlanModeRemovedError, resolvePaperScope, type PaperScope } from '../../routers/school/question-paper/question-paper.scope';
 import { pageNotReadyMessage, unreadablePageMessage } from '../../routers/school/question-paper/question-paper.service';
 import { getObjectBytes } from '../../routers/school/question-paper/question-paper.storage';
+import { renameReservedClasses } from '../../routers/school/question-paper/question-paper.sanitize';
 import { checkQuestionPaperDraft, saveQuestionPaperVersion, SourceJobEndedError } from '../../routers/school/question-paper/question-paper.version.service';
 import { QUESTION_PAPER_JOB_FAILURES, type QuestionPaperJobErrorCode } from './constants';
 import { nextQuestionPaperRequestKey, recordQuestionPaperRequest } from './cost';
 import type { QuestionPaperJobInput } from './input';
 import { log } from './log';
-import { getQuestionPaperModel, type QuestionPaperModel, type TextPart, type TextResult } from './model';
+import { getQuestionPaperFigureRoute, getQuestionPaperModel, type QuestionPaperFigureRoute, type QuestionPaperModel, type TextPart, type TextResult } from './model';
 import { describeError } from './error-detail';
-import { buildGenerationParts, buildRepairParts, questionPaperJobSystemPrompt } from './prompt';
+import { buildGenerationParts, buildRepairParts, FIGURE_DECISION_QUESTION, FIGURE_DECISION_THRESHOLD, questionPaperJobSystemPrompt } from './prompt';
 
 /**
  * The body of the generation job, shared by the Restate workflow
@@ -32,8 +33,9 @@ import { buildGenerationParts, buildRepairParts, questionPaperJobSystemPrompt } 
  * only small values (ids, counts, the model's text) are returned from
  * steps. Images are read inside the model step and never journaled.
  *
- * Sequence (design F6): begin, access, inputs, model call, cost, validate,
- * at most one repair (call, cost, validate), save, succeed. Anything that
+ * Sequence (design F6): begin, access, inputs, route (on the figure route
+ * only: one decision request, with its cost), model call, cost, validate, at
+ * most one repair (call, cost, validate), save, succeed. Anything that
  * cannot succeed ends the job as `failed` with a code and a safe message
  * (`QUESTION_PAPER_JOB_FAILURES`); the workflow then returns normally, because
  * the job row, not the invocation, is where the user reads the outcome.
@@ -84,6 +86,7 @@ export type GenerationOutcome =
 export type GenerationDeps = {
   db: Database;
   getModel: () => QuestionPaperModel | undefined;
+  getFigureRoute: () => QuestionPaperFigureRoute | undefined;
   readObject: (key: string) => Promise<Uint8Array>;
   save: typeof saveQuestionPaperVersion;
   sleep: (ms: number) => Promise<void>;
@@ -95,6 +98,7 @@ export function defaultGenerationDeps(): GenerationDeps {
   return {
     db: defaultDb,
     getModel: getQuestionPaperModel,
+    getFigureRoute: getQuestionPaperFigureRoute,
     readObject: getObjectBytes,
     save: saveQuestionPaperVersion,
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -127,6 +131,13 @@ type Plan = { scope: PaperScope; pages: PlannedPage[]; templatePrints?: Template
 
 /** The plan's template lines, null for not known (also for an inputs step journaled before they existed). */
 const templatePrintsOfPlan = (plan: Plan): TemplatePrints | null => plan.templatePrints ?? null;
+
+/**
+ * What the route step returns: whether the paper is written on the figure
+ * route, and the decision model's probability of a diagram (null when no
+ * decision was made: the route is off, or the decision request failed).
+ */
+type Route = { figures: boolean; probability: number | null };
 
 /** A model answer as journaled. */
 type ModelAnswer = Pick<TextResult, 'text' | 'usage' | 'answeredModel' | 'refusal' | 'unfinished'>;
@@ -227,7 +238,12 @@ export async function runQuestionPaperGeneration(
     const plan = await run('inputs', () => planInputs(deps, begun, model));
 
     phase = 'model';
-    const first = await runModelRequest({ deps, run, model, input, begun, plan, n: 1, parts: null });
+    const figureRoute = deps.getFigureRoute();
+    const route = await run('route', () => chooseRoute(deps, input, begun, plan, figureRoute));
+    // A journaled "figures" whose route was switched off since is written by the question paper model.
+    const writer = route.figures && figureRoute ? figureRoute.model : model;
+    const redrawFigures = writer !== model;
+    const first = await runModelRequest({ deps, run, model: writer, redrawFigures, input, begun, plan, n: 1, parts: null });
     if (first.refusal) throw new QuestionPaperJobFailure('model_rejected', undefined, 'The model declined to answer.');
     if (first.unfinished) throw new QuestionPaperJobFailure('output_too_long', undefined, 'The answer stopped on the output limit.');
 
@@ -241,7 +257,8 @@ export async function runQuestionPaperGeneration(
       const repair = await runModelRequest({
         deps,
         run,
-        model,
+        model: writer,
+        redrawFigures,
         input,
         begun,
         plan,
@@ -398,6 +415,43 @@ async function planInputs(deps: GenerationDeps, begun: BegunJob, model: Question
   };
 }
 
+/**
+ * Decides whether the paper is written on the figure route: the decision model
+ * reads the page photos and says how likely the paper has a diagram to
+ * redraw. The route only chooses a model, so a decision that cannot be made (a
+ * provider error, a page that cannot be read) writes the paper as before
+ * instead of failing it; the transcription step reports an unreadable page on
+ * its own. The decision's cost is saved like any other request of the job,
+ * as request 0.
+ */
+async function chooseRoute(deps: GenerationDeps, input: QuestionPaperJobInput, begun: BegunJob, plan: Plan, route: QuestionPaperFigureRoute | undefined): Promise<Route> {
+  if (!route) return { figures: false, probability: null };
+  if (!(await jobIsLive(deps.db, input))) throw new JobStopped();
+  // The decision is billed too: a school that became read-only spends nothing more.
+  await assertSchoolStillWritable(deps.db, begun.schoolId);
+  let decided: Awaited<ReturnType<QuestionPaperFigureRoute['decision']['decide']>>;
+  try {
+    const images = await Promise.all(plan.pages.map(async (page) => ({ type: 'image' as const, mimeType: page.mimeType, data: await deps.readObject(page.key) })));
+    decided = await route.decision.decide({ images, question: FIGURE_DECISION_QUESTION });
+  } catch (error) {
+    log.warn({ jobId: input.jobId, model: route.decision.model, err: describeError(error) }, 'question-paper.route.failed');
+    return { figures: false, probability: null };
+  }
+  await recordQuestionPaperRequest(deps.db, {
+    jobId: input.jobId,
+    schoolId: begun.schoolId,
+    userId: begun.requestedBy,
+    requestKey: await nextQuestionPaperRequestKey(deps.db, { jobId: input.jobId, attempt: input.attempt, n: 0, finalAnswer: true }),
+    model: route.decision,
+    answeredModel: decided.answeredModel,
+    usage: decided.usage,
+    usageComplete: true,
+  });
+  const figures = decided.probability >= FIGURE_DECISION_THRESHOLD;
+  log.info({ jobId: input.jobId, probability: decided.probability, figures }, 'question-paper.route');
+  return { figures, probability: decided.probability };
+}
+
 /** Whether an S3 error means the object is gone. */
 const isMissingObject = (error: unknown) => error instanceof Error && (error.name === 'NoSuchKey' || error.name === 'NotFound');
 
@@ -418,6 +472,8 @@ async function runModelRequest(options: {
   deps: GenerationDeps;
   run: <T>(name: string, action: () => Promise<T>, options?: StepOptions) => Promise<T>;
   model: QuestionPaperModel;
+  /** The job runs on the figure route: its prompt asks for simple diagrams to be redrawn. */
+  redrawFigures: boolean;
   input: QuestionPaperJobInput;
   begun: BegunJob;
   plan: Plan;
@@ -431,6 +487,7 @@ async function runModelRequest(options: {
 async function callModel({
   deps,
   model,
+  redrawFigures,
   input,
   begun,
   plan,
@@ -470,7 +527,7 @@ async function callModel({
     let result: TextResult;
     try {
       result = await model.generate({
-        system: questionPaperJobSystemPrompt(instructions),
+        system: questionPaperJobSystemPrompt(instructions, { redrawFigures }),
         parts: requestParts,
         maxOutputTokens: deps.maxOutputTokens,
       });
@@ -530,13 +587,16 @@ async function callModel({
 
 /**
  * Takes the fragment out of the model's text (a code fence and chatter around
- * it are dropped) and checks it with the same function the save uses. A figure
+ * it are dropped), renames the class names it gave itself that the page
+ * reserves (nobody reads the sanitiser's report in a job, and the paper would
+ * otherwise lose all its styling, see `renameReservedClasses`), and checks it
+ * with the same function the save uses. A figure
  * id the model invented becomes a placeholder: the job can attach no image. What
  * the sanitiser removes is not a problem, so the answer that passes is the
  * extracted fragment, which the save cleans again.
  */
 async function validateAnswer(deps: GenerationDeps, plan: Plan, text: string): Promise<Validation> {
-  const html = extractQuestionPaperFragment(text);
+  const html = renameReservedClasses(extractQuestionPaperFragment(text));
   if (html === '') return { ok: false, html, problems: ['The answer is empty. Return the HTML fragment of the paper.'] };
   // The shape comes first: a refusal or a sentence of chatter would otherwise be cleaned to text and printed as the paper.
   const shape = questionPaperFragmentShapeProblem(html);

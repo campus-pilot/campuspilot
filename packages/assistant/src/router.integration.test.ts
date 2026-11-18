@@ -768,6 +768,14 @@ describe('images attached to a message', () => {
     expect(sent.item.body.seed).toEqual(seed);
   });
 
+  it('keeps Pro on the message it was picked for, and nothing for Fast', async () => {
+    const owner = await newOwner();
+    const pro = await startConversation(owner, { text: 'Redraw question 6.', tier: 'pro' });
+    expect(pro.item.body.tier).toBe('pro');
+    const fast = await startConversation(owner, { text: 'Thanks.', tier: 'standard' });
+    expect(fast.item.body.tier).toBeUndefined();
+  });
+
   it('refuses a seed that names no paper of the school, before anything is saved', async () => {
     const owner = await newOwner();
     const before = await list(owner);

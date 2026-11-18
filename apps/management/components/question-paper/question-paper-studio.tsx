@@ -65,7 +65,7 @@ const PAPER_SUGGESTIONS: readonly AssistantSuggestion[] = [
 
 const PAPER_WELCOME = {
   title: 'Ask for a change',
-  text: 'Say what to change in this paper. I show a draft first and save it only when you approve. Everyone who can open this paper sees this chat.',
+  text: 'Say what to change in this paper. Each change is saved as a new version, and earlier versions stay. Everyone who can open this paper sees this chat.',
 };
 
 /** An icon button of the assistant's header, named by its tooltip. */
@@ -205,6 +205,7 @@ function PaperAssistant({
             shareWithPaper
             readOnlyReason={readOnlyReason}
             welcome={PAPER_WELCOME}
+            trustCue="Saves each change as a new version"
             placeholder="Ask for a change to this paper…"
             suggestions={PAPER_SUGGESTIONS}
             onConversationStarted={(id) => {

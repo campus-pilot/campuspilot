@@ -133,6 +133,52 @@ function requireQuestionPaperPricesWithModel(value: Record<string, unknown>, con
 }
 
 /**
+ * The settings of the stronger question paper model, in the order errors name
+ * them: the model, its four prices, and the input price of the decision model
+ * that tells a photographed paper with diagrams apart. The stronger model
+ * writes such a paper (the figure route), and answers chat messages sent with
+ * Pro picked when no other Pro provider is set.
+ */
+const QUESTION_PAPER_STRONG_SETTING_NAMES = [
+  'QUESTION_PAPER_STRONG_MODEL',
+  'QUESTION_PAPER_STRONG_PRICE_INPUT_USD_PER_MTOK',
+  'QUESTION_PAPER_STRONG_PRICE_OUTPUT_USD_PER_MTOK',
+  'QUESTION_PAPER_STRONG_PRICE_CACHE_READ_USD_PER_MTOK',
+  'QUESTION_PAPER_STRONG_PRICE_CACHE_WRITE_USD_PER_MTOK',
+  'QUESTION_PAPER_DECISION_PRICE_INPUT_USD_PER_MTOK',
+] as const;
+
+/**
+ * The figure route is all or nothing, like a provider: a figure model brings
+ * its four prices and the decision model's price, and none of them is set
+ * without it. It needs Gemini, the only provider with a decision model.
+ */
+function requireCompleteQuestionPaperStrongModel(value: Record<string, unknown>, context: z.RefinementCtx) {
+  const missing = QUESTION_PAPER_STRONG_SETTING_NAMES.filter((name) => value[name] === undefined);
+  if (missing.length > 0 && missing.length < QUESTION_PAPER_STRONG_SETTING_NAMES.length) {
+    for (const name of missing) {
+      context.addIssue({
+        code: 'custom',
+        path: [name],
+        message: `${name} is required because other QUESTION_PAPER_STRONG_* settings are set: the stronger question paper model needs its four prices and the decision model's input price.`,
+      });
+    }
+  }
+  if (value.QUESTION_PAPER_STRONG_MODEL === undefined) return;
+  const provider = value.QUESTION_PAPER_PROVIDER ?? value.ASSISTANT_PROVIDER ?? 'gemini';
+  if (provider !== 'gemini') {
+    context.addIssue({
+      code: 'custom',
+      path: ['QUESTION_PAPER_STRONG_MODEL'],
+      message: 'QUESTION_PAPER_STRONG_MODEL needs question papers on Gemini (QUESTION_PAPER_PROVIDER or ASSISTANT_PROVIDER): the decision model is a Gemini model.',
+    });
+  }
+  if (value.GEMINI_API_KEY === undefined) {
+    context.addIssue({ code: 'custom', path: ['QUESTION_PAPER_STRONG_MODEL'], message: 'QUESTION_PAPER_STRONG_MODEL needs GEMINI_API_KEY.' });
+  }
+}
+
+/**
  * The settings that switch voice mode on for the platform: the live model and
  * the four prices it is billed at (text and audio, in and out), in the order
  * errors name them.
@@ -190,6 +236,22 @@ function refineAssistantEnv(value: Record<string, unknown>, context: z.Refinemen
   requireCompleteVoice(value, context);
   requireQuestionPaperPricesWithModel(value, context);
   requireUsableQuestionPaperProvider(value, context);
+  requireCompleteQuestionPaperStrongModel(value, context);
+  requireUsableProProvider(value, context);
+}
+
+/** `ASSISTANT_PRO_PROVIDER` must name a provider that has its key and model (its prices come with them). */
+function requireUsableProProvider(value: Record<string, unknown>, context: z.RefinementCtx) {
+  const provider = value.ASSISTANT_PRO_PROVIDER;
+  if (provider !== 'anthropic' && provider !== 'gemini') return;
+  const prefix = provider === 'anthropic' ? 'ANTHROPIC' : 'GEMINI';
+  if (value[`${prefix}_API_KEY`] === undefined || value[`${prefix}_MODEL`] === undefined) {
+    context.addIssue({
+      code: 'custom',
+      path: ['ASSISTANT_PRO_PROVIDER'],
+      message: `ASSISTANT_PRO_PROVIDER=${provider} needs ${prefix}_API_KEY, ${prefix}_MODEL and its four prices.`,
+    });
+  }
 }
 
 /** The assistant settings' shape, without validation (see `assistantEnvSchema`). */
@@ -202,6 +264,15 @@ const assistantEnvShape = {
      * settings while they are in use.
      */
     ASSISTANT_PROVIDER: z.enum(['anthropic', 'gemini']).default('gemini'),
+    /**
+     * The provider that answers a chat message sent with Pro picked, with its
+     * own `<P>_MODEL` and prices, optional. A conversation on another provider
+     * then has Pro messages answered by this one: each provider reads its own
+     * earlier turns as they were and a plain summary of the other's
+     * (`runtime/handoff.ts`). Unset, Pro is the stronger Gemini model
+     * (`QUESTION_PAPER_STRONG_MODEL`) when there is one, else the standard model.
+     */
+    ASSISTANT_PRO_PROVIDER: z.enum(['anthropic', 'gemini']).optional(),
     ...providerShape('ANTHROPIC'),
     ...providerShape('GEMINI'),
     /**
@@ -260,6 +331,23 @@ const assistantEnvShape = {
     QUESTION_PAPER_PRICE_OUTPUT_USD_PER_MTOK: usdPerMillionTokens,
     QUESTION_PAPER_PRICE_CACHE_READ_USD_PER_MTOK: usdPerMillionTokens,
     QUESTION_PAPER_PRICE_CACHE_WRITE_USD_PER_MTOK: usdPerMillionTokens,
+    /**
+     * The stronger question paper model, optional (all six settings or none,
+     * Gemini only), read by the worker. Generation: the decision model
+     * (`QUESTION_PAPER_DECISION_MODEL`, default `gemini-decision-1`, billed for
+     * input only) is asked whether the photographed paper has a diagram that
+     * must be redrawn; when it has, the paper is written with
+     * `QUESTION_PAPER_STRONG_MODEL` at its own prices and told to redraw simple
+     * diagrams. Chat: it answers a message the user sent with Pro picked (with
+     * none set, Pro is the standard model).
+     */
+    QUESTION_PAPER_STRONG_MODEL: z.string().min(1).optional(),
+    QUESTION_PAPER_STRONG_PRICE_INPUT_USD_PER_MTOK: usdPerMillionTokens,
+    QUESTION_PAPER_STRONG_PRICE_OUTPUT_USD_PER_MTOK: usdPerMillionTokens,
+    QUESTION_PAPER_STRONG_PRICE_CACHE_READ_USD_PER_MTOK: usdPerMillionTokens,
+    QUESTION_PAPER_STRONG_PRICE_CACHE_WRITE_USD_PER_MTOK: usdPerMillionTokens,
+    QUESTION_PAPER_DECISION_MODEL: z.string().min(1).default('gemini-decision-1'),
+    QUESTION_PAPER_DECISION_PRICE_INPUT_USD_PER_MTOK: usdPerMillionTokens,
     /** Output token limit of one generation request; a paper that does not fit fails as too long. */
     QUESTION_PAPER_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(1_000).max(128_000).default(32_000),
     /**

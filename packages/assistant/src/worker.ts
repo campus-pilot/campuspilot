@@ -2,6 +2,7 @@ import { resolveAssistantAccess } from '@campuspilot/api/assistant/access';
 import { env } from '@campuspilot/env/assistant';
 
 import { loadAttachmentFile } from './attachments';
+import { loadPaperPagePhotos } from './paper-pages';
 import { assistantControlService } from './control';
 import { db } from './db';
 import { log } from './log';
@@ -41,5 +42,5 @@ export function createAssistantWorkerServices() {
     const decision = await resolveAssistantAccess(db, input);
     return decision.refusal ? { allowed: false, ...decision.refusal } : { allowed: true };
   };
-  return [assistantControlService, createAssistantConversationObject({ providers, log, checkAccess, loadAttachment: loadAttachmentFile })] as const;
+  return [assistantControlService, createAssistantConversationObject({ providers, log, checkAccess, loadAttachment: loadAttachmentFile, loadPaperPages: (input) => loadPaperPagePhotos(input) })] as const;
 }

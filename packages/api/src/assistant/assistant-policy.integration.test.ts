@@ -60,13 +60,17 @@ describe('assistant tool policy', () => {
     ).toBe(false);
   });
 
-  it('requires approval for every write, billing writes included', () => {
+  it('requires approval for every write, billing writes included, unless the write declares it skips approval', () => {
     for (const module of ['admissions', 'billing'] as const) {
       expect(assistantToolDecision({ exposure: 'core', access: 'write', destructive: false, module })).toEqual({
         allowed: true,
         requiresApproval: true,
       });
     }
+    expect(assistantToolDecision({ exposure: 'advanced', access: 'write', destructive: false, module: 'exams', skipsApproval: true })).toEqual({
+      allowed: true,
+      requiresApproval: false,
+    });
   });
 });
 

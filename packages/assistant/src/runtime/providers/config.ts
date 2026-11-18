@@ -70,6 +70,9 @@ export function configuredProviderSettings(): ReadonlyMap<ModelProviderId, Provi
 /** The provider new conversations start on (`ASSISTANT_PROVIDER`). */
 export const selectedProviderId = (): ModelProviderId => env.ASSISTANT_PROVIDER;
 
+/** The provider that answers Pro messages (`ASSISTANT_PRO_PROVIDER`), or null when Pro stays on the conversation's provider. */
+export const proProviderId = (): ModelProviderId | null => env.ASSISTANT_PRO_PROVIDER ?? null;
+
 /** Why the selected provider cannot be used, for status and logs. */
 export function missingProviderReason(id: ModelProviderId): string {
   const prefix = ENV_PREFIX[id];
@@ -111,4 +114,46 @@ export function readQuestionPaperSettings(
 /** The question paper settings of this deployment, or null when generation is not configured. */
 export function questionPaperSettings(): QuestionPaperSettings | null {
   return readQuestionPaperSettings(env as unknown as Readonly<Record<string, string | undefined>>, selectedProviderId());
+}
+
+/**
+ * The figure route of question paper generation: the model a paper with
+ * diagrams is written with, and the decision model that tells such a paper
+ * apart, billed for its input only (it writes no text).
+ */
+export type QuestionPaperStrongSettings = {
+  strong: QuestionPaperSettings;
+  decision: { apiKey: string; model: string; inputUsdPerMtok: string };
+};
+
+/**
+ * The figure route from an environment, or null when it is off. It is on when
+ * `QUESTION_PAPER_STRONG_MODEL` is set with its four prices and the decision
+ * model's input price, and question papers run on Gemini (the env schema
+ * refuses anything else; this returns null for it all the same). The key is
+ * Gemini's own, as for every question paper model.
+ */
+export function readQuestionPaperStrongSettings(
+  source: Readonly<Record<string, string | undefined>>,
+  defaultProviderId: ModelProviderId,
+): QuestionPaperStrongSettings | null {
+  const providerId = (source.QUESTION_PAPER_PROVIDER as ModelProviderId | undefined) ?? defaultProviderId;
+  const model = source.QUESTION_PAPER_STRONG_MODEL;
+  const apiKey = source.GEMINI_API_KEY;
+  const inputUsdPerMtok = source.QUESTION_PAPER_STRONG_PRICE_INPUT_USD_PER_MTOK;
+  const outputUsdPerMtok = source.QUESTION_PAPER_STRONG_PRICE_OUTPUT_USD_PER_MTOK;
+  const cacheReadUsdPerMtok = source.QUESTION_PAPER_STRONG_PRICE_CACHE_READ_USD_PER_MTOK;
+  const cacheWriteUsdPerMtok = source.QUESTION_PAPER_STRONG_PRICE_CACHE_WRITE_USD_PER_MTOK;
+  const decisionInputUsdPerMtok = source.QUESTION_PAPER_DECISION_PRICE_INPUT_USD_PER_MTOK;
+  if (providerId !== 'gemini' || !model || !apiKey) return null;
+  if (!inputUsdPerMtok || !outputUsdPerMtok || !cacheReadUsdPerMtok || !cacheWriteUsdPerMtok || !decisionInputUsdPerMtok) return null;
+  return {
+    strong: { id: 'gemini', apiKey, model, prices: { inputUsdPerMtok, outputUsdPerMtok, cacheReadUsdPerMtok, cacheWriteUsdPerMtok } },
+    decision: { apiKey, model: source.QUESTION_PAPER_DECISION_MODEL || 'gemini-decision-1', inputUsdPerMtok: decisionInputUsdPerMtok },
+  };
+}
+
+/** The figure route of this deployment, or null when it is off. */
+export function questionPaperStrongSettings(): QuestionPaperStrongSettings | null {
+  return readQuestionPaperStrongSettings(env as unknown as Readonly<Record<string, string | undefined>>, selectedProviderId());
 }

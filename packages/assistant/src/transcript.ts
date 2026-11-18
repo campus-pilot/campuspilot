@@ -53,8 +53,6 @@ function seedText(seed: NonNullable<AssistantUserMessageBody['seed']>): string {
 /** The line that introduces the page's text inside a `<current_page>` block. */
 const PAGE_TEXT_INTRO =
   'The page’s text (all of it, above and below the user’s view too; top to bottom, cells of a row joined by " | "; the part on their screen now is framed by marker lines; it may be cut where it says so):';
-/** What stands in for the page's text once its message is old (see {@link omitPageText}). */
-export const PAGE_TEXT_OMITTED = '(The text of this page was shown to you here earlier. It is omitted now to keep the chat short, and the page may have changed since.)';
 const PAGE_FENCE = '"""';
 const PAGE_BLOCK_END = '</current_page>';
 /** An opening or closing tag of the page block, however it is spaced or cased. */
@@ -86,25 +84,6 @@ function withoutPageTags(text: string): string {
  * end the block or start a line of its own any more than the page's text may.
  */
 const pageLine = (value: string) => withoutPageTags(value).replace(/\s+/g, ' ').trim();
-
-/**
- * The text of a `<current_page>` block without the page's text: its path and
- * title stay, a one-line note stands where the text was. Any other text is
- * returned as it is, and so is a block that has no page text (also one already
- * shortened: doing it twice changes nothing).
- *
- * The model context uses it for messages that are no longer recent: a page's
- * text is up to twelve thousand characters and answers only the question it
- * came with, so replaying it on every later step would be paid for again and
- * again without being read. The stored transcript keeps it.
- */
-export function omitPageText(text: string): string {
-  const closing = `\n${PAGE_FENCE}\n${PAGE_BLOCK_END}`;
-  if (!text.startsWith('<current_page>\n') || !text.endsWith(closing)) return text;
-  const start = text.indexOf(`\n${PAGE_TEXT_INTRO}\n${PAGE_FENCE}\n`);
-  if (start === -1) return text;
-  return `${text.slice(0, start)}\n${PAGE_TEXT_OMITTED}\n${PAGE_BLOCK_END}`;
-}
 
 /**
  * A user message as blocks, in order: the page the user was on (context, not

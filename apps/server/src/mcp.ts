@@ -331,6 +331,11 @@ function readMcpMetadata(name: string, meta: unknown): McpProcedureMeta {
       `oRPC procedure ${name} declares an invalid outputChars: ${JSON.stringify(mcp.outputChars)}.`,
     );
   }
+  if (mcp.skipsApproval !== undefined && (mcp.skipsApproval !== true || mcp.access !== 'write' || mcp.destructive)) {
+    throw new TypeError(
+      `oRPC procedure ${name} may only skip approval as a write that is not destructive.`,
+    );
+  }
   return mcp as McpProcedureMeta;
 }
 
@@ -592,6 +597,7 @@ function registerAssistantTools(
           ...(tool.mcp.outputChars === undefined
             ? {}
             : { [ASSISTANT_TOOL_META.outputChars]: tool.mcp.outputChars }),
+          ...(tool.mcp.skipsApproval ? { [ASSISTANT_TOOL_META.skipsApproval]: true } : {}),
         },
       },
       async (input, requestContext) =>

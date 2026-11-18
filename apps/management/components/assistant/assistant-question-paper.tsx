@@ -12,6 +12,7 @@ import {
   parseDraftCallInput,
   parseStoredDraftResult,
   saveDraftMessage,
+  type DraftPaperKey,
   type DraftResult,
 } from '@campuspilot/components/question-paper/chat-cards-model';
 import { PlaceholderNote, RemovedList } from '@campuspilot/components/question-paper/paper-notices';
@@ -192,9 +193,9 @@ function DraftUnavailable({ ordinal, children }: { ordinal: number; children: Re
 
 /**
  * A draft question paper the assistant wrote (a `validateQuestionPaperDraft`
- * call). It is a draft until the user says so: Preview renders it, and Save as
- * new version sends the message that asks for it (decision D32), naming the
- * paper, after which the usual approval card follows.
+ * call). The assistant saves a valid draft by itself, and the card then says
+ * it is saved; Preview renders it, and for a draft it did not save, Save as new
+ * version sends the message that asks for it (decision D32), naming the paper.
  */
 export function AssistantDraftCard({
   schoolId,
@@ -202,6 +203,7 @@ export function AssistantDraftCard({
   ordinal,
   onSendMessage,
   saveRequested,
+  saved,
   supersededBy,
 }: {
   schoolId: string;
@@ -209,6 +211,8 @@ export function AssistantDraftCard({
   ordinal: number;
   /** Whether the conversation already holds this user message that saves the draft (the exact request sentence). */
   saveRequested: (request: string) => boolean;
+  /** Whether a save of this draft for its paper went through later in the conversation. */
+  saved: (paper: DraftPaperKey, draftId: string) => boolean;
   /** Sends a chat message; absent while the chat cannot send. */
   onSendMessage?: (text: string) => void;
   /** The ordinal of the later ready draft of the same paper that replaced this one, if any. */
@@ -256,6 +260,7 @@ export function AssistantDraftCard({
         ) : null
       }
       saveRequested={request !== null && saveRequested(request)}
+      saved={facts.valid && input !== null && saved(input, facts.draftId)}
       onSave={request !== null && onSendMessage ? () => onSendMessage(request) : undefined}
     />
   );

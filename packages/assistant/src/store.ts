@@ -27,6 +27,7 @@ import {
   type AssistantItemBody,
 } from '@campuspilot/db/schema/assistant';
 import type { ModelPrices } from './runtime/providers/config';
+import type { ModelProviderId } from './runtime/providers/types';
 import { publishAssistantEvent } from './events';
 import { log } from './log';
 
@@ -643,6 +644,34 @@ export async function appendTranscriptEntry(
     position: counters.lastTranscriptPosition,
   });
   return true;
+}
+
+/** The transcript with the run each entry belongs to and the provider that run called (null before it started). */
+export async function loadTranscriptWithRuns(
+  db: AssistantExecutor,
+  conversationId: string,
+): Promise<Array<{ role: 'user' | 'assistant'; content: unknown[]; runId: string; provider: ModelProviderId | null }>> {
+  return db
+    .select({
+      role: assistantTranscriptEntryTable.role,
+      content: assistantTranscriptEntryTable.content,
+      runId: assistantTranscriptEntryTable.runId,
+      provider: assistantRunTable.provider,
+    })
+    .from(assistantTranscriptEntryTable)
+    .innerJoin(assistantRunTable, eq(assistantRunTable.id, assistantTranscriptEntryTable.runId))
+    .where(eq(assistantTranscriptEntryTable.conversationId, conversationId))
+    .orderBy(asc(assistantTranscriptEntryTable.position));
+}
+
+/** The items of some runs of a conversation, in display order (the provider-neutral record of what each run did). */
+export async function loadItemsOfRuns(db: AssistantExecutor, conversationId: string, runIds: readonly string[]) {
+  if (runIds.length === 0) return [];
+  return db
+    .select({ runId: assistantItemTable.runId, kind: assistantItemTable.kind, status: assistantItemTable.status, body: assistantItemTable.body })
+    .from(assistantItemTable)
+    .where(and(eq(assistantItemTable.conversationId, conversationId), inArray(assistantItemTable.runId, [...runIds])))
+    .orderBy(asc(assistantItemTable.position));
 }
 
 export async function loadTranscript(
