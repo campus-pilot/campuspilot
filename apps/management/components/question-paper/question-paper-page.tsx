@@ -69,6 +69,10 @@ function PaperList({ scope }: { scope: ExamScope }) {
       {query.data.classes.length === 0 ? (
         <NoClasses />
       ) : storedModes === undefined ? (
+        // Only during server rendering and the hydration pass, when local storage cannot be read. The
+        // list is never loaded then (nothing prefetches it on the server or restores a cache), so this
+        // shows no later than the query's own loading state would; an unfiltered list here would only
+        // flash rows the stored filter then hides.
         <LoadingExam />
       ) : (
         // The filter form is seeded from the stored entry when it mounts: once per school, and again
@@ -99,16 +103,24 @@ function NoClasses() {
 /**
  * The open class is the `class` parameter (`openClassOf`: an id not in the
  * list opens nothing); `replaceOpenClass` rewrites it.
+ *
+ * The parameter is written with `window.history.replaceState`, not
+ * `router.replace`. This route is an async server component, so a router
+ * navigation would fetch its RSC payload again on every toggle, and the
+ * accordion would not move until that returned (rapid taps raced each
+ * other). Since Next 14.1 the App Router patches the History API and syncs
+ * `useSearchParams` (and `usePathname`) with it, so a `replaceState` re-renders
+ * this hook with the new parameter at once, without a request and without
+ * scrolling, while Back and reload keep working with the rewritten address.
  */
 function useOpenClassParam(classes: PaperClasses) {
-  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   return {
     openClassId: openClassOf(searchParams.get('class'), classes),
     setOpenClass: (classId: string | null) =>
       replaceOpenClass(
-        { pathname, search: searchParams.toString(), replace: (href, options) => router.replace(href, options) },
+        { pathname, search: searchParams.toString(), replace: (href) => window.history.replaceState(null, '', href) },
         classId,
       ),
   };

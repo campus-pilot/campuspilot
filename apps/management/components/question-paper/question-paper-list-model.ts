@@ -1,4 +1,5 @@
 import { modeFilterSchema } from '@campuspilot/components/question-paper/question-paper-model';
+import { examStatusLabel } from '@/components/exam/exam-model';
 import { commandFuzzyScore } from '@/components/management-command-model';
 
 /**
@@ -20,22 +21,23 @@ export function withClassParam(search: string, classId: string | null): string {
   return query ? `?${query}` : '';
 }
 
-/** What `replaceOpenClass` needs of the router and the current address. */
+/** What `replaceOpenClass` needs of the current address and of the way it is rewritten. */
 export type ClassParamNavigation = {
   pathname: string;
   /** The current query string, without its `?`. */
   search: string;
-  replace: (href: string, options: { scroll: boolean }) => void;
+  /** Replaces the current history entry with `href` (the page writes it with `window.history.replaceState`). */
+  replace: (href: string) => void;
 };
 
 /**
  * Opens `classId` (null collapses the open class) by rewriting the `class`
  * parameter. It replaces the address rather than pushing, so Back does not
- * step through every toggle, and never scrolls, so the page stays where the
- * person is.
+ * step through every toggle. The caller rewrites the history entry in place
+ * (no navigation), so nothing is fetched and the page never scrolls.
  */
 export function replaceOpenClass(navigation: ClassParamNavigation, classId: string | null) {
-  navigation.replace(`${navigation.pathname}${withClassParam(navigation.search, classId)}`, { scroll: false });
+  navigation.replace(`${navigation.pathname}${withClassParam(navigation.search, classId)}`);
 }
 
 /** What every school's mode filter entry starts with. */
@@ -95,7 +97,22 @@ export function parseStoredModeFilter(raw: string | null | undefined): string[] 
 /** The command palette's question paper picker: an examination first, then one of its classes. */
 export type QuestionPaperPickerStep = { step: 'exam' } | { step: 'class'; exam: { slug: string; name: string } };
 
-/** What the picker's list says when it shows nothing: there is nothing at all, or nothing matches the search. */
+/**
+ * The line under an examination in the picker: its status, and "No plan
+ * yet" when it has no subject plan (its Question paper tab does not exist
+ * then, so the picker lists it disabled).
+ */
+export function examPickerDescription(exam: { status: 'ready' | 'active' | 'completed' | null; planCount: number }): string {
+  const status = examStatusLabel(exam.status);
+  return exam.planCount > 0 ? status : `No plan yet · ${status}`;
+}
+
+/**
+ * What the picker's list says when it shows nothing: there is nothing at
+ * all, or nothing matches the search. The class step is reached only for an
+ * examination with a plan (one without is disabled), so an empty class list
+ * there means the server listed none the person may open.
+ */
 export function pickerEmptyMessage(step: QuestionPaperPickerStep, query: string): string {
   const searching = query.trim() !== '';
   if (step.step === 'exam') return searching ? 'No matching examinations.' : 'No examinations in this session.';

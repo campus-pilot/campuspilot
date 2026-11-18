@@ -2,6 +2,7 @@ import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { isQuestionPaperSectionPath, questionPaperClassHref, questionPaperReturnHref } from '@/components/exam/exam-model';
 import {
+  examPickerDescription,
   initialModeFilterRevisions,
   modeFilterRevisionOf,
   modeFilterStorageKey,
@@ -72,20 +73,20 @@ test("another tab's change reseeds only that school's filter; clearing storage r
   assert.equal(start.bySchool.size, 0);
 });
 
-test('toggling a class replaces the address without scrolling, and collapsing drops the parameter', () => {
-  const calls: Array<[string, { scroll: boolean }]> = [];
+test('toggling a class replaces the address, and collapsing drops the parameter', () => {
+  const calls: string[] = [];
   const navigation = (search: string) => ({
     pathname: '/school/sch_1/sessions/ses_1/exam/first-term/question-paper',
     search,
-    replace: (href: string, options: { scroll: boolean }) => void calls.push([href, options]),
+    replace: (href: string) => void calls.push(href),
   });
   replaceOpenClass(navigation(''), 'c8');
   replaceOpenClass(navigation('class=c8'), null);
   replaceOpenClass(navigation('class=c8&tab=x'), 'c9');
   assert.deepEqual(calls, [
-    ['/school/sch_1/sessions/ses_1/exam/first-term/question-paper?class=c8', { scroll: false }],
-    ['/school/sch_1/sessions/ses_1/exam/first-term/question-paper', { scroll: false }],
-    ['/school/sch_1/sessions/ses_1/exam/first-term/question-paper?class=c9&tab=x', { scroll: false }],
+    '/school/sch_1/sessions/ses_1/exam/first-term/question-paper?class=c8',
+    '/school/sch_1/sessions/ses_1/exam/first-term/question-paper',
+    '/school/sch_1/sessions/ses_1/exam/first-term/question-paper?class=c9&tab=x',
   ]);
 });
 
@@ -106,6 +107,12 @@ test('the palette picker says whether there is nothing or nothing matches', () =
   const classStep = { step: 'class', exam: { slug: 'a', name: 'A' } } as const;
   assert.equal(pickerEmptyMessage(classStep, ' '), 'No classes you can open.');
   assert.equal(pickerEmptyMessage(classStep, 'zz'), 'No matching classes.');
+});
+
+test('the picker marks an examination without a plan, whatever its status', () => {
+  assert.equal(examPickerDescription({ status: 'active', planCount: 3 }), 'In progress');
+  assert.equal(examPickerDescription({ status: null, planCount: 0 }), 'No plan yet · Not started');
+  assert.equal(examPickerDescription({ status: 'completed', planCount: 0 }), 'No plan yet · Completed');
 });
 
 test('the picker keeps the given order without a search and ranks matches with one', () => {
