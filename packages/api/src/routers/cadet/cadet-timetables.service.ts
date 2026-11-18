@@ -23,7 +23,12 @@ import type { CadetScope } from './cadet-notices.service';
  * student is enrolled in its session in a class **taking part** in its
  * examination (`exam_class`): a student whose class was excluded does not sit
  * the examination, so its timetable is not theirs (as the exam list hides the
- * examination from them). The timetable is examination-wide, so once visible
+ * examination from them). Taking part is checked for the student's **current**
+ * placement in the session (`student.class_id`), not for the class records the
+ * exam list and results use (which keep the class a result was made in): a
+ * student moved to a class not taking part loses the timetable but keeps the
+ * examination's results. Plans are not required, unlike the exam list
+ * (`sitsCadetExam`). See docs/cadet-portal.md. The timetable is examination-wide, so once visible
  * it shows every class taking part, not only the student's own. Visibility is
  * evaluated when the student asks: withdrawing a timetable hides it again at
  * once, while the notifications already sent keep their link and then answer

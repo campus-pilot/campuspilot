@@ -116,6 +116,30 @@ export function parseExamId(examId: string) {
 
 const sessionLabelOf = (start: number, end: number) => `${start}–${String(end).slice(-2)}`;
 
+/**
+ * Whether a student of `classId` sits an examination, from two independent
+ * facts: which classes take part (`exam_class`) and which classes have plans.
+ *
+ * - Once the examination has any plans, a class sits it only when it both
+ *   takes part and has plans of its own. A class can take part without plans
+ *   (its last single plan deleted, or recorded by the 0076 backfill because a
+ *   timetable scheduled it); its results can never be released (`examState`
+ *   needs plans), so listing it would show "awaiting release" forever.
+ * - Before any plan exists, a class sits it when it takes part, or when no
+ *   class takes part yet (an examination not planned at all is listed for
+ *   every class, as before classes could be chosen).
+ */
+function sitsCadetExam(
+  classId: string,
+  participants: ReadonlyArray<{ classId: string }>,
+  examPlanCount: number,
+  classPlanCount: number,
+): boolean {
+  const takesPart = participants.some((row) => row.classId === classId);
+  if (examPlanCount > 0) return takesPart && classPlanCount > 0;
+  return takesPart || participants.length === 0;
+}
+
 function examState(
   planCountForClass: number,
   lifecycle: { status: 'ready' | 'active' | 'completed'; cadetReleasedAt: Date | null } | undefined,
@@ -277,15 +301,10 @@ export async function loadCadetAcademics(db: DatabaseExecutor, cadet: Cadet) {
     );
     const list: CadetExam[] = [];
     for (const [examSlug, definition] of definitions) {
-      const classPlans = plans.filter(
-        (plan) => plan.sessionId === record.sessionId && plan.examSlug === examSlug && plan.classId === record.classId,
-      );
-      // Which classes take part is the exam's own fact (`exam_class`): once
-      // any class takes part, an exam this class does not take part in is not
-      // one this student sits. An exam no class takes part in yet (not
-      // planned) is still listed.
+      const examPlans = plans.filter((plan) => plan.sessionId === record.sessionId && plan.examSlug === examSlug);
+      const classPlans = examPlans.filter((plan) => plan.classId === record.classId);
       const participants = examClasses.filter((row) => row.sessionId === record.sessionId && row.examSlug === examSlug);
-      if (participants.length > 0 && !participants.some((row) => row.classId === record.classId)) continue;
+      if (!sitsCadetExam(record.classId, participants, examPlans.length, classPlans.length)) continue;
       const lifecycle = lifecycleByExam.get(`${record.sessionId}|${examSlug}`);
       const state = examState(classPlans.length, lifecycle);
       list.push({

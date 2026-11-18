@@ -358,6 +358,22 @@ describe('exam class participation', () => {
       });
     });
 
+    it("refuses another school's class without writing anything", async () => {
+      await generate([class6.classId]);
+      const other = await createResultsSchool();
+      const foreign = await createSubjectClass(other.school.id, 'Class 6', { maths: 'Mathematics' });
+      const plansBefore = (await planRows()).map((plan) => plan.id).sort();
+      for (const classIds of [[class6.classId, foreign.classId], [foreign.classId]])
+        await expect(update(classIds)).rejects.toMatchObject({
+          code: 'BAD_REQUEST',
+          message: 'Every selected class must be a class of this school.',
+        });
+      expect(await participants()).toEqual([class6.classId]);
+      expect((await planRows()).map((plan) => plan.id).sort()).toEqual(plansBefore);
+      expect(await db.select().from(examClassTable).where(eq(examClassTable.classId, foreign.classId))).toEqual([]);
+      expect(await db.select().from(examPlanTable).where(eq(examPlanTable.classId, foreign.classId))).toEqual([]);
+    });
+
     it("refuses removing a class whose students have saved attendance, activities or remarks", async () => {
       await generate([class6.classId, class7.classId]);
       const refusal = {
@@ -482,6 +498,31 @@ describe('exam class participation', () => {
         "Class 7 takes part in an examination. Remove it from that examination's classes (examination Settings, Classes taking part) before deleting it.",
     });
     expect(await db.select({ id: classTable.id }).from(classTable).where(eq(classTable.id, class7.classId))).toHaveLength(1);
+  });
+
+  it('does not list an examination with plans in the Cadet Portal for a class that takes part without plans', async () => {
+    await generate([class6.classId, class7.classId]);
+    // Class 7 keeps taking part after its plans are deleted one by one (as a
+    // class recorded by the 0076 backfill from a timetable column does).
+    for (const plan of (await planRows()).filter((row) => row.classId === class7.classId))
+      await principal.school.deleteExamPlan({ schoolId: scope.schoolId, sessionId: scope.sessionId, classId: class7.classId, examPlanId: plan.id });
+    expect(await participants()).toEqual([class6.classId, class7.classId].sort());
+    const ravi = await cadetClient(login7);
+    expect((await ravi.listExams({})).items.map((exam) => exam.examSlug)).not.toContain('term');
+    const asha = await cadetClient(login6);
+    expect((await asha.listExams({})).items.map((exam) => exam.examSlug)).toContain('term');
+  });
+
+  it('lists an examination not planned yet for every class, and one without plans only for the classes taking part', async () => {
+    const ravi = await cadetClient(login7);
+    expect((await ravi.listExams({})).items.map((exam) => exam.examSlug)).toContain('term');
+    // Class 6 takes part without plans; no class has plans yet.
+    const plan = await principal.school.createExamPlan({ ...scope, classId: class6.classId, subjectSlug: 'maths' });
+    await principal.school.deleteExamPlan({ schoolId: scope.schoolId, sessionId: scope.sessionId, classId: class6.classId, examPlanId: plan.id });
+    expect(await participants()).toEqual([class6.classId]);
+    expect((await ravi.listExams({})).items.map((exam) => exam.examSlug)).not.toContain('term');
+    const asha = await cadetClient(login6);
+    expect((await asha.listExams({})).items.map((exam) => exam.examSlug)).toContain('term');
   });
 
   it('removes the class selection of an exam dropped through a session configuration replacement', async () => {
