@@ -8,6 +8,7 @@ import {
   applyModeFilter,
   mergeModeSelection,
   modeFilterSchema,
+  modeSelectionSchema,
   paperModeOptions,
   visibleModeSelection,
   type PaperModeOption,
@@ -35,6 +36,13 @@ type FilteredClassesProps = {
  * valid change to `onStoredModesChange` through the form's listener, so the
  * caller's store stays the source of truth across reloads without an effect.
  *
+ * The form validates with the unbounded `modeSelectionSchema`, never the
+ * storage bounds, so a person's change is always applied on screen. What is
+ * stored is checked against `modeFilterSchema` in the listener; the merged
+ * selection is already capped (`mergeModeSelection`), so only a mode slug
+ * longer than storage allows (never one the app creates) is left unstored,
+ * and the filter still applies for this visit.
+ *
  * Re-rendering with the selection just stored does not reset the form: the
  * new default equals the form's value, and TanStack Form keeps a touched
  * form's values anyway. A change made elsewhere (another tab) is picked up
@@ -44,7 +52,7 @@ type FilteredClassesProps = {
 function useModeFilterForm(storedModes: readonly string[], onStoredModesChange: (slugs: string[]) => void) {
   return useForm({
     defaultValues: { modes: [...storedModes] },
-    validators: { onChange: z.object({ modes: modeFilterSchema }) },
+    validators: { onChange: z.object({ modes: modeSelectionSchema }) },
     listeners: {
       onChange: ({ formApi }) => {
         const parsed = modeFilterSchema.safeParse(formApi.state.values.modes);
@@ -58,7 +66,7 @@ function useModeFilterForm(storedModes: readonly string[], onStoredModesChange: 
  * An examination's classes with the Question paper tab's mode filter above
  * them. The filter works on the loaded rows only (no request). It shows the
  * stored slugs this examination has (`visibleModeSelection`); a change keeps
- * the stored slugs of other examinations (`mergeModeSelection`). The filter
+ * the most recent stored slugs of other examinations (`mergeModeSelection`). The filter
  * is left out when the examination has no modes to choose from.
  */
 export function QuestionPaperFilteredClasses({

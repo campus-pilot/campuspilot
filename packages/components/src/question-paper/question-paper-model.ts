@@ -233,10 +233,26 @@ export type PaperListClass = {
 };
 
 /**
- * The mode filter's value as it is stored and validated: mode slugs (never
- * names), bounded so a tampered stored entry cannot grow without limit.
+ * The most mode slugs a stored mode filter keeps. `mergeModeSelection` never
+ * returns more, so every selection a person makes can be stored.
  */
-export const modeFilterSchema = z.array(z.string().min(1).max(100)).max(100);
+export const MODE_FILTER_MAX_SLUGS = 100;
+
+/**
+ * The mode filter's value as it is stored: mode slugs (never names),
+ * bounded so a tampered stored entry cannot grow without limit. Only the
+ * storage parse and write use it; the form validates with
+ * `modeSelectionSchema`, which has no bounds, so a person's change is never
+ * rejected on screen.
+ */
+export const modeFilterSchema = z.array(z.string().min(1).max(100)).max(MODE_FILTER_MAX_SLUGS);
+
+/**
+ * The mode filter form's value: the slugs of the selected modes. It is not
+ * bounded: the choices come from the examination's own modes, and what is
+ * stored is bounded by `mergeModeSelection` and `modeFilterSchema`.
+ */
+export const modeSelectionSchema = z.array(z.string().min(1));
 
 /** One choice of the mode filter: the slug is what is stored, the name what is shown. */
 export type PaperModeOption = { slug: string; name: string };
@@ -275,9 +291,18 @@ export function visibleModeSelection(stored: readonly string[], options: readonl
 
 /**
  * The selection to store after the person changed what the filter shows:
- * the stored slugs this examination does not have (kept untouched, in their
- * order) followed by the new visible choice. Clearing the filter therefore
- * clears only this examination's modes.
+ * the new visible choice first, then the stored slugs this examination does
+ * not have, at most `MODE_FILTER_MAX_SLUGS` in all. Clearing the filter
+ * therefore clears only this examination's modes.
+ *
+ * The filter is kept per school, and a school's examinations (across
+ * sessions) need not share their modes, so slugs of other examinations are
+ * kept rather than dropped: a choice made on one examination still applies
+ * on the next one that has the mode. Keeping them all would let the entry
+ * grow past what storage accepts, so the oldest are dropped instead. Each
+ * change puts the current examination's choice first, so the stored order is
+ * most recently chosen first and the cap drops the slugs chosen longest ago,
+ * never the choice just made.
  */
 export function mergeModeSelection(
   stored: readonly string[],
@@ -285,9 +310,9 @@ export function mergeModeSelection(
   nextVisible: readonly string[],
 ): string[] {
   const known = new Set(options.map((option) => option.slug));
+  const next = new Set(nextVisible.filter((slug) => known.has(slug)));
   const kept = stored.filter((slug) => !known.has(slug));
-  const next = nextVisible.filter((slug) => known.has(slug));
-  return [...kept, ...new Set(next)];
+  return [...new Set([...next, ...kept])].slice(0, MODE_FILTER_MAX_SLUGS);
 }
 
 /**

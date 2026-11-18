@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest';
 import {
   applyModeFilter,
   cellStatus,
+  MODE_FILTER_MAX_SLUGS,
   mergeModeSelection,
+  modeFilterSchema,
+  modeSelectionSchema,
   openClassOf,
   paperClassSummary,
   paperClassSummaryLabel,
@@ -184,12 +187,32 @@ describe('mode filter', () => {
     expect(visibleModeSelection(['project'], options)).toEqual([]);
   });
 
-  it('keeps stored slugs of other examinations when the visible choice changes or is cleared', () => {
+  it('keeps stored slugs of other examinations, after the new choice, when the visible choice changes or is cleared', () => {
     const options = paperModeOptions(classes);
-    expect(mergeModeSelection(['project', 'written'], options, ['oral', 'oral'])).toEqual(['project', 'oral']);
+    expect(mergeModeSelection(['project', 'written'], options, ['oral', 'oral'])).toEqual(['oral', 'project']);
     expect(mergeModeSelection(['project', 'written'], options, [])).toEqual(['project']);
     // A choice that is not an option of this examination is not stored.
     expect(mergeModeSelection([], options, ['nonsense', 'theory'])).toEqual(['theory']);
+  });
+
+  it('never keeps more slugs than storage accepts, dropping the ones chosen longest ago', () => {
+    const options = paperModeOptions(classes);
+    const others = Array.from({ length: MODE_FILTER_MAX_SLUGS }, (_, index) => `other-${index}`);
+    const merged = mergeModeSelection(others, options, ['written', 'oral']);
+    expect(merged).toHaveLength(MODE_FILTER_MAX_SLUGS);
+    // The choice just made is kept whole; the oldest stored slugs (last in the entry) go.
+    expect(merged.slice(0, 3)).toEqual(['written', 'oral', 'other-0']);
+    expect(merged).not.toContain(`other-${MODE_FILTER_MAX_SLUGS - 1}`);
+    expect(merged).not.toContain(`other-${MODE_FILTER_MAX_SLUGS - 2}`);
+    expect(modeFilterSchema.safeParse(merged).success).toBe(true);
+    // An entry already over the limit (written before the cap) is brought back within it.
+    expect(mergeModeSelection([...others, 'extra'], options, [])).toHaveLength(MODE_FILTER_MAX_SLUGS);
+  });
+
+  it('validates the form without the storage bounds, so a change is never rejected on screen', () => {
+    const many = Array.from({ length: MODE_FILTER_MAX_SLUGS + 1 }, (_, index) => `mode-${index}`);
+    expect(modeSelectionSchema.safeParse(many).success).toBe(true);
+    expect(modeFilterSchema.safeParse(many).success).toBe(false);
   });
 
   it('shows every row for an empty selection', () => {

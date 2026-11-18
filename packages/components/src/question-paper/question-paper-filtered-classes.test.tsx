@@ -80,7 +80,20 @@ describe('QuestionPaperFilteredClasses', () => {
     expect(screen.queryByRole('button', { name: /Remove filter/ })).toBeNull();
     openModeFilter();
     pickMode('Written');
-    expect(onStoredModesChange).toHaveBeenLastCalledWith(['practical', 'written']);
+    expect(onStoredModesChange).toHaveBeenLastCalledWith(['written', 'practical']);
+  });
+
+  it('applies and stores a change even when the stored entry is full of other examinations\' modes', () => {
+    const onStoredModesChange = vi.fn();
+    const others = Array.from({ length: 100 }, (_, index) => `other-${index}`);
+    renderFiltered({ storedModes: others, onStoredModesChange });
+    openModeFilter();
+    pickMode('Written');
+    expect(shownModes()).toEqual(['/p/c8/english/written']);
+    expect(screen.queryByRole('alert')).toBeNull();
+    const stored = onStoredModesChange.mock.lastCall?.[0] as string[];
+    expect(stored).toHaveLength(100);
+    expect(stored[0]).toBe('written');
   });
 
   it('says so when the filter hides every paper of the open class', () => {
