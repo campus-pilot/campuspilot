@@ -1,5 +1,6 @@
 import {
   examNameKey,
+  examNameSchema,
   examSlugSchema,
   findExamNameClash,
   findIntroducedExamNameClashes,
@@ -320,6 +321,19 @@ describe('new exam order and slug rules', () => {
       'Exam slug is required',
     ]);
   });
+
+  it('refuses the slugs a plain object already answers for, which record parsing would drop', () => {
+    for (const slug of ['__proto__', 'constructor', 'prototype', ' __proto__ ']) {
+      const result = examSlugSchema.safeParse(slug);
+      expect(result.success).toBe(false);
+      expect(result.error?.issues.map((issue) => issue.message)).toEqual([
+        'This slug is reserved. Choose another slug.',
+      ]);
+    }
+    // Only the exact names are reserved.
+    for (const slug of ['proto', '_proto_', 'constructor_1', 'prototypes'])
+      expect(examSlugSchema.parse(slug)).toBe(slug);
+  });
 });
 
 describe('isExamSlugTakenError', () => {
@@ -347,12 +361,35 @@ describe('isExamSlugTakenError', () => {
 });
 
 describe('exam name rule', () => {
-  it('compares names trimmed and ignoring case, keeping inner whitespace', () => {
+  it('compares names trimmed and ignoring case, with whitespace runs collapsed', () => {
     expect(examNameKey('  Unit Test 1 ')).toBe('unit test 1');
     expect(examNameKey('UNIT TEST 1')).toBe(examNameKey(' unit test 1 '));
     // Unicode spaces are trimmed too.
     expect(examNameKey('\u00a0Final\u2003')).toBe('final');
-    expect(examNameKey('Unit  Test')).not.toBe(examNameKey('Unit Test'));
+    // Inner runs of any whitespace are one space.
+    expect(examNameKey('Unit  Test')).toBe(examNameKey('Unit Test'));
+    expect(examNameKey('Unit\t\n Test')).toBe('unit test');
+    expect(examNameKey('Unit\u00a0\u3000Test')).toBe('unit test');
+    // Removing a space is still another name.
+    expect(examNameKey('UnitTest')).not.toBe(examNameKey('Unit Test'));
+  });
+
+  it('ignores invisible format characters', () => {
+    for (const invisible of ['\u200b', '\u200c', '\u200d', '\u2060', '\ufeff', '\u00ad', '\u202e'])
+      expect(examNameKey(`Fi${invisible}nal`)).toBe('final');
+    expect(examNameKey('\u200bFinal\u200b')).toBe('final');
+    // A format character between spaces leaves one space.
+    expect(examNameKey('Unit \u200b Test')).toBe('unit test');
+    expect(examNameKey('\u200b\u200d \ufeff')).toBe('');
+  });
+
+  it('compares Unicode compatibility forms as the same name', () => {
+    // Full-width letters and digits.
+    expect(examNameKey('\uff26\uff49\uff4e\uff41\uff4c \uff11')).toBe('final 1');
+    // The fi ligature.
+    expect(examNameKey('\ufb01nal')).toBe('final');
+    // A superscript digit is its digit.
+    expect(examNameKey('Unit Test \u00b9')).toBe('unit test 1');
   });
 
   it('folds case without depending on the runtime locale, and composes Unicode first', () => {
@@ -418,6 +455,37 @@ describe('exam name rule', () => {
     expect(
       findIntroducedExamNameClashes({}, { a: { name: 'Final' }, b: { name: 'FINAL' } }),
     ).toEqual([['a', 'b']]);
+  });
+});
+
+describe('exam name schema', () => {
+  it('trims a name and keeps its case and inner spacing as given', () => {
+    expect(examNameSchema.parse('  Unit  Test 1 ')).toBe('Unit  Test 1');
+  });
+
+  it('refuses an empty name once, as required', () => {
+    for (const name of ['', '   ']) {
+      const result = examNameSchema.safeParse(name);
+      expect(result.error?.issues.map((issue) => issue.message)).toEqual([
+        'Exam name is required',
+      ]);
+    }
+  });
+
+  it('refuses a name made only of invisible characters', () => {
+    for (const name of ['\u200b', ' \u200b\u200d ', '\ufeff\u2060']) {
+      const result = examNameSchema.safeParse(name);
+      expect(result.error?.issues.map((issue) => issue.message)).toEqual([
+        'Exam name must contain visible characters',
+      ]);
+    }
+  });
+
+  it('accepts up to 200 characters', () => {
+    expect(examNameSchema.safeParse('a'.repeat(200)).success).toBe(true);
+    expect(
+      examNameSchema.safeParse('a'.repeat(201)).error?.issues.map((issue) => issue.message),
+    ).toEqual(['Exam name must be 200 characters or fewer']);
   });
 });
 

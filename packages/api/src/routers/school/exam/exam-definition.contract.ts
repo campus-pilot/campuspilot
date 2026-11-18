@@ -20,7 +20,8 @@ export {
  * unique violations, serialization failures and deadlocks. Clients tell a
  * taken slug from those by this reason, never by the code or the message.
  *
- * Exam names are unique within a session (compared by `examNameKey`: trimmed,
+ * Exam names are unique within a session (compared by `examNameKey`: NFKC,
+ * invisible format characters removed, whitespace runs collapsed, trimmed,
  * ignoring case). `createExam`, a rename through `updateExam`, and a session
  * configuration save (`createSession`, `updateSession`) that introduces a
  * clash are refused with CONFLICT carrying `data.reason: 'EXAM_NAME_TAKEN'`,

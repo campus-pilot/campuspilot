@@ -22,6 +22,21 @@ export const examDefinitionSchema = z
 export const EXAM_SLUG_PATTERN = /^[a-z0-9_]*$/;
 
 /**
+ * Slugs a new exam may not take although they match `EXAM_SLUG_PATTERN`:
+ * names of `Object.prototype` machinery. `examConfig` is a plain object keyed
+ * by slug, and Zod's record parsing skips a `__proto__` key, so an exam with
+ * that slug would be written to the database and then vanish from every read
+ * (a stored ghost exam whose plans and results could never be reached).
+ * `constructor` and `prototype` are refused with it, so no slug can collide
+ * with what a plain object already answers for those keys.
+ */
+export const RESERVED_EXAM_SLUGS: readonly string[] = [
+  '__proto__',
+  'constructor',
+  'prototype',
+];
+
+/**
  * The rule for a new exam's slug, shared by the session settings editor, the
  * Examinations list's Create examination dialog and `school.createExam`.
  * Stored configurations are not re-validated against it: `examConfigSchema`
@@ -35,6 +50,10 @@ export const examSlugSchema = z
   .regex(
     EXAM_SLUG_PATTERN,
     'Slug can only contain lowercase letters, numbers, and underscores',
+  )
+  .refine(
+    (slug) => !RESERVED_EXAM_SLUGS.includes(slug),
+    'This slug is reserved. Choose another slug.',
   );
 
 /**
@@ -58,29 +77,77 @@ export function nextExamOrder(
 
 /**
  * The form of an exam name that decides whether two exams of a session share a
- * name: exam names are unique within a session, compared trimmed and ignoring
- * case. The name is first put in Unicode NFC, so a precomposed letter and the
- * same letter written with a combining mark (`é` and `e` + U+0301) compare
- * equal; then surrounding whitespace is removed (`String.prototype.trim`,
- * which includes Unicode spaces such as U+00A0); then it is lowercased with
- * the fixed `en` locale, so the result does not depend on the runtime's locale
- * (a Turkish default locale would otherwise lowercase `I` to dotless `ı`).
- * Whitespace inside the name is kept as typed: `Unit  Test` and `Unit Test`
- * are different names. Used by the browser and the server alike, so the
- * dialogs and the procedures apply one rule. The stored name keeps the case
- * and inner spacing the user gave it; this key is only compared, never stored.
+ * name: exam names are unique within a session, and two names are the same
+ * name when this key is equal. Built in this order:
+ *
+ * 1. Unicode NFKC normalisation, so a precomposed letter and the same letter
+ *    written with a combining mark (`é` and `e` + U+0301) are equal, and so
+ *    are compatibility forms such as full-width letters (`Ｆｉｎａｌ`), ligatures
+ *    (`ﬁ`) and the ideographic space.
+ * 2. Every format character (`\p{Cf}`: zero-width space, zero-width joiner and
+ *    non-joiner, word joiner, byte-order mark, bidirectional controls, soft
+ *    hyphen) is removed. They are invisible, so a name differing only by them
+ *    looks identical. This also ignores a joiner that changes how an Indic or
+ *    Arabic-script name is drawn; such names compare equal, which is the safe
+ *    side for a uniqueness rule.
+ * 3. Every run of whitespace (`\s`, which includes Unicode spaces such as
+ *    U+00A0 and line breaks) becomes one space: `Unit  Test` and `Unit Test`
+ *    are the same name.
+ * 4. Surrounding whitespace is removed.
+ * 5. Lowercasing with the fixed `en` locale, so the result does not depend on
+ *    the runtime's locale (a Turkish default locale would otherwise lowercase
+ *    `I` to dotless `ı`).
+ *
+ * A name whose key is empty (only whitespace and format characters) is no
+ * name at all and is refused where exams are written (`examNameSchema`).
+ * Used by the browser and the server alike, so the dialogs and the procedures
+ * apply one rule. The stored name keeps the case and spacing the user gave it
+ * (trimmed); this key is only compared, never stored.
  */
 export function examNameKey(name: string): string {
-  return name.normalize('NFC').trim().toLocaleLowerCase('en');
+  return name
+    .normalize('NFKC')
+    .replace(/\p{Cf}/gu, '')
+    .replace(/\s+/gu, ' ')
+    .trim()
+    .toLocaleLowerCase('en');
 }
+
+/** The longest exam name a new or renamed exam may have, in UTF-16 code units. */
+export const EXAM_NAME_MAX_LENGTH = 200;
+
+/**
+ * The rule for the name of a new or renamed exam, shared by `school.createExam`,
+ * `school.updateExam`, the Examinations list's Create examination dialog and
+ * the session settings Add / Edit examination dialog. The name is trimmed,
+ * required, at most `EXAM_NAME_MAX_LENGTH` characters, and must have a
+ * non-empty `examNameKey`: a name made only of invisible format characters
+ * (for example a lone zero-width space, which `trim` keeps) is refused. An
+ * empty name is reported once, as required.
+ *
+ * Stored names are not re-validated against it: `examDefinitionSchema` also
+ * parses stored configurations and keeps accepting any non-empty name.
+ */
+export const examNameSchema = z
+  .string()
+  .trim()
+  .min(1, 'Exam name is required')
+  .max(
+    EXAM_NAME_MAX_LENGTH,
+    `Exam name must be ${EXAM_NAME_MAX_LENGTH} characters or fewer`,
+  )
+  .refine(
+    (name) => name === '' || examNameKey(name) !== '',
+    'Exam name must contain visible characters',
+  );
 
 /**
  * The slug of an exam in `examConfig` whose name clashes with `name`
  * (`examNameKey`), or `undefined` when none does. `exceptSlug` is the exam
  * being renamed: it never clashes with itself, so keeping its name or changing
- * only its case or surrounding whitespace is not a clash. When several exams
- * clash (stored duplicates), the first by slug is returned, so the answer does
- * not depend on the map's insertion order.
+ * only what `examNameKey` ignores (case, spacing, invisible characters) is not
+ * a clash. When several exams clash (stored duplicates), the first by slug is
+ * returned, so the answer does not depend on the map's insertion order.
  */
 export function findExamNameClash(
   examConfig: Readonly<Record<string, { name: string }>>,
@@ -105,7 +172,9 @@ export function findExamNameClash(
  * saved before names had to be unique keeps saving its existing duplicates,
  * so saving unrelated settings never fails for it. Changing an exam's slug in
  * session settings makes it a new exam here, like any exam whose slug the
- * session did not have. Groups are ordered by their first slug.
+ * session did not have (and removes the exam under the old slug, which
+ * `school.updateSession` refuses while that slug has recorded data). Groups
+ * are ordered by their first slug.
  */
 export function findIntroducedExamNameClashes(
   stored: Readonly<Record<string, { name: string }>>,

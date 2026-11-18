@@ -24,8 +24,17 @@ function issues(
 }
 
 describe('session settings exam dialog rules', () => {
-  it('refuses adding an exam whose name another exam has, trimmed and ignoring case', () => {
-    for (const name of ['First Term', ' first term ', 'FIRST TERM'])
+  it('refuses adding an exam whose name another exam has, by the shared name key', () => {
+    for (const name of [
+      'First Term',
+      ' first term ',
+      'FIRST TERM',
+      // Inner whitespace runs, invisible format characters and compatibility forms.
+      'First   Term',
+      'First \u200bTerm',
+      'Fir\u200bst Te\u2060rm',
+      '\uff26irst \uff34erm',
+    ])
       expect(issues({ name, slug: 'term_1' }, { examConfig: draft })).toEqual({
         name: EXAM_DIALOG_NAME_TAKEN_MESSAGE,
       });
@@ -61,5 +70,27 @@ describe('session settings exam dialog rules', () => {
     expect(issues({ name: 'Final', slug: 'c' }, { examConfig: duplicates, editingSlug: 'a' })).toEqual({
       name: EXAM_DIALOG_NAME_TAKEN_MESSAGE,
     });
+  });
+});
+
+describe('session settings exam dialog limits', () => {
+  it('refuses a name longer than the createExam limit and one made only of invisible characters', () => {
+    expect(issues({ name: 'a'.repeat(200), slug: 'long' }, { examConfig: {} })).toEqual({});
+    expect(issues({ name: 'a'.repeat(201), slug: 'long' }, { examConfig: {} })).toEqual({
+      name: 'Exam name must be 200 characters or fewer',
+    });
+    expect(issues({ name: '\u200b\u200d', slug: 'blank' }, { examConfig: {} })).toEqual({
+      name: 'Exam name must contain visible characters',
+    });
+    expect(issues({ name: '   ', slug: 'blank' }, { examConfig: {} })).toEqual({
+      name: 'Exam name is required',
+    });
+  });
+
+  it('refuses the reserved slugs a plain object already answers for', () => {
+    for (const slug of ['__proto__', 'constructor', 'prototype'])
+      expect(issues({ name: 'Reserved', slug }, { examConfig: {} })).toEqual({
+        slug: 'This slug is reserved. Choose another slug.',
+      });
   });
 });

@@ -10,7 +10,8 @@ action (`exam-create.tsx`; navbar and empty state) adds one to the session's
 settings through `school.createExam`: a name, and a slug that follows the name with
 the settings rule until the user types their own (`exam-create-model.ts`). The server
 lists it last and refuses a taken slug or a taken name (exam names are unique in a
-session, compared trimmed and ignoring case) with explicit reasons
+session, compared ignoring case, spacing differences, invisible characters and
+Unicode compatibility forms, `examNameKey`) with explicit reasons
 (`isExamSlugTakenError`, `isExamNameTakenError`), shown beside the slug or name
 field (`withServerRefusal`). Before any request the dialog checks both against the
 session's exams it already holds (the cached `getSession` read that gates the

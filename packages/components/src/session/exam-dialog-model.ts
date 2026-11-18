@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   examNameKey,
+  examNameSchema,
   examSlugSchema,
   findExamNameClash,
 } from '@campuspilot/db/schema/jsonb/session-config';
@@ -18,17 +19,21 @@ export const EXAM_DIALOG_NAME_TAKEN_MESSAGE =
  * against `examConfig`, the settings draft the dialog edits (keyed by slug).
  * `editingSlug` is the exam being edited, or undefined when adding one.
  *
- * The slug rule is shared with the Examinations list and `school.createExam`
- * (`examSlugSchema`); a slug another exam has is refused. Exam names are
- * unique within a session, compared trimmed and ignoring case
- * (`examNameKey`), and the dialog applies the rule the settings save
- * (`school.updateSession`) enforces: only a clash the edit introduces is
- * refused. An exam kept under its slug with the same name (changing only case
- * or surrounding whitespace) is never refused, so an exam stored before names
- * had to be unique can still be edited while a duplicate of it exists. A
- * changed slug makes it a new exam for the server, so its name is checked
- * then too. The server stays the authority: it compares with the stored
- * configuration, not this draft.
+ * The slug and name rules are shared with the Examinations list and
+ * `school.createExam` (`examSlugSchema`, `examNameSchema`: a name is required,
+ * at most 200 characters and not only invisible characters); a slug another
+ * exam has is refused. Exam names are unique within a session, compared by
+ * `examNameKey` (ignoring case, spacing differences, invisible format
+ * characters and Unicode compatibility forms), and the dialog applies the rule
+ * the settings save (`school.updateSession`) enforces: only a clash the edit
+ * introduces is refused. An exam kept under its slug with the same name
+ * (changing only what `examNameKey` ignores) is never refused, so an exam
+ * stored before names had to be unique can still be edited while a duplicate
+ * of it exists. A changed slug makes it a new exam for the server, so its name
+ * is checked then too, and the save removes the old slug, which the server
+ * refuses while that slug has plans, results or other recorded data. The
+ * server stays the authority: it compares with the stored configuration, not
+ * this draft.
  */
 export function examDialogSchema({
   examConfig,
@@ -40,7 +45,7 @@ export function examDialogSchema({
   const editing = editingSlug === undefined ? undefined : examConfig[editingSlug];
   return z
     .object({
-      name: z.string().trim().min(1, 'Exam name is required'),
+      name: examNameSchema,
       slug: examSlugSchema,
     })
     .superRefine((values, context) => {

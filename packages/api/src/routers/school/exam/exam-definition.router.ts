@@ -168,7 +168,7 @@ export const schoolExamDefinitionRouter = {
     .route(
       route(
         'Create a session exam',
-        'Add an exam with a slug and a name unique in the session (names compared trimmed and ignoring case) to an active session, listed after the last exam unless an order is given. School exam administrators only.',
+        'Add an exam with a slug and a name unique in the session to an active session, listed after the last exam unless an order is given. Names are compared ignoring case, spacing differences, invisible characters and Unicode compatibility forms. The slugs __proto__, constructor and prototype are reserved. School exam administrators only.',
       ),
     )
     .meta({
@@ -191,7 +191,7 @@ export const schoolExamDefinitionRouter = {
               message: EXAM_SLUG_TAKEN_MESSAGE,
               data: { reason: EXAM_SLUG_TAKEN_REASON } satisfies ExamSlugTakenData,
             });
-          // Exam names are unique within the session (trimmed, ignoring case).
+          // Exam names are unique within the session (`examNameKey`).
           // The slug is checked first, so a request whose name derives a taken
           // slug keeps being refused as a taken slug.
           if (findExamNameClash(session.config.examConfig, input.name) !== undefined)
@@ -227,7 +227,7 @@ export const schoolExamDefinitionRouter = {
     .route(
       route(
         'Update a session exam',
-        'Edit the name and display order of an exam without changing its stable slug. A new name must not be used by another exam of the session (compared trimmed and ignoring case).',
+        'Edit the name and display order of an exam without changing its stable slug. A new name must not be used by another exam of the session (compared ignoring case, spacing differences, invisible characters and Unicode compatibility forms).',
       ),
     )
     .meta({
@@ -250,9 +250,10 @@ export const schoolExamDefinitionRouter = {
             'update',
           );
           // A new name must not clash with another exam of the session. Keeping
-          // the exam's own name, or changing only its case or surrounding
-          // whitespace, does not introduce a clash and is allowed, even when the
-          // session already stored a duplicate of it.
+          // the exam's own name, or changing only what `examNameKey` ignores
+          // (case, spacing, invisible characters), does not introduce a clash
+          // and is allowed, even when the session already stored a duplicate
+          // of it.
           if (
             input.name !== undefined &&
             examNameKey(input.name) !== examNameKey(existing.name) &&

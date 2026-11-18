@@ -15,7 +15,8 @@ export const EXAM_SLUG_TAKEN_MESSAGE =
 
 /**
  * Shown next to the name when another exam of the session has it, compared
- * with the shared rule (`examNameKey`: trimmed, ignoring case).
+ * with the shared rule (`examNameKey`: ignoring case, spacing differences,
+ * invisible characters and Unicode compatibility forms).
  */
 export const EXAM_NAME_TAKEN_MESSAGE =
   'An examination with this name already exists in this session.';

@@ -8,6 +8,7 @@ import {
 } from '@campuspilot/db/schema/jsonb/exam-config';
 import {
   examDefinitionSchema,
+  examNameSchema,
   examSlugSchema,
 } from '@campuspilot/db/schema/jsonb/session-config';
 import { EXAM_STUDENT_REMARK_MAX_LENGTH } from '@campuspilot/db/schema/exam';
@@ -36,7 +37,9 @@ export const examDtoSchema = examDefinitionSchema.extend({ slug: z.string() });
 /**
  * A new exam. The slug follows the session settings rule (`examSlugSchema`),
  * which is stricter than the slugs older configurations may hold, so it is
- * checked here rather than in `examScopeSchema`. Without `order` the exam is
+ * checked here rather than in `examScopeSchema`. The name follows the shared
+ * name rule (`examNameSchema`: required, at most 200 characters, not only
+ * invisible characters). Without `order` the exam is
  * listed last (`nextExamOrder`), decided under the session lock so two
  * concurrent creations never read the same configuration.
  */
@@ -44,7 +47,7 @@ export const createExamInputSchema = sessionScopeSchema.extend({
   examSlug: examSlugSchema.describe(
     'Stable exam slug: lowercase letters, numbers and underscores, unique in the session.',
   ),
-  name: z.string().trim().min(1, 'Exam name is required').max(200, 'Exam name must be 200 characters or fewer'),
+  name: examNameSchema,
   order: z
     .number()
     .int()
@@ -54,7 +57,8 @@ export const createExamInputSchema = sessionScopeSchema.extend({
 });
 export const updateExamInputSchema = examScopeSchema
   .extend({
-    name: z.string().trim().min(1).max(200).optional(),
+    /** A new name follows the shared name rule (`examNameSchema`). */
+    name: examNameSchema.optional(),
     order: z.number().int().positive().optional(),
   })
   .refine(

@@ -126,17 +126,34 @@ const loadedExams: SessionExams = {
   annual: { name: 'Annual Examination' },
 };
 
-test('a name another exam of the loaded session has is shown beside the name field, trimmed and ignoring case', () => {
-  for (const name of ['Unit Test 1', ' unit test 1 ', 'UNIT TEST 1'])
+test('a name another exam of the loaded session has is shown beside the name field, by the shared name key', () => {
+  for (const name of [
+    'Unit Test 1',
+    ' unit test 1 ',
+    'UNIT TEST 1',
+    // Whitespace runs, invisible format characters and compatibility forms.
+    'Unit  Test 1',
+    'Unit\u200b Test 1',
+    '\uff35nit Test 1',
+  ])
     assert.deepEqual(
       nameIssues({ name, slug: 'ut_one' }, loadedExams),
       [EXAM_NAME_TAKEN_MESSAGE],
     );
   assert.deepEqual(nameIssues({ name: 'Unit Test 2', slug: 'unit_test_2' }, loadedExams), []);
-  // Inner whitespace is part of the name.
-  assert.deepEqual(nameIssues({ name: 'Unit  Test 1', slug: 'ut_one' }, loadedExams), []);
+  // Removing a space makes another name.
+  assert.deepEqual(nameIssues({ name: 'UnitTest 1', slug: 'ut_one' }, loadedExams), []);
   // Without loaded session data only the server decides.
   assert.deepEqual(nameIssues({ name: 'Unit Test 1', slug: 'ut_one' }), []);
+});
+
+test('a name made only of invisible characters and a reserved slug are refused beside their fields', () => {
+  assert.deepEqual(nameIssues({ name: '\u200b\u200d', slug: 'blank' }), [
+    'Exam name must contain visible characters',
+  ]);
+  assert.deepEqual(slugIssues({ name: 'Proto', slug: '__proto__' }), [
+    'This slug is reserved. Choose another slug.',
+  ]);
 });
 
 test('a slug the loaded session has is shown beside the slug field', () => {
