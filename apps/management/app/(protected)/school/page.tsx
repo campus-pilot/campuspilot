@@ -32,8 +32,8 @@ function NoSchoolsEmptyState() {
               You are not part of a school yet
             </h1>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              Create your school below, or ask a school administrator to
-              invite you to theirs.
+              Create your own school, or ask a school administrator to invite
+              you to theirs.
             </p>
           </div>
           <div className="w-full max-w-md">
