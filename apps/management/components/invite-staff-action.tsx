@@ -64,9 +64,12 @@ function InviteStaffDialog({
   allowPhone,
   onOpenChange,
   onPasswordIssued,
+  defaultRoles,
 }: {
   schoolId: string;
   open: boolean;
+  /** Roles ticked when the dialog opens; the person can still change them. */
+  defaultRoles: Role[];
   /** Whether the caller may issue passwords, which inviting by phone does. */
   allowPhone: boolean;
   onOpenChange: (open: boolean) => void;
@@ -74,7 +77,7 @@ function InviteStaffDialog({
 }) {
   const queryClient = useQueryClient();
   const form = useForm({
-    defaultValues: { ...defaultInviteIdentifierValues(), roles: [] as Role[] },
+    defaultValues: { ...defaultInviteIdentifierValues(), roles: defaultRoles },
     validators: { onSubmit: inviteStaffFormSchema },
     onSubmit: async ({ value }) => {
       form.setErrorMap({});
@@ -230,7 +233,7 @@ function InviteStaffDialog({
  * states (the staff table, the class teacher picker) render the same entry
  * point and the same dialog.
  */
-export function InviteStaffAction({ schoolId }: { schoolId: string }) {
+export function InviteStaffAction({ schoolId, defaultRoles = [] }: { schoolId: string; defaultRoles?: Role[] }) {
   return (
     <RequirePermissions
       permissions={{
@@ -238,12 +241,12 @@ export function InviteStaffAction({ schoolId }: { schoolId: string }) {
         resource: { kind: 'school', schoolId },
       }}
     >
-      <InviteStaffButton schoolId={schoolId} />
+      <InviteStaffButton schoolId={schoolId} defaultRoles={defaultRoles} />
     </RequirePermissions>
   );
 }
 
-function InviteStaffButton({ schoolId }: { schoolId: string }) {
+function InviteStaffButton({ schoolId, defaultRoles }: { schoolId: string; defaultRoles: Role[] }) {
   const [isOpen, setIsOpen] = useState(false);
   const [issued, setIssued] = useState<IssuedStaffPasswordDetails | null>(null);
   const dialog = (allowPhone: boolean) => (
@@ -251,6 +254,7 @@ function InviteStaffButton({ schoolId }: { schoolId: string }) {
       schoolId={schoolId}
       open={isOpen}
       allowPhone={allowPhone}
+      defaultRoles={defaultRoles}
       onOpenChange={setIsOpen}
       onPasswordIssued={setIssued}
     />

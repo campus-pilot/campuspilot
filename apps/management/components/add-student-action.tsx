@@ -11,13 +11,11 @@ import { Label } from '@campuspilot/ui/components/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@campuspilot/ui/components/select';
 import { Combobox } from '@campuspilot/ui/components/combobox';
 import { Plus } from 'lucide-react';
-import Link from 'next/link';
 import { z } from 'zod';
 
 import { client, orpc } from '@/lib/orpc';
 import { FormErrors } from './form-errors';
-import { RequirePermissions } from './require-permissions';
-import { schoolHref } from './school-route';
+import { CreateAdmissionAction } from './create-admission-action';
 import { RequireFeature } from './require-feature';
 
 const admissionOptionSchema = z.object({ id: z.string().min(1), name: z.string(), admissionNo: z.string() });
@@ -32,7 +30,7 @@ const enrollmentSchema = z.object({ admission: admissionOptionSchema.nullable().
  */
 function AdmissionCombobox({ schoolId, sessionId, value, searchQuery, onValueChange, onSearchChange }: { schoolId: string; sessionId: string; value: AdmissionOption | null; searchQuery: string; onValueChange: (value: AdmissionOption | null) => void; onSearchChange: (value: string) => void }) {
   const admissionsQuery = useQuery(orpc.school.listAdmissions.queryOptions({ input: { schoolId, limit: 20, searchQuery: searchQuery.trim() || undefined, filters: { registered: true, unadmittedForSessionId: sessionId } } }));
-  return (
+  const combobox = (
     <Combobox
       items={admissionsQuery.data?.items ?? []}
       value={value}
@@ -48,27 +46,30 @@ function AdmissionCombobox({ schoolId, sessionId, value, searchQuery, onValueCha
       searchPlaceholder="Search eligible admissions…"
       clearLabel="Clear admission"
       showClear
-      emptyMessage={admissionsQuery.isPending ? 'Loading admissions…' : admissionsQuery.isError ? 'Unable to load admissions. Try again.' : searchQuery.trim() ? 'No eligible admissions found.' : <NoEligibleAdmissions schoolId={schoolId} />}
+      emptyMessage={admissionsQuery.isPending ? 'Loading admissions…' : admissionsQuery.isError ? 'Unable to load admissions. Try again.' : 'No eligible admissions found.'}
     />
   );
+  return admissionsQuery.data?.items.length === 0 && !searchQuery.trim() ? (
+    <>
+      {combobox}
+      <NoEligibleAdmissions schoolId={schoolId} />
+    </>
+  ) : combobox;
 }
 
 /**
  * Nothing to enroll and nothing searched: every registered admission is
  * already a student this session, or there are none. Staff who may create
- * admissions get a link to the Admission page, where New admission lives.
+ * admissions get New admission (its own gated dialog, opened over this one);
+ * a new admission is registered and refreshes the picker, so it can be
+ * chosen straight away.
  */
 function NoEligibleAdmissions({ schoolId }: { schoolId: string }) {
   return (
-    <span className="flex flex-col items-center gap-2">
-      <span>No eligible admissions found.</span>
-      <RequirePermissions permissions={[
-        { action: SCHOOL_ACTIONS.CREATE_ADMISSION, resource: { kind: 'school', schoolId } },
-        { action: SCHOOL_ACTIONS.LIST_CLASSES, resource: { kind: 'school', schoolId } },
-      ]}>
-        <Button asChild size="sm" variant="outline"><Link href={schoolHref(schoolId, '/admission')}>Create an admission</Link></Button>
-      </RequirePermissions>
-    </span>
+    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+      <span>No admission is waiting to be enrolled.</span>
+      <CreateAdmissionAction schoolId={schoolId} variant="outline" />
+    </div>
   );
 }
 
@@ -123,8 +124,9 @@ function PermittedAddStudentAction({ schoolId, sessionId, classId, variant = 'de
     { action: CLASS_ACTIONS.ADD_STUDENT, resource: { kind: 'class', schoolId, classId } },
     { action: SCHOOL_ACTIONS.LIST_ADMISSIONS, resource: { kind: 'school', schoolId } },
     { action: SCHOOL_ACTIONS.LIST_SECTIONS, resource: { kind: 'school', schoolId } },
+    { action: SCHOOL_ACTIONS.LIST_STUDENTS, resource: { kind: 'school', schoolId } },
   ] } }));
   const permissions = permissionQuery.data?.results;
-  if (!permissions || (!(permissions[0] || permissions[1])) || !permissions[2] || !permissions[3]) return null;
+  if (!permissions || (!(permissions[0] || permissions[1])) || !permissions[2] || !permissions[3] || !permissions[4]) return null;
   return <><Button type="button" size="sm" variant={variant} onClick={() => setOpen(true)}><Plus aria-hidden />Add student</Button>{open ? <EnrollmentDialog schoolId={schoolId} sessionId={sessionId} classId={classId} onClose={() => setOpen(false)} /> : null}</>;
 }

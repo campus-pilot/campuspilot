@@ -42,12 +42,16 @@ import { errorCode, errorMessage, examResultsHref, schoolPermission, type ExamSc
 /**
  * The classes are chosen when the plan is created, and the plan is created
  * from the examination's Results page (its "No plans yet" state), so a
- * settings page without a plan links there.
+ * settings page with no plan and no classes links there. Opening that page
+ * needs `READ_EXAM_PLANS`; creating the plan needs `CREATE_EXAM_PLAN`.
  */
 function CreateExamPlanLink({ scope }: { scope: ExamScope }) {
   return (
     <RequirePermissions
-      permissions={schoolPermission(scope.schoolId, SCHOOL_ACTIONS.CREATE_EXAM_PLAN)}
+      permissions={[
+        schoolPermission(scope.schoolId, SCHOOL_ACTIONS.CREATE_EXAM_PLAN),
+        schoolPermission(scope.schoolId, SCHOOL_ACTIONS.READ_EXAM_PLANS),
+      ]}
     >
       <Button asChild size="sm" variant="outline">
         <Link href={examResultsHref(scope)}>Create exam plan</Link>
@@ -95,7 +99,7 @@ export function ExamClassesSection({
             : 'No classes yet. Create the exam plan to choose them.'}
         </p>
       </div>
-      {active && overview.planCount === 0 && (
+      {active && overview.planCount === 0 && context.classes.length === 0 && (
         <CreateExamPlanLink scope={scope} />
       )}
       {editable && (

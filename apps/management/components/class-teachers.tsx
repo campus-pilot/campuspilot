@@ -123,7 +123,7 @@ function AddTeacherDialogContent({ classId, schoolId, onClose }: { classId: stri
                 <Label>Teacher</Label>
                 {candidatesQuery.isPending ? <Skeleton className="h-36 w-full" /> : null}
                 {candidatesQuery.data?.items.length === 0 ? <NoTeacherCandidates schoolId={schoolId} /> : null}
-                <RadioGroup value={field.state.value} onValueChange={field.handleChange} className="max-h-72 overflow-y-auto rounded-lg border p-2">
+                {candidatesQuery.data?.items.length ? <RadioGroup value={field.state.value} onValueChange={field.handleChange} className="max-h-72 overflow-y-auto rounded-lg border p-2">
                   {candidatesQuery.data?.items.map((member) => (
                     <Label key={member.userId} className="flex cursor-pointer items-center gap-3 rounded-md p-2 hover:bg-muted">
                       <RadioGroupItem value={member.userId} />
@@ -137,7 +137,7 @@ function AddTeacherDialogContent({ classId, schoolId, onClose }: { classId: stri
                       </span>
                     </Label>
                   ))}
-                </RadioGroup>
+                </RadioGroup> : null}
                 <FormErrors errors={field.state.meta.errors} />
               </div>
             )}
@@ -169,14 +169,15 @@ function AddTeacherDialogContent({ classId, schoolId, onClose }: { classId: stri
 }
 
 /**
- * The teacher picker has no one to offer. Inviting a teacher (the Staff
- * page's dialog) refreshes the member lists, so the new teacher appears here.
+ * The teacher picker has no one to offer. Invite staff (the Staff page's
+ * dialog) opens with the teacher role ticked; inviting refreshes the member
+ * lists, so a new teacher appears here.
  */
 function NoTeacherCandidates({ schoolId }: { schoolId: string }) {
   return (
     <div className="flex flex-col items-center gap-3 rounded-lg border p-4 text-center text-sm text-muted-foreground">
       <p>No unassigned teachers found.</p>
-      <InviteStaffAction schoolId={schoolId} />
+      <InviteStaffAction schoolId={schoolId} defaultRoles={['teacher']} />
     </div>
   );
 }

@@ -228,6 +228,18 @@ function SubjectDialog({
   );
 }
 
+/** Editing or deleting a subject saves the class configuration, so it needs that grant. */
+function SubjectRowActions({ schoolId, name, onEdit, onDelete }: { schoolId: string; name: string; onEdit: () => void; onDelete: () => void }) {
+  return (
+    <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.UPDATE_CLASS_CONFIGURATION, resource: { kind: 'school', schoolId } }}>
+      <div className="flex shrink-0 items-center gap-1 pr-2">
+        <Button type="button" variant="ghost" size="icon-sm" aria-label={`Edit ${name}`} onClick={onEdit}><Pencil aria-hidden /></Button>
+        <Button type="button" variant="ghost" size="icon-sm" aria-label={`Delete ${name}`} onClick={onDelete}><Trash2 aria-hidden /></Button>
+      </div>
+    </RequirePermissions>
+  );
+}
+
 /** Adding a subject saves the class configuration, so it needs that grant. */
 function AddSubjectButton({ schoolId, onAdd, variant = 'default' }: { schoolId: string; onAdd: () => void; variant?: 'default' | 'outline' }) {
   return (
@@ -288,10 +300,7 @@ export function ClassSubjects({ classId, schoolId }: { classId: string; schoolId
                     {subject.books.length} {subject.books.length === 1 ? 'book' : 'books'} · {Object.keys(subject.examModes).length} {Object.keys(subject.examModes).length === 1 ? 'exam mode' : 'exam modes'}
                   </span>
                 </AccordionTrigger>
-                <div className="flex shrink-0 items-center gap-1 pr-2">
-                  <Button type="button" variant="ghost" size="icon-sm" aria-label={`Edit ${subject.name}`} onClick={() => setEditingSlug(slug)}><Pencil aria-hidden /></Button>
-                  <Button type="button" variant="ghost" size="icon-sm" aria-label={`Delete ${subject.name}`} onClick={() => setDeleteSlug(slug)}><Trash2 aria-hidden /></Button>
-                </div>
+                <SubjectRowActions schoolId={schoolId} name={subject.name} onEdit={() => setEditingSlug(slug)} onDelete={() => setDeleteSlug(slug)} />
               </div>
               <AccordionContent className="flex flex-col gap-5 border-t pt-4">
                 <div className="flex flex-col gap-2">
