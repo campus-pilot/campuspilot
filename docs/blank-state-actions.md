@@ -54,6 +54,8 @@ conflicts).
 
 ## Session states (other branch)
 
+These were done in `fix/first-session-setup` (PR #79, merged), which offers Create a session on each of them.
+
 | Screen | File | Status |
 | --- | --- | --- |
 | School has no active session | `apps/management/components/school-selection.tsx` | handled in fix/first-session-setup |
