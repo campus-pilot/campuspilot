@@ -8,7 +8,8 @@ import { Button } from '@campuspilot/ui/components/button';
 import { AuthLoading } from '@/components/auth-loading';
 import { orpc } from '@/lib/orpc';
 import { schoolHref, schoolSessionHref } from './school-route';
-import { onboardingHref } from './school-onboarding/onboarding-route';
+import { onboardingHref, onboardingPermissions } from './school-onboarding/onboarding-route';
+import { RequirePermissions } from './require-permissions';
 import { CreateSessionButton } from './session/create-session-button';
 import { storeSchoolSessionId } from './session-selection';
 
@@ -138,15 +139,30 @@ export function SchoolEntryRedirect({ schoolId }: { schoolId: string }) {
  */
 /**
  * A school without an active session, where every workspace page waits for
- * one: says so and offers to create one. A session created while none is
- * active becomes active, and the refreshed session query then opens it.
+ * one. A guided setup that is neither finished nor set aside opens on its own
+ * for someone who may run it (docs/school-creation.md, "Guided setup");
+ * anyone else, and everyone once it is set aside or finished, is told the
+ * school has no session and offered to create one.
  */
 function NoActiveSession({ schoolId }: { schoolId: string }) {
   const onboarding = useQuery(orpc.school.getOnboarding.queryOptions({ input: { schoolId } }));
   if (onboarding.isPending) return <AuthLoading label="Opening your school…" />;
   const onboardingState = onboarding.data?.state;
-  // A guide not yet finished or set aside opens on its own; one set aside is offered beside Create a session.
-  if (onboardingState === 'pending') return <RouteAfterCommit href={onboardingHref(schoolId)} schoolId={schoolId} />;
+  const notice = <NoActiveSessionNotice schoolId={schoolId} offerGuide={onboardingState === 'skipped'} />;
+  if (onboardingState !== 'pending') return notice;
+  return (
+    <RequirePermissions permissions={onboardingPermissions(schoolId)} fallback={notice} pending={<AuthLoading label="Opening your school…" />}>
+      <RouteAfterCommit href={onboardingHref(schoolId)} schoolId={schoolId} />
+    </RequirePermissions>
+  );
+}
+
+/**
+ * Says the school has no active session and offers to create one, with the
+ * guided setup beside it while that is set aside. A session created while
+ * none is active becomes active, and the refreshed session query opens it.
+ */
+function NoActiveSessionNotice({ schoolId, offerGuide }: { schoolId: string; offerGuide: boolean }) {
   return (
     <main className="grid min-h-[50vh] place-items-center px-6">
       <section className="flex max-w-md flex-col items-center gap-4 text-center">
@@ -158,7 +174,7 @@ function NoActiveSession({ schoolId }: { schoolId: string }) {
           </p>
         </div>
         <div className="flex flex-wrap justify-center gap-2">
-          {onboardingState === 'skipped' ? (
+          {offerGuide ? (
             <Button asChild variant="outline">
               <Link href={onboardingHref(schoolId)}>Use the guided setup</Link>
             </Button>

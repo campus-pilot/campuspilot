@@ -1,4 +1,4 @@
-import { examNameKey, examNameSchema } from '@campuspilot/db/schema/jsonb/session-config';
+import { RESERVED_EXAM_SLUGS, examNameKey, examNameSchema } from '@campuspilot/db/schema/jsonb/session-config';
 import { z } from 'zod';
 
 /**
@@ -103,10 +103,11 @@ export function stagesOfClasses(classSlugs: readonly string[]): OnboardingStageK
  * Slugs for names, one per name and all different: the name reduced to
  * lowercase letters and digits joined by `separator`, or `fallback` and its
  * position when nothing is left (a name written only in Devanagari, for
- * example), with `_2`, `_3`… (or `-2`…) added to a slug already taken.
+ * example), with `_2`, `_3`… (or `-2`…) added to a slug already taken or
+ * in `reserved`.
  */
-function slugsFor(names: readonly string[], separator: '_' | '-', fallback: string): string[] {
-  const taken = new Set<string>();
+function slugsFor(names: readonly string[], separator: '_' | '-', fallback: string, reserved: readonly string[] = []): string[] {
+  const taken = new Set<string>(reserved);
   return names.map((name, index) => {
     const base =
       name
@@ -121,9 +122,14 @@ function slugsFor(names: readonly string[], separator: '_' | '-', fallback: stri
   });
 }
 
-/** Exam slugs for the guide's exam names, following the exam slug rule (`examSlugSchema`: underscores). */
+/**
+ * Exam slugs for the guide's exam names, following the exam slug rule
+ * (`examSlugSchema`): underscores, and never a reserved slug (an examination
+ * named "Constructor" gets `constructor_2`), since `createSession` stores
+ * configuration keys without that rule.
+ */
 export function onboardingExamSlugs(names: readonly string[]): string[] {
-  return slugsFor(names, '_', 'exam');
+  return slugsFor(names, '_', 'exam', RESERVED_EXAM_SLUGS);
 }
 
 /** Subject slugs for a stage's subject names, in the kebab case the class subject editor uses. */

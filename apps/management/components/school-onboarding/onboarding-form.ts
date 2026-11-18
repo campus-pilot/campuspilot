@@ -5,7 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from '@campuspilot/ui/lib/toast';
 import { client } from '@/lib/orpc';
 import { prepareSchoolLogo, uploadPreparedSchoolLogo } from '@/lib/school-image';
-import { onboardingDefaults, onboardingFormSchema, onboardingInput, type OnboardingValues } from './onboarding-model';
+import { isOnboardingPaperDesign, onboardingDefaults, onboardingFormSchema, onboardingInput, type OnboardingValues } from './onboarding-model';
 
 /**
  * Uploads the logo the person chose for the paper header. The logo is
@@ -22,14 +22,18 @@ async function uploadOptionalLogo(schoolId: string, logo: File | null) {
 }
 
 /**
- * Selects the chosen question paper design unless it is already the school's
- * (a retried setup selected it the first time), through the marketplace's own
- * procedure and its revision check.
+ * Selects the chosen question paper design through the marketplace's own
+ * procedure and its revision check. Nothing changes when it is already the
+ * school's (a retried setup selected it the first time). A template the
+ * school chose itself, one that is neither of the guide's designs (an edited
+ * or another marketplace design, picked after Set up later), is kept: the
+ * guide never replaces a header the owner made.
  */
 async function selectPaperDesign(schoolId: string, design: OnboardingValues['design']) {
   const scope = { schoolId, documentType: 'question_paper' as const };
   const active = await client.school.getActiveDocumentTemplate(scope);
   if (active?.artifact.marketplaceSlug === design) return;
+  if (active && !isOnboardingPaperDesign(active.artifact.marketplaceSlug)) return;
   await client.school.selectMarketplaceTemplate({ ...scope, slug: design, expectedRevisionId: active?.revisionId ?? null });
 }
 

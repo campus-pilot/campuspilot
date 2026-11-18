@@ -45,13 +45,16 @@ import {
  * guided setup calls it too, after the same check): it records the chosen
  * classes as taking part, creates a plan for each of their subjects and opens
  * the examination's lifecycle as `ready`. A stale `configurationVersion` or
- * existing plans are refused.
+ * existing plans are refused. A caller that already prepared the plan under
+ * its locks in this transaction passes it as `prepared`, so it is not read
+ * twice.
  */
 export async function generateExamPlanRecords(
   tx: DatabaseTransaction,
   input: z.infer<typeof dto.generateExamPlanInputSchema>,
+  prepared?: Awaited<ReturnType<typeof prepareExamPlan>>,
 ) {
-  const prepared = await prepareExamPlan(tx, input, true);
+  prepared ??= await prepareExamPlan(tx, input, true);
   const plans = assertCreatableExamPlan(
     prepared,
     input.configurationVersion,

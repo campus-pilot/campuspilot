@@ -3,24 +3,15 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import { Button } from '@campuspilot/ui/components/button';
 import { orpc } from '@/lib/orpc';
 import { AuthLoading } from '../auth-loading';
-import { schoolPermission } from '../exam/exam-model';
 import { RequirePermissions } from '../require-permissions';
+import { onboardingPermissions } from './onboarding-route';
 import { SchoolPageNavbar } from '../school-page-navbar';
 import { schoolHref } from '../school-route';
 import { OnboardingFirstPaper } from './onboarding-first-paper';
 import { OnboardingWizard } from './onboarding-wizard';
-
-/** The permissions `school.completeOnboarding` checks, one per step it takes. */
-const ONBOARDING_ACTIONS = [
-  SCHOOL_ACTIONS.CREATE_SESSION,
-  SCHOOL_ACTIONS.CREATE_EXAM,
-  SCHOOL_ACTIONS.CREATE_CLASS,
-  SCHOOL_ACTIONS.CREATE_EXAM_PLAN,
-] as const;
 
 /** A short message with the way into the school. */
 function OnboardingNotice({ schoolId, title, children }: { schoolId: string; title: string; children: ReactNode }) {
@@ -59,7 +50,7 @@ function OnboardingBody({ schoolId }: { schoolId: string }) {
     );
   return (
     <RequirePermissions
-      permissions={ONBOARDING_ACTIONS.map((action) => schoolPermission(schoolId, action))}
+      permissions={onboardingPermissions(schoolId)}
       fallback={
         <OnboardingNotice schoolId={schoolId} title="Your school is being set up">
           The school&apos;s owner sets up its session, classes and examinations.

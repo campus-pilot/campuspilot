@@ -5,7 +5,9 @@ import {
   ONBOARDING_STAGES,
   academicSessionStartYear,
   completeSchoolOnboardingInputSchema,
+  onboardingSessionStartYearSchema,
   stagesOfClasses,
+  subjectNameKey,
   type CompleteSchoolOnboardingInput,
   type OnboardingStageKey,
 } from '@campuspilot/api/school-onboarding/school-onboarding.contract';
@@ -17,6 +19,11 @@ export const ONBOARDING_PAPER_DESIGNS = [
   { slug: 'question-paper-compact', label: 'Compact', description: 'Logo on the left, more room for questions' },
 ] as const;
 export type OnboardingPaperDesign = (typeof ONBOARDING_PAPER_DESIGNS)[number]['slug'];
+
+/** Whether a template's marketplace slug (null for one the school wrote) is one of the guide's designs. */
+export function isOnboardingPaperDesign(slug: string | null): slug is OnboardingPaperDesign {
+  return ONBOARDING_PAPER_DESIGNS.some((design) => design.slug === slug);
+}
 
 /** The guide's screens before it saves, in order. */
 export const ONBOARDING_STEPS = ['session', 'exams', 'classes', 'subjects', 'header'] as const;
@@ -60,6 +67,17 @@ export function examNameAt(index: number): string {
 
 /** Whether another examination may be added. */
 export const canAddExam = (count: number) => count < ONBOARDING_MAX_EXAMS;
+
+/** Whether the session may start in this year (the procedure's rule), so the arrows stop at its bounds. */
+export function isSessionYearAllowed(year: number): boolean {
+  return onboardingSessionStartYearSchema.safeParse(year).success;
+}
+
+/** Whether a stage already has a subject of this name, compared as the procedure compares them. */
+export function hasSubject(subjects: readonly string[], name: string): boolean {
+  const key = subjectNameKey(name);
+  return subjects.some((subject) => subjectNameKey(subject) === key);
+}
 
 /** The academic session as people write it: 2026–27. */
 export function sessionLabel(startYear: number): string {

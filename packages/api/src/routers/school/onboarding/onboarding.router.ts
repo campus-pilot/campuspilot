@@ -78,7 +78,8 @@ export const schoolOnboardingRouter = {
         'Set up later: the guide stops opening on its own and the school is set up from the app’s screens. It may still be finished while the school has no session and no class.',
       tags: ['School'],
     })
-    .meta({ mcp: { exposure: 'hidden', access: 'write', destructive: false, module: 'schools' } })
+    // It changes the state of the existing guide row.
+    .meta({ mcp: { exposure: 'hidden', access: 'write', destructive: true, module: 'schools' } })
     .input(schoolIdInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.CREATE_SESSION))
     .output(z.object({ ok: z.literal(true) }))

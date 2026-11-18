@@ -153,8 +153,13 @@ export async function completeSchoolOnboarding(
   let planCount = 0;
   for (const examSlug of examSlugs) {
     const scope = { schoolId, sessionId: session.id, examSlug };
-    const { preview } = await prepareExamPlan(transaction, scope);
-    const generated = await generateExamPlanRecords(transaction, { ...scope, configurationVersion: preview.configurationVersion });
+    // Prepared once under the generation's locks; this transaction just wrote the configuration it reads.
+    const prepared = await prepareExamPlan(transaction, scope, true);
+    const generated = await generateExamPlanRecords(
+      transaction,
+      { ...scope, configurationVersion: prepared.preview.configurationVersion },
+      prepared,
+    );
     planCount += generated.createdCount;
   }
 

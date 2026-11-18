@@ -2,6 +2,7 @@ import { db } from '@campuspilot/db';
 import { classTable } from '@campuspilot/db/schema/class';
 import { examClassTable, examLifecycleTable, examPlanTable } from '@campuspilot/db/schema/exam';
 import { schoolOnboardingTable } from '@campuspilot/db/schema/school-creation';
+import { examSlugSchema } from '@campuspilot/db/schema/jsonb/session-config';
 import { schoolSessionTable } from '@campuspilot/db/schema/session';
 import { asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
@@ -184,6 +185,24 @@ describe('school guided setup', () => {
     expect(await teacher.school.getOnboarding({ schoolId })).toEqual({ state: 'pending' });
     await expectRpcCode(teacher.school.completeOnboarding(proposal(schoolId)), 'FORBIDDEN');
     await expectRpcCode(teacher.school.skipOnboarding({ schoolId }), 'FORBIDDEN');
+  });
+});
+
+describe('school guided setup authentication', () => {
+  it('refuses anonymous callers', async () => {
+    const { schoolId } = await ownSchool();
+    const anonymous = createTestClient(null);
+    await expectRpcCode(anonymous.school.getOnboarding({ schoolId }), 'UNAUTHORIZED');
+    await expectRpcCode(anonymous.school.completeOnboarding(proposal(schoolId)), 'UNAUTHORIZED');
+    await expectRpcCode(anonymous.school.skipOnboarding({ schoolId }), 'UNAUTHORIZED');
+  });
+});
+
+describe('onboardingExamSlugs', () => {
+  it('follows the exam slug rule and never takes a reserved slug', () => {
+    const slugs = onboardingExamSlugs(['Constructor', 'Prototype', 'Final', 'final!', '__proto__']);
+    expect(slugs).toEqual(['constructor_2', 'prototype_2', 'final', 'final_2', 'proto']);
+    for (const slug of slugs) expect(examSlugSchema.safeParse(slug).success).toBe(true);
   });
 });
 

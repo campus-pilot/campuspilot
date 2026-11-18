@@ -5,9 +5,10 @@ import { ONBOARDING_CLASSES, ONBOARDING_STAGES, stagesOfClasses, type Onboarding
 import { Button } from '@campuspilot/ui/components/button';
 import { Input } from '@campuspilot/ui/components/input';
 import { ChevronLeft, ChevronRight, Minus, Plus, X } from 'lucide-react';
+import { z } from 'zod';
 import { FormErrors } from '@/components/form-errors';
 import type { OnboardingForm } from './onboarding-form';
-import { canAddExam, examNameAt, sessionLabel, stageClassRange, subjectPaperCount } from './onboarding-model';
+import { canAddExam, examNameAt, hasSubject, isSessionYearAllowed, sessionLabel, stageClassRange, subjectPaperCount } from './onboarding-model';
 
 /** A screen's question and the line under it. */
 export function StepHeading({ title, children }: { title: string; children: ReactNode }) {
@@ -38,7 +39,7 @@ export function SessionStep({ form }: { form: OnboardingForm }) {
       <form.Field name="sessionStartYear">
         {(field) => (
           <div className="flex items-center justify-center gap-6 py-4">
-            <StepperButton label="Previous year" onClick={() => field.handleChange(field.state.value - 1)}>
+            <StepperButton label="Previous year" disabled={!isSessionYearAllowed(field.state.value - 1)} onClick={() => field.handleChange(field.state.value - 1)}>
               <ChevronLeft aria-hidden />
             </StepperButton>
             <div className="flex flex-col items-center gap-1">
@@ -47,7 +48,7 @@ export function SessionStep({ form }: { form: OnboardingForm }) {
                 April {field.state.value} to March {field.state.value + 1}
               </span>
             </div>
-            <StepperButton label="Next year" onClick={() => field.handleChange(field.state.value + 1)}>
+            <StepperButton label="Next year" disabled={!isSessionYearAllowed(field.state.value + 1)} onClick={() => field.handleChange(field.state.value + 1)}>
               <ChevronRight aria-hidden />
             </StepperButton>
           </div>
@@ -168,32 +169,45 @@ function SubjectChip({ name, onRemove }: { name: string; onRemove: () => void })
   );
 }
 
-/** The box that adds a subject to a stage: Enter or Add puts it in the list and empties the box. */
+/**
+ * The box that adds a subject to a stage: Enter or Add puts it in the list
+ * and empties the box. A name already in the stage's list is refused beside
+ * the box (compared as the server compares them), so the list never holds a
+ * duplicate that would block Continue.
+ */
 function AddSubject({ form, stage }: { form: OnboardingForm; stage: OnboardingStageKey }) {
+  const isTaken = (name: string) => hasSubject(form.getFieldValue(`subjects.${stage}`), name);
   const add = () => {
     const name = form.getFieldValue(`newSubject.${stage}`).trim();
-    if (!name) return;
+    if (!name || isTaken(name)) return;
     form.pushFieldValue(`subjects.${stage}`, name);
     form.setFieldValue(`newSubject.${stage}`, '');
   };
   return (
-    <form.Field name={`newSubject.${stage}`}>
+    <form.Field
+      name={`newSubject.${stage}`}
+      validators={{ onChange: z.string().refine((name) => !isTaken(name), 'This subject is already in the list.') }}
+    >
       {(field) => (
-        <div className="flex gap-2">
-          <Input
-            aria-label={`Add a subject to ${ONBOARDING_STAGES.find((entry) => entry.key === stage)!.label}`}
-            placeholder="Add a subject"
-            value={field.state.value}
-            onChange={(event) => field.handleChange(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key !== 'Enter') return;
-              event.preventDefault();
-              add();
-            }}
-          />
-          <Button type="button" variant="outline" onClick={add}>
-            Add
-          </Button>
+        <div className="flex flex-col gap-1">
+          <div className="flex gap-2">
+            <Input
+              aria-label={`Add a subject to ${ONBOARDING_STAGES.find((entry) => entry.key === stage)!.label}`}
+              placeholder="Add a subject"
+              value={field.state.value}
+              aria-invalid={field.state.meta.errors.length > 0}
+              onChange={(event) => field.handleChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter') return;
+                event.preventDefault();
+                add();
+              }}
+            />
+            <Button type="button" variant="outline" onClick={add}>
+              Add
+            </Button>
+          </div>
+          <FormErrors errors={field.state.meta.errors} />
         </div>
       )}
     </form.Field>
