@@ -108,6 +108,8 @@ const HIDDEN_TOOLS = [
   'systemAdmin.listDataMigrations',
   'systemAdmin.listDataMigrationSkippedItems',
   'systemAdmin.requestDataMigrationRun',
+  // Website leads carry prospects' contact details: platform admins only.
+  'systemAdmin.listLeads',
   // Demo provisioning, credentials and purge stay human admin actions.
   'systemAdmin.listDemoClassCatalogue',
   'systemAdmin.createDemoSchool',

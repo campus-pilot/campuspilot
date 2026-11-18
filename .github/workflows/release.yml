@@ -198,7 +198,6 @@ jobs:
               VITE_CONTACT_PHONE_LABEL=${{ vars.VITE_CONTACT_PHONE_LABEL }}
               VITE_WHATSAPP_NUMBER=${{ vars.VITE_WHATSAPP_NUMBER }}
               VITE_WHATSAPP_LABEL=${{ vars.VITE_WHATSAPP_LABEL }}
-              VITE_CALENDAR_URL=${{ vars.VITE_CALENDAR_URL }}
               VITE_STAFF_LOGIN_URL=${{ vars.VITE_STAFF_LOGIN_URL }}
               VITE_STUDENT_LOGIN_URL=${{ vars.VITE_STUDENT_LOGIN_URL || '' }}
               VITE_META_PIXEL_ID=${{ vars.VITE_META_PIXEL_ID || '' }}

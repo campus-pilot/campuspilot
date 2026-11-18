@@ -3,6 +3,7 @@ import { logger as rootLogger } from '@campuspilot/logger';
 import { pinoLogger, type LoggerVariables } from '@campuspilot/logger/hono';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { PROOF_OF_WORK_HEADER } from '@campuspilot/api/leads/demo-request';
 
 /** Creates the transport shell and applies cross-cutting HTTP configuration. */
 export function createConfiguredApp() {
@@ -48,6 +49,20 @@ export function createConfiguredApp() {
     path === '/api/cadet/auth/jwks' ||
     path.startsWith('/blob/');
 
+  /**
+   * The website's lead form (`/public/leads/*`) is called from the marketing
+   * site without credentials. Any origin may call it: nothing there reads a
+   * session, and the proof-of-work header plus per-IP rate limits, not
+   * CORS, are what bound abuse (CORS never stops non-browser clients).
+   */
+  const publicLeadCors = cors({
+    origin: '*',
+    allowMethods: ['GET', 'POST', 'OPTIONS'],
+    allowHeaders: ['Content-Type', PROOF_OF_WORK_HEADER],
+    credentials: false,
+  });
+  const isPublicLeadPath = (path: string) => path.startsWith('/public/leads/');
+
   const applicationCors = cors({
     origin: (origin, context) => {
       if (!origin) return null;
@@ -73,7 +88,9 @@ export function createConfiguredApp() {
   app.use('/*', async (context, next) =>
     isPublicDiscoveryPath(context.req.path)
       ? publicDiscoveryCors(context, next)
-      : applicationCors(context, next),
+      : isPublicLeadPath(context.req.path)
+        ? publicLeadCors(context, next)
+        : applicationCors(context, next),
   );
 
   app.onError((error, context) => {

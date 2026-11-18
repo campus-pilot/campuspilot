@@ -59,6 +59,11 @@ grants contains {"role": "platform.admin", "action": action} if {
 
 grants contains {
   "role": "platform.admin",
+  "action": "system.lead.read",
+} if { true }
+
+grants contains {
+  "role": "platform.admin",
   "action": "system.oauth_client.list",
 } if { true }
 

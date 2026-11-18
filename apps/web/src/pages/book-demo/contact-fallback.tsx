@@ -10,7 +10,7 @@ export function ContactFallback() {
   return (
     <section className="cp-final-cta pg-book-fallback" aria-labelledby="pg-book-fallback-title">
       <h2 id="pg-book-fallback-title">Rather talk it through first?</h2>
-      <p>No slot that works, or a quick question before you book? Message, call or email us, whichever is easiest.</p>
+      <p>A quick question before you request a demo? Message, call or email us, whichever is easiest.</p>
       <ButtonRow center>
         <ButtonLink href={channels.whatsapp.href} size="lg" external>
           Message on WhatsApp

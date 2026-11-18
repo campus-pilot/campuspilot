@@ -38,6 +38,7 @@ export const PREFIX_MAP = {
   dataMigrationRun: "dmr",
   demoSchoolJob: "dsj",
   cadetPushSubscription: "cpsub",
+  lead: "lead",
   notice: "ntc",
   noticeClass: "ntcc",
   notification: "ntf",

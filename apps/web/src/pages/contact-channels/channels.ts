@@ -67,9 +67,6 @@ export const channels: Record<ChannelId, Channel> = {
 /** Display order everywhere: the recommended channel first. */
 export const channelOrder: readonly ChannelId[] = ["whatsapp", "phone", "email"];
 
-/** Scheduling page embedded on `/book-demo` and linked as its new-tab fallback. */
-export const calendarUrl = env.VITE_CALENDAR_URL;
-
 /** Anchor attributes for a channel link: new tab only for external channels. */
 export function channelTarget(channel: Channel) {
   return channel.external ? ({ target: "_blank", rel: "noreferrer" } as const) : {};

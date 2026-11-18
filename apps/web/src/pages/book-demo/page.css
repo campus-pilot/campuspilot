@@ -4,190 +4,259 @@
  * so `prefers-reduced-motion` (handled globally in site.css) simply skips them.
  */
 
-/* ------------------------------------------------- hero: fast channels */
+/* ------------------------------------------------- hero: demo request form */
 
-.pg-book-fast {
+.pg-book-form {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 22px;
+  padding: 24px;
   border: 1px solid var(--cp-line);
   border-radius: 22px;
   background:
     radial-gradient(90% 60% at 100% 0%, color-mix(in oklch, var(--cp-accent-soft) 70%, transparent), transparent 70%),
-    var(--cp-soft);
+    var(--cp-surface);
   box-shadow: 0 24px 60px -36px rgb(0 0 0 / 0.35);
+  scroll-margin-top: calc(var(--cp-header-h, 64px) + 16px);
   animation: cp-fade-up 0.8s 0.15s var(--cp-ease) both;
 }
 
-.pg-book-fast-head {
+.pg-book-form-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.pg-book-form-head {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-.pg-book-fast-head h2 {
+.pg-book-form-progress {
+  color: var(--cp-subtle);
+  font: 500 11px/1.3 var(--cp-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.pg-book-form-head h2,
+.pg-book-form-sent h2 {
   margin: 0;
-  font-size: 19px;
+  font-size: 20px;
   font-weight: 600;
   letter-spacing: -0.02em;
 }
 
-.pg-book-fast-head p {
+.pg-book-form-head p,
+.pg-book-form-sent p {
   margin: 0;
   color: var(--cp-muted);
-  font-size: 14px;
-}
-
-.pg-book-fast-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-/* WhatsApp message preview: an outgoing chat bubble. */
-.pg-book-bubble {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  align-self: flex-end;
-  max-width: min(100%, 380px);
-  margin: 0;
-  animation: pg-book-bubble-in 0.7s 0.7s var(--cp-ease) both;
-}
-
-.pg-book-bubble figcaption {
-  align-self: flex-end;
-  color: var(--cp-subtle);
-  font: 500 11px/1.3 var(--cp-mono);
-  letter-spacing: 0.02em;
-}
-
-.pg-book-bubble blockquote {
-  margin: 0;
-  padding: 12px 14px 22px;
-  border: 1px solid color-mix(in oklch, var(--cp-primary) 18%, var(--cp-line));
-  border-radius: 16px 16px 4px 16px;
-  background: var(--cp-surface);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
-}
-
-.pg-book-bubble p {
-  margin: 0;
-  color: var(--cp-ink-2);
   font-size: 14px;
   line-height: 1.5;
 }
 
-.pg-book-bubble-ticks {
-  position: absolute;
-  right: 10px;
-  bottom: 6px;
-  color: var(--cp-accent);
-}
-
-.pg-book-bubble-ticks svg {
-  width: 15px;
-  height: 15px;
-}
-
-/* ------------------------------------------------------------ scheduler */
-
-.pg-book-schedule.cp-section {
-  padding-top: 88px;
-}
-
-.pg-book-cal {
+.pg-book-form-field {
   display: flex;
   flex-direction: column;
-  max-width: 1040px;
-  margin: 0 auto;
-  border: 1px solid var(--cp-line);
-  border-radius: 22px;
-  background: var(--cp-surface);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.03), 0 40px 80px -56px rgb(0 0 0 / 0.4);
-  overflow: hidden;
-}
-
-.pg-book-cal-bar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  height: 46px;
-  padding: 0 16px;
-  border-bottom: 1px solid var(--cp-line);
-  background: var(--cp-soft);
-}
-
-.pg-book-cal-dots {
-  display: flex;
   gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
 
-.pg-book-cal-dots i {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--cp-line-strong);
-}
-
-.pg-book-cal-bar b {
+.pg-book-form-label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0;
+  color: var(--cp-ink);
   font-size: 13.5px;
   font-weight: 600;
 }
 
-.pg-book-cal-meta {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  margin-left: auto;
-  padding: 4px 10px;
-  border: 1px solid var(--cp-line);
-  border-radius: 99px;
-  background: var(--cp-surface);
-  color: var(--cp-muted);
-  font: 500 12px/1 var(--cp-mono);
+.pg-book-form-label span {
+  color: var(--cp-subtle);
+  font-size: 12px;
+  font-weight: 500;
 }
 
-.pg-book-cal-meta svg {
-  width: 13px;
-  height: 13px;
-}
-
-.pg-book-cal-body {
-  background: var(--cp-surface);
-}
-
-/* Tall enough for a month view plus time slots without an inner scrollbar on desktop. */
-.pg-book-cal-body iframe {
-  display: block;
+.pg-book-form-input {
   width: 100%;
-  height: 720px;
-  border: 0;
+  min-width: 0;
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--cp-line-strong);
+  border-radius: 10px;
   background: var(--cp-surface);
+  color: var(--cp-ink);
+  font: inherit;
+  font-size: 15px;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
-.pg-book-cal-foot {
+.pg-book-form-input::placeholder {
+  color: var(--cp-subtle);
+}
+
+.pg-book-form-input:focus-visible {
+  border-color: var(--cp-primary);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--cp-primary) 22%, transparent);
+}
+
+.pg-book-form-input[aria-invalid="true"] {
+  border-color: var(--cp-primary-hover, #b45309);
+}
+
+/* Country code ("IN +91") beside the number. */
+.pg-book-form-phone {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.pg-book-form-phone select {
+  padding-right: 4px;
+  text-overflow: ellipsis;
+}
+
+.pg-book-form-hint {
+  color: var(--cp-muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.pg-book-form-error {
+  margin: 0;
+  color: var(--destructive, #c2410c);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.pg-book-form-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: -6px;
+  color: var(--cp-ink-2);
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+.pg-book-form-check input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--cp-primary);
+}
+
+.pg-book-form-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.pg-book-form-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--cp-line);
+  border-radius: 12px;
+  background: var(--cp-surface);
+  color: var(--cp-ink-2);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.pg-book-form-choice:hover {
+  border-color: var(--cp-line-strong);
+}
+
+.pg-book-form-choice:has(input:focus-visible) {
+  outline: 2px solid var(--cp-primary);
+  outline-offset: 2px;
+}
+
+.pg-book-form-choice[data-checked] {
+  border-color: var(--cp-primary);
+  background: color-mix(in oklch, var(--cp-primary) 8%, var(--cp-surface));
+  color: var(--cp-ink);
+}
+
+.pg-book-form-choice input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pg-book-form-choice svg {
+  width: 16px;
+  height: 16px;
+  color: var(--cp-primary);
+}
+
+.pg-book-form-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.pg-book-form-alert {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in oklch, var(--cp-accent-warm, #e48618) 40%, var(--cp-line));
+  border-radius: 12px;
+  background: color-mix(in oklch, var(--cp-accent-warm, #e48618) 8%, var(--cp-surface));
+  color: var(--cp-ink-2);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.pg-book-form-alert a {
+  color: var(--cp-ink);
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.pg-book-form-actions {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 6px 10px;
-  margin: 0;
-  padding: 14px 16px;
-  border-top: 1px solid var(--cp-line);
-  background: var(--cp-soft);
-  color: var(--cp-muted);
-  font-size: 13.5px;
-  text-align: center;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
-.pg-book-cal-foot .cp-text-link {
-  font-size: 13.5px;
+.pg-book-form-actions .cp-btn[disabled] {
+  opacity: 0.7;
+  cursor: progress;
 }
 
-/* Reassurance strip under the calendar. */
+.pg-book-spin {
+  animation: pg-book-sweep 0.9s linear infinite;
+}
+
+.pg-book-form-sent {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0;
+}
+
+.pg-book-form-sent > svg {
+  width: 32px;
+  height: 32px;
+  color: var(--cp-accent);
+}
+
+.pg-book-assure-band.cp-section {
+  padding-top: 24px;
+  padding-bottom: 24px;
+}
+
+/* Reassurance strip under the hero. */
 .pg-book-assure {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -679,28 +748,6 @@
 }
 
 @media (max-width: 640px) {
-  .pg-book-fast {
-    padding: 16px;
-    border-radius: 18px;
-  }
-
-  .pg-book-schedule.cp-section {
-    padding-top: 56px;
-  }
-
-  .pg-book-cal {
-    border-radius: 16px;
-  }
-
-  .pg-book-cal-dots {
-    display: none;
-  }
-
-  /* Phones stack the month above the time slots; keep the page scrollable around it. */
-  .pg-book-cal-body iframe {
-    height: clamp(600px, 82svh, 720px);
-  }
-
   .pg-book-assure {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -770,16 +817,19 @@
   .pg-book-fallback .cp-btn {
     width: 100%;
   }
+
+  .pg-book-form {
+    padding: 18px 16px;
+    border-radius: 18px;
+  }
+
+  .pg-book-form-actions .cp-btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
 }
 
 /* ------------------------------------------------------------ keyframes */
-
-@keyframes pg-book-bubble-in {
-  from {
-    opacity: 0;
-    transform: translateY(10px) scale(0.96);
-  }
-}
 
 @keyframes pg-book-sweep {
   from {

@@ -111,6 +111,14 @@ actions contains {
   "resourceKind": "system",
 } if { true }
 
+# Marketing leads (the website's demo request form): reading them shows
+# prospects' names and phone numbers, so it is its own action.
+actions contains {
+  "id": "system.lead.read",
+  "key": "READ_LEADS",
+  "resourceKind": "system",
+} if { true }
+
 # Per-school platform feature flags (docs/feature-flags.md). Reading a
 # school's flags is separate from changing them, which switches product
 # areas such as the Cadet Portal on or off for the whole school.
