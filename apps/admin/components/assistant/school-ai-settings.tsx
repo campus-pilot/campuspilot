@@ -126,7 +126,7 @@ function LimitField({ form }: { form: SettingsForm }) {
     <form.Field name="monthlyLimitUsd">
       {(field) => (
         <Field>
-          <FieldLabel htmlFor="assistant-limit">Monthly limit (USD)</FieldLabel>
+          <FieldLabel htmlFor="assistant-limit">Spending limit (USD)</FieldLabel>
           <Input
             id="assistant-limit"
             inputMode="decimal"
@@ -137,8 +137,8 @@ function LimitField({ form }: { form: SettingsForm }) {
             aria-invalid={field.state.meta.errors.length > 0}
           />
           <FieldDescription>
-            Per calendar month in IST. Once the school’s spend reaches it, nobody in the school can use the assistant until the 1st.
-            Checked against spend up to 10 minutes old.
+            Per 28 days of the school’s billing period, or per calendar month in IST without one. Once the school’s spend reaches it,
+            nobody in the school can use the assistant until the next of these begins. Checked against spend up to 10 minutes old.
           </FieldDescription>
           <FieldError errors={field.state.meta.errors.map((error) => ({ message: errorText(error) }))} />
         </Field>
@@ -172,7 +172,7 @@ function VoiceNotConfiguredWarning() {
 
 /**
  * Voice mode, a switch inside the assistant feature: it only matters while the
- * assistant is enabled, and its cost counts toward the same monthly limit.
+ * assistant is enabled, and its cost counts toward the same spending limit.
  */
 function VoiceField({ form }: { form: SettingsForm }) {
   return (
@@ -185,7 +185,7 @@ function VoiceField({ form }: { form: SettingsForm }) {
           </div>
           <FieldDescription>
             Staff who may use the assistant can talk to it and hear it answer. Needs a voice model configured on the platform. Its cost counts
-            toward the monthly limit.
+            toward the spending limit.
           </FieldDescription>
           {field.state.value ? <VoiceNotConfiguredWarning /> : null}
         </Field>

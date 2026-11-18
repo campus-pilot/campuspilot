@@ -69,7 +69,7 @@ function assertAssistantToolPolicy(
 
 /**
  * A suspended school, and a school without an active plan, is read-only
- * (docs/school-suspension.md, docs/school-trials.md): every procedure that
+ * (docs/school-suspension.md, docs/school-billing.md): every procedure that
  * is not an explicit read (`mcp.access`; a procedure without metadata is
  * treated as a write, as for OAuth scopes) is refused for the school its
  * input names. Here, on every protected procedure, rather than on each one:

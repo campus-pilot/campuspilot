@@ -130,3 +130,11 @@ grants contains {"role": role, "action": action} if {
 }
 
 grants contains {"role": "platform.admin", "action": "system.assistant.usage.read"} if { true }
+
+grants contains {"role": "platform.admin", "action": action} if {
+  some action in {
+    "system.school_creation_request.list",
+    "system.school_creation_request.decide",
+    "system.subscription_price.update",
+  }
+}

@@ -3,7 +3,7 @@ import { and, eq, sql, type SQL } from "drizzle-orm";
 import type { DatabaseExecutor } from "../index";
 import { schoolTable } from "../schema/school";
 import { schoolFeatureFlagTable } from "../schema/school-feature-flag";
-import { schoolTrialTable } from "../schema/school-trial";
+import { schoolBillingPeriodTable } from "../schema/school-billing";
 import {
   parseSchoolFeatureConfig,
   resolveSchoolFeatureActivity,
@@ -15,89 +15,107 @@ import {
   type SchoolFeatureKey,
   type SchoolFeatureState,
   type SchoolPlan,
+  type BillingPeriodKind,
   type SchoolTier,
 } from "./catalogue";
 
 /**
- * Reads of a school's plan and features (its subscribed tier on `school`,
- * its active trial in `school_trial`, its adjustments and settings in
- * `school_feature_flag`), shared by the API and the auth package (Cadet
- * sign-in), so every enforcement point decides from the same query. Writes
- * live in the API (`packages/api/src/feature-flags`, the system admin
- * trial procedures).
+ * Reads of a school's plan and features (its standing tier on `school`, its
+ * active billing period in `school_billing_period`, its adjustments and
+ * settings in `school_feature_flag`), shared by the API and the auth package
+ * (Cadet sign-in), so every enforcement point decides from the same query.
+ * Writes live in the API (`packages/api/src/feature-flags`,
+ * `packages/api/src/billing`).
  */
 
 /**
- * SQL condition: the `school_trial` row is active now, that is
+ * SQL condition: the `school_billing_period` row is active now, that is
  * `starts_at <= now() < least(ends_at, coalesce(ended_at, 'infinity'))`.
- * Compared with the database's `now()` at every read, so a trial switches
- * itself off at its end without any job (docs/school-trials.md). Inside a
- * transaction `now()` is the transaction's start, so a trial ended in it
- * (`ended_at = now()`) is already inactive there. A school has at most one
- * active trial (the table's EXCLUDE constraint), so a join on this
- * condition adds at most one row per school.
+ * Compared with the database's `now()` at every read, so a period ends by
+ * itself without any job (docs/school-billing.md). Inside a transaction
+ * `now()` is the transaction's start, so a period ended in it
+ * (`ended_at = now()`) is already inactive there. Periods of a school never
+ * overlap (the table's EXCLUDE constraint), so a join on this condition adds
+ * at most one row per school.
  */
-export function activeSchoolTrialCondition(): SQL {
-  return sql`${schoolTrialTable.startsAt} <= now() and now() < least(${schoolTrialTable.endsAt}, coalesce(${schoolTrialTable.endedAt}, 'infinity'::timestamptz))`;
+export function activeBillingPeriodCondition(): SQL {
+  return sql`${schoolBillingPeriodTable.startsAt} <= now() and now() < ${billingPeriodEnd()}`;
 }
 
-/** The active trial of a school as reads return it. */
-export type ActiveSchoolTrial = {
+/** SQL: when a period really ends, its `ends_at` or the earlier moment it was cut short. */
+export function billingPeriodEnd(): SQL<Date> {
+  return sql<Date>`least(${schoolBillingPeriodTable.endsAt}, coalesce(${schoolBillingPeriodTable.endedAt}, 'infinity'::timestamptz))`;
+}
+
+/** The active billing period of a school as reads return it; `endsAt` is when it really ends. */
+export type ActiveBillingPeriod = {
   id: string;
+  kind: BillingPeriodKind;
   tier: SchoolTier;
   startsAt: Date;
   endsAt: Date;
 };
 
-/** The columns of an active trial for a select joined with {@link activeSchoolTrialCondition}. */
-export const activeSchoolTrialColumns = {
-  trialId: schoolTrialTable.id,
-  trialTier: schoolTrialTable.tier,
-  trialStartsAt: schoolTrialTable.startsAt,
-  trialEndsAt: schoolTrialTable.endsAt,
+/** The columns of an active period for a select joined with {@link activeBillingPeriodCondition}. */
+export const activeBillingPeriodColumns = {
+  periodId: schoolBillingPeriodTable.id,
+  periodKind: schoolBillingPeriodTable.kind,
+  periodTier: schoolBillingPeriodTable.tier,
+  periodStartsAt: schoolBillingPeriodTable.startsAt,
+  periodEndsAt: sql<Date | null>`least(${schoolBillingPeriodTable.endsAt}, coalesce(${schoolBillingPeriodTable.endedAt}, 'infinity'::timestamptz))`.mapWith(
+    (value: string | Date | null) => (value === null ? null : new Date(value)),
+  ),
 };
 
-/** The active trial out of a row selected with {@link activeSchoolTrialColumns} (left joined: null without one). */
-export function activeSchoolTrialOf(row: {
-  trialId: string | null;
-  trialTier: SchoolTier | null;
-  trialStartsAt: Date | null;
-  trialEndsAt: Date | null;
-}): ActiveSchoolTrial | null {
-  if (row.trialId === null || row.trialTier === null || row.trialStartsAt === null || row.trialEndsAt === null) return null;
-  return { id: row.trialId, tier: row.trialTier, startsAt: row.trialStartsAt, endsAt: row.trialEndsAt };
+/** The active period out of a row selected with {@link activeBillingPeriodColumns} (left joined: null without one). */
+export function activeBillingPeriodOf(row: {
+  periodId: string | null;
+  periodKind: BillingPeriodKind | null;
+  periodTier: SchoolTier | null;
+  periodStartsAt: Date | null;
+  periodEndsAt: Date | null;
+}): ActiveBillingPeriod | null {
+  if (row.periodId === null || row.periodKind === null || row.periodTier === null || row.periodStartsAt === null || row.periodEndsAt === null) {
+    return null;
+  }
+  return { id: row.periodId, kind: row.periodKind, tier: row.periodTier, startsAt: row.periodStartsAt, endsAt: row.periodEndsAt };
+}
+
+/** The left join of a school's active billing period onto `school`. */
+export function joinActiveBillingPeriod(): SQL {
+  return and(eq(schoolBillingPeriodTable.schoolId, schoolTable.id), activeBillingPeriodCondition())!;
 }
 
 /** A school's plan with the two facts it comes from ({@link readSchoolPlan}). */
 export type SchoolPlanRead = {
-  /** `school.tier`: the subscribed tier, null without a subscription. */
+  /** `school.tier`: the standing tier, null without one. */
   subscribedTier: SchoolTier | null;
-  /** The active trial, null without one. */
-  trial: ActiveSchoolTrial | null;
+  /** The active billing period, null without one. */
+  period: ActiveBillingPeriod | null;
   /** The plan both give ({@link resolveSchoolPlan}); `tier: null` means the school has no plan. */
   plan: SchoolPlan;
 };
 
 /**
- * A school's subscribed tier, its active trial and the plan they give, in
- * one query. Null for a school that does not exist.
+ * A school's standing tier, its active billing period and the plan they
+ * give, in one query. Null for a school that does not exist.
  */
 export async function readSchoolPlan(
   db: DatabaseExecutor,
   schoolId: string,
 ): Promise<SchoolPlanRead | null> {
   const [row] = await db
-    .select({ subscribedTier: schoolTable.tier, ...activeSchoolTrialColumns })
+    .select({ subscribedTier: schoolTable.tier, ...activeBillingPeriodColumns })
     .from(schoolTable)
-    .leftJoin(schoolTrialTable, and(eq(schoolTrialTable.schoolId, schoolTable.id), activeSchoolTrialCondition()))
+    .leftJoin(schoolBillingPeriodTable, joinActiveBillingPeriod())
     .where(eq(schoolTable.id, schoolId))
     .limit(1);
   if (!row) return null;
-  return schoolPlanOf(row.subscribedTier, activeSchoolTrialOf(row));
+  return schoolPlanOf(row.subscribedTier, activeBillingPeriodOf(row));
 }
 
-function schoolPlanOf(subscribedTier: SchoolTier | null, trial: ActiveSchoolTrial | null): SchoolPlanRead {
-  return { subscribedTier, trial, plan: resolveSchoolPlan({ subscribedTier, activeTrial: trial }) };
+function schoolPlanOf(subscribedTier: SchoolTier | null, period: ActiveBillingPeriod | null): SchoolPlanRead {
+  return { subscribedTier, period, plan: resolveSchoolPlan({ subscribedTier, activePeriod: period }) };
 }
 
 /**
@@ -162,16 +180,16 @@ type SchoolFeatureSwitches = {
 export type SchoolFeatureFlagsRead = {
   /** The tier of the school's plan, which every feature's `included` follows; null when it has no plan. */
   tier: SchoolTier | null;
-  /** `school.tier`: the subscribed tier, null without a subscription. */
+  /** `school.tier`: the standing tier, null without one. */
   subscribedTier: SchoolTier | null;
-  /** The active trial, null without one. */
-  trial: ActiveSchoolTrial | null;
+  /** The active billing period, null without one. */
+  period: ActiveBillingPeriod | null;
   features: SchoolFeatureFlags;
   invalidConfigs: SchoolFeatureKey[];
 };
 
 /**
- * A school's plan (subscribed tier and active trial), every feature's
+ * A school's plan (standing tier and active billing period), every feature's
  * switch (the stored adjustment, or the plan tier's own answer without one)
  * and the stored rows, in one query. `found` says whether the school
  * exists. A school that does not exist has no plan and no stored row, so
@@ -183,21 +201,21 @@ async function readSchoolFeatureSwitches(
   schoolId: string,
 ): Promise<SchoolFeatureSwitches> {
   // From the school, so a school without any stored row still answers with
-  // its plan. At most one trial is active, so the trial join adds no rows.
+  // its plan. At most one period is active, so the period join adds no rows.
   const rows = await db
     .select({
       subscribedTier: schoolTable.tier,
-      ...activeSchoolTrialColumns,
+      ...activeBillingPeriodColumns,
       feature: schoolFeatureFlagTable.feature,
       adjustment: schoolFeatureFlagTable.enabled,
       config: schoolFeatureFlagTable.config,
     })
     .from(schoolTable)
-    .leftJoin(schoolTrialTable, and(eq(schoolTrialTable.schoolId, schoolTable.id), activeSchoolTrialCondition()))
+    .leftJoin(schoolBillingPeriodTable, joinActiveBillingPeriod())
     .leftJoin(schoolFeatureFlagTable, eq(schoolFeatureFlagTable.schoolId, schoolTable.id))
     .where(eq(schoolTable.id, schoolId));
   const first = rows[0];
-  const plan = schoolPlanOf(first?.subscribedTier ?? null, first ? activeSchoolTrialOf(first) : null);
+  const plan = schoolPlanOf(first?.subscribedTier ?? null, first ? activeBillingPeriodOf(first) : null);
   const byKey = new Map<string, StoredFeatureRow>();
   for (const row of rows) {
     if (row.feature !== null) byKey.set(row.feature, { adjustment: row.adjustment, config: row.config });
@@ -242,8 +260,8 @@ export async function isSchoolFeatureEnabled(
  * A school's plan, every catalogue feature's state, and which features hold
  * a stored config that no longer matches its schema. Rows of retired keys
  * are ignored. Null when the school does not exist. `tier` is the tier of
- * the school's plan (the higher of `subscribedTier` and the active `trial`'s
- * tier); it is null for a school without a plan: no tier includes any
+ * the school's plan (the higher of `subscribedTier` and the active
+ * `period`'s tier); it is null for a school without a plan: no tier includes any
  * feature for it, and its adjustments still apply.
  *
  * Per feature: `included` is the tier's answer, `adjustment` what is stored
@@ -287,7 +305,7 @@ function resolveSchoolFeatureFlags({ plan, switches, rows }: SchoolFeatureSwitch
       ];
     }),
   ) as SchoolFeatureFlags;
-  return { tier, subscribedTier: plan.subscribedTier, trial: plan.trial, features, invalidConfigs };
+  return { tier, subscribedTier: plan.subscribedTier, period: plan.period, features, invalidConfigs };
 }
 
 /**

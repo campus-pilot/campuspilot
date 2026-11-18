@@ -25,7 +25,7 @@ beforeEach(() => {
 });
 
 /** The student's school as `getSchool` answers it. */
-const school = { id: 'school_1', name: 'Greenfield Valley School', hasLogo: false, isSuspended: false, hasActivePlan: true, trialEndsAt: null };
+const school = { id: 'school_1', name: 'Greenfield Valley School', hasLogo: false, isSuspended: false, hasActivePlan: true, planSource: 'standing' as const, planEndsAt: null };
 
 describe('AppFrame', () => {
   it('sends a signed-out visitor to sign-in before loading any record', () => {

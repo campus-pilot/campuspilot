@@ -1,13 +1,14 @@
-import { resolveSchoolPlan, schoolPlanSourceSchema, schoolTierSchema } from "@campuspilot/db/feature-flags/catalogue";
-import type { ActiveSchoolTrial } from "@campuspilot/db/feature-flags/store";
+import { billingPeriodKindSchema, resolveSchoolPlan, schoolPlanSourceSchema, schoolTierSchema } from "@campuspilot/db/feature-flags/catalogue";
+import type { ActiveBillingPeriod } from "@campuspilot/db/feature-flags/store";
 import type { schoolTable } from "@campuspilot/db/schema/school";
 import { z } from "zod";
 
 import { createListInputSchema, createPaginatedOutputSchema } from "../../../paginations";
 
-/** A school's active trial as the admin app shows it next to the school. */
-export const activeSchoolTrialDtoSchema = z.object({
+/** A school's active billing period as the admin app shows it next to the school; `endsAt` is when it really ends. */
+export const activeBillingPeriodDtoSchema = z.object({
   id: z.string(),
+  kind: billingPeriodKindSchema,
   tier: schoolTierSchema,
   startsAt: z.date(),
   endsAt: z.date(),
@@ -25,18 +26,18 @@ export const schoolDtoSchema = z.object({
   hasCompletedOnboarding: z.boolean(),
   /** Explicit demo fact (`school.is_demo`); never inferred from slug or email. */
   isDemo: z.boolean(),
-  /** `school.tier`: the tier the school subscribes to; null without a subscription. */
+  /** `school.tier`: the school's standing tier, which never lapses; null without one (docs/school-billing.md). */
   subscribedTier: schoolTierSchema.nullable(),
   /**
    * The tier of the school's plan, which its features follow: the higher of
-   * the subscription and the active trial (docs/school-trials.md). Null
+   * the standing tier and the active billing period (docs/school-billing.md). Null
    * when the school has no plan, which makes it read-only.
    */
   planTier: schoolTierSchema.nullable(),
   /** Which of the two gives `planTier`; null when the school has no plan. */
   planSource: schoolPlanSourceSchema.nullable(),
-  /** The active trial, whether or not it gives the plan; null without one. */
-  trial: activeSchoolTrialDtoSchema.nullable(),
+  /** The active billing period, whether or not it gives the plan; null without one. */
+  period: activeBillingPeriodDtoSchema.nullable(),
   /**
    * When the school was suspended; null while it is not. A suspended
    * school is read-only for its staff and students
@@ -45,6 +46,11 @@ export const schoolDtoSchema = z.object({
   suspendedAt: z.date().nullable(),
   /** Why it is suspended, as the administrator wrote it; null while it is not suspended. */
   suspendedReason: z.string().nullable(),
+  /**
+   * The school's owner (docs/school-creation.md): the person who created it
+   * themselves, or whom an administrator named; null when it has none.
+   */
+  ownerUserId: z.string().nullable(),
 });
 
 export type SchoolDto = z.infer<typeof schoolDtoSchema>;
@@ -59,11 +65,12 @@ export const listSchoolsInputSchema = createListInputSchema({
       /** True for suspended schools only, false for schools that are not. */
       suspended: z.boolean().optional(),
       /**
-       * The plan state: `trial` for schools with an active trial (whether or
-       * not it gives their plan), `none` for schools without a plan (no
-       * subscription and no active trial).
+       * The plan state: `trial`, `paid` or `complimentary` for schools in an
+       * active billing period of that kind (whether or not it gives their
+       * plan), `none` for schools without a plan (no standing tier and no
+       * active period).
        */
-      plan: z.enum(["trial", "none"]).optional(),
+      plan: z.enum(["trial", "paid", "complimentary", "none"]).optional(),
     })
     .optional(),
   orderBy: z
@@ -77,18 +84,18 @@ export const listSchoolsInputSchema = createListInputSchema({
 export const listSchoolsOutputSchema = createPaginatedOutputSchema(schoolDtoSchema);
 
 /**
- * A school row with its active trial (null without one) as the admin DTO,
+ * A school row with its active billing period (null without one) as the admin DTO,
  * with the plan both give (`resolveSchoolPlan`).
  */
-export function toSchoolDto(row: typeof schoolTable.$inferSelect, activeTrial: ActiveSchoolTrial | null): SchoolDto {
+export function toSchoolDto(row: typeof schoolTable.$inferSelect, activePeriod: ActiveBillingPeriod | null): SchoolDto {
   const { tier, ...school } = row;
-  const plan = resolveSchoolPlan({ subscribedTier: tier, activeTrial });
+  const plan = resolveSchoolPlan({ subscribedTier: tier, activePeriod });
   return schoolDtoSchema.parse({
     ...school,
     subscribedTier: tier,
     planTier: plan.tier,
     planSource: plan.source,
-    trial: activeTrial,
+    period: activePeriod,
   });
 }
 
@@ -138,6 +145,15 @@ export const suspendSchoolInputSchema = z.object({
 });
 
 export const schoolIdInputSchema = z.object({ id: z.string().min(1) });
+
+/**
+ * Names the school's owner, or clears it with null. The new owner must be a
+ * member holding the principal role (docs/school-creation.md).
+ */
+export const updateSchoolOwnerInputSchema = z.object({
+  id: z.string().min(1),
+  ownerUserId: z.string().min(1).nullable(),
+});
 
 export const updateSchoolInputSchema = z
   .object({

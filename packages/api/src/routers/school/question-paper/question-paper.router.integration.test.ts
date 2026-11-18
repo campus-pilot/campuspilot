@@ -14,12 +14,13 @@ import { PDFDocument } from 'pdf-lib';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { expectFeatureDisabled, expectPermissionDenied } from '../../../../test/feature-flags';
-import { setTestSchoolFeature, type TestClient } from '../../../../test/fixtures';
+import { createHandlerContext, setTestSchoolFeature, type TestClient } from '../../../../test/fixtures';
 import { createQuestionPaperWorld, switchAssistantRoles, type QuestionPaperWorld } from '../../../../test/question-paper';
 import type { Context } from '../../../context';
 import { appRouter } from '../../index';
 import { DOCUMENT_MARKETPLACE } from '../document/document.catalog';
 import { QUESTION_PAPER_LEARN_OUTPUT_CHARS } from './question-paper.dto';
+import { handleQuestionPaperVersionPdfRead } from './question-paper.http';
 
 const { 'hindi-maths': HINDI_MATH, 'english-science': ENGLISH_SCIENCE } = QUESTION_PAPER_EXAMPLES;
 
@@ -232,6 +233,22 @@ describe('question paper procedures', () => {
       const { width, height } = pdf.getPage(0).getSize();
       expect(Math.round(width)).toBe(595);
       expect(Math.round(height)).toBe(842);
+    });
+
+    it('streams the stored PDF to the paper screen behind the checks of Download PDF', async () => {
+      const read = (context: Context, versionNo: string, overrides = {}) => handleQuestionPaperVersionPdfRead(context, { key: key(overrides), versionNo });
+      const response = await read(world.people.teacher.context, '1');
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toBe('application/pdf');
+      const streamed = Buffer.from(await response.arrayBuffer());
+      const { url } = await teacher.school.getQuestionPaperDownload({ ...key(), versionNo: 1 });
+      expect(streamed.equals(Buffer.from(await (await fetch(url)).arrayBuffer()))).toBe(true);
+
+      expect((await read(world.people.otherTeacher.context, '1')).status).toBe(403);
+      expect((await read(createHandlerContext(null), '1')).status).toBe(401);
+      expect((await read(world.people.teacher.context, '9')).status).toBe(404);
+      expect((await read(world.people.teacher.context, '1.5')).status).toBe(404);
+      expect((await read(world.people.teacher.context, '0')).status).toBe(404);
     });
 
     it('flows a long paper over several pages', async () => {

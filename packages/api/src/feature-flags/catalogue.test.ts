@@ -197,31 +197,33 @@ describe('subscription tiers', () => {
   });
 });
 
-describe('the plan of a school (subscription and trial)', () => {
-  const trial = (tier: SchoolTier) => ({ tier });
+describe('the plan of a school (standing tier and billing period)', () => {
+  const trial = (tier: SchoolTier) => ({ tier, kind: 'trial' as const });
 
   it('ranks the tiers Plus below Pro below Enterprise, stated per tier', () => {
     expect([...SCHOOL_TIERS].sort((a, b) => schoolTierRank[a] - schoolTierRank[b])).toEqual(['plus', 'pro', 'enterprise']);
     expect(new Set(Object.values(schoolTierRank)).size).toBe(SCHOOL_TIERS.length);
   });
 
-  it('is the subscription without a trial, the trial without a subscription, and nothing without either', () => {
-    expect(resolveSchoolPlan({ subscribedTier: 'pro', activeTrial: null })).toEqual({ tier: 'pro', source: 'subscription' });
-    expect(resolveSchoolPlan({ subscribedTier: null, activeTrial: trial('plus') })).toEqual({ tier: 'plus', source: 'trial' });
-    expect(resolveSchoolPlan({ subscribedTier: null, activeTrial: trial('enterprise') })).toEqual({ tier: 'enterprise', source: 'trial' });
+  it('is the standing tier without a period, the period without a standing tier, and nothing without either', () => {
+    expect(resolveSchoolPlan({ subscribedTier: null, activePeriod: { tier: 'pro', kind: 'paid' } })).toEqual({ tier: 'pro', source: 'paid' });
+    expect(resolveSchoolPlan({ subscribedTier: null, activePeriod: { tier: 'pro', kind: 'complimentary' } })).toEqual({ tier: 'pro', source: 'complimentary' });
+    expect(resolveSchoolPlan({ subscribedTier: 'pro', activePeriod: null })).toEqual({ tier: 'pro', source: 'standing' });
+    expect(resolveSchoolPlan({ subscribedTier: null, activePeriod: trial('plus') })).toEqual({ tier: 'plus', source: 'trial' });
+    expect(resolveSchoolPlan({ subscribedTier: null, activePeriod: trial('enterprise') })).toEqual({ tier: 'enterprise', source: 'trial' });
     // Neither: the school has no plan (it is read-only).
-    expect(resolveSchoolPlan({ subscribedTier: null, activeTrial: null })).toEqual({ tier: null, source: null });
+    expect(resolveSchoolPlan({ subscribedTier: null, activePeriod: null })).toEqual({ tier: null, source: null });
   });
 
   it('takes the higher tier when both run, so a trial never takes away what the school pays for', () => {
-    expect(resolveSchoolPlan({ subscribedTier: 'plus', activeTrial: trial('enterprise') })).toEqual({ tier: 'enterprise', source: 'trial' });
-    expect(resolveSchoolPlan({ subscribedTier: 'pro', activeTrial: trial('enterprise') })).toEqual({ tier: 'enterprise', source: 'trial' });
-    expect(resolveSchoolPlan({ subscribedTier: 'enterprise', activeTrial: trial('plus') })).toEqual({ tier: 'enterprise', source: 'subscription' });
+    expect(resolveSchoolPlan({ subscribedTier: 'plus', activePeriod: trial('enterprise') })).toEqual({ tier: 'enterprise', source: 'trial' });
+    expect(resolveSchoolPlan({ subscribedTier: 'pro', activePeriod: trial('enterprise') })).toEqual({ tier: 'enterprise', source: 'trial' });
+    expect(resolveSchoolPlan({ subscribedTier: 'enterprise', activePeriod: trial('plus') })).toEqual({ tier: 'enterprise', source: 'standing' });
     // A trial of the subscribed tier changes nothing: the subscription gives the plan.
-    expect(resolveSchoolPlan({ subscribedTier: 'pro', activeTrial: trial('pro') })).toEqual({ tier: 'pro', source: 'subscription' });
+    expect(resolveSchoolPlan({ subscribedTier: 'pro', activePeriod: trial('pro') })).toEqual({ tier: 'pro', source: 'standing' });
     for (const subscribed of SCHOOL_TIERS) {
       for (const tried of SCHOOL_TIERS) {
-        const plan = resolveSchoolPlan({ subscribedTier: subscribed, activeTrial: trial(tried) });
+        const plan = resolveSchoolPlan({ subscribedTier: subscribed, activePeriod: trial(tried) });
         expect(schoolTierRank[plan.tier!]).toBe(Math.max(schoolTierRank[subscribed], schoolTierRank[tried]));
       }
     }

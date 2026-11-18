@@ -25,7 +25,8 @@ import { Input } from '@campuspilot/ui/components/input';
 import { Label } from '@campuspilot/ui/components/label';
 import { client, orpc } from '@/lib/orpc';
 import { uploadSchoolLogo } from '@/lib/school-image';
-import { addCalendarMonths, defaultTrialEndDay, endOfIstDay, istDay, trialEndDayProblem } from '@/lib/trial-dates';
+import { BILLING_PERIOD_DAYS } from '@campuspilot/api/billing/billing.contract';
+import { addDays, defaultTrialEndDay, endOfIstDay, istDay, trialEndDayProblem } from '@/lib/trial-dates';
 import { NO_PLAN_CONSEQUENCE } from './school-plan-effect';
 
 /**
@@ -45,7 +46,7 @@ const addSchoolFormSchema = addSchoolInputSchema
   .extend({
     registrationNo: z.string(),
     logo: z.instanceof(File).nullable(),
-    tier: z.union([z.enum([...SCHOOL_TIERS, 'none']), z.literal('')]).refine((tier) => tier !== '', { message: 'Choose a subscription, or No subscription.' }),
+    tier: z.union([z.enum([...SCHOOL_TIERS, 'none']), z.literal('')]).refine((tier) => tier !== '', { message: 'Choose a standing tier, or None (billed by period).' }),
     withTrial: z.boolean(),
     trialTier: z.enum(SCHOOL_TIERS),
     trialEndDay: z.string(),
@@ -58,9 +59,9 @@ const addSchoolFormSchema = addSchoolInputSchema
 type AddSchoolFormValues = z.input<typeof addSchoolFormSchema>;
 
 const SUBSCRIPTION_OPTIONS: OptionSelectOption<SubscriptionChoice>[] = [
-  { value: '', label: 'Choose a subscription', disabled: true },
+  { value: '', label: 'Choose a standing tier', disabled: true },
   ...SCHOOL_TIERS.map((tier) => ({ value: tier, label: schoolTierCatalogue[tier].label })),
-  { value: 'none', label: 'No subscription' },
+  { value: 'none', label: 'None (billed by period)' },
 ];
 
 const TRIAL_TIER_OPTIONS: OptionSelectOption<SchoolTier>[] = SCHOOL_TIERS.map((tier) => ({
@@ -70,8 +71,10 @@ const TRIAL_TIER_OPTIONS: OptionSelectOption<SchoolTier>[] = SCHOOL_TIERS.map((t
 
 /** What the picked subscription includes, or what having none means. */
 function subscriptionDescription(tier: SubscriptionChoice) {
-  if (tier === '') return 'The tier the school pays for decides its features. It can be changed later.';
-  return tier === 'none' ? 'The school pays for no tier. A trial can give it one for a while.' : schoolTierCatalogue[tier].description;
+  if (tier === '') return 'A standing tier never lapses and is not billed (for contracts and demos). Most schools have none and are billed per 28-day period.';
+  return tier === 'none'
+    ? 'The school has a plan only while a trial or a paid period runs (Billing card, after creating it).'
+    : `${schoolTierCatalogue[tier].description} It never lapses.`;
 }
 
 function FieldErrors({ errors }: { errors: unknown[] }) {
@@ -151,7 +154,7 @@ function SubscriptionField({ form }: { form: AddSchoolForm }) {
     <form.Field name="tier">
       {(field) => (
         <div className="flex flex-col gap-2">
-          <Label htmlFor={field.name}>Subscription</Label>
+          <Label htmlFor={field.name}>Standing tier</Label>
           <OptionSelect
             value={field.state.value}
             options={SUBSCRIPTION_OPTIONS}
@@ -197,7 +200,7 @@ function TrialTierField({ form }: { form: AddSchoolForm }) {
   );
 }
 
-/** The trial's end day, one calendar month ahead by default, with a quick "+1 month". */
+/** The trial's end day, one 28-day period ahead by default, with a quick "+28 days". */
 function TrialEndField({ form }: { form: AddSchoolForm }) {
   return (
     <form.Field name="trialEndDay">
@@ -210,9 +213,9 @@ function TrialEndField({ form }: { form: AddSchoolForm }) {
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => field.handleChange(addCalendarMonths(trialEndDayProblem(field.state.value) ? istDay(new Date()) : field.state.value, 1))}
+              onClick={() => field.handleChange(addDays(trialEndDayProblem(field.state.value) ? istDay(new Date()) : field.state.value, BILLING_PERIOD_DAYS))}
             >
-              +1 month
+              +28 days
             </Button>
           </div>
           <FieldErrors errors={field.state.meta.errors} />
@@ -248,7 +251,7 @@ function NoPlanNotice({ form }: { form: AddSchoolForm }) {
       {(noPlan) =>
         noPlan ? (
           <p role="status" className="rounded-md border border-warning/50 bg-warning/10 p-3 text-xs text-foreground">
-            Without a subscription or a trial, this school has no plan. {NO_PLAN_CONSEQUENCE}
+            Without a standing tier or a trial, this school has no plan. {NO_PLAN_CONSEQUENCE}
           </p>
         ) : null
       }
@@ -310,7 +313,7 @@ export function AddSchoolDialog({
       <DialogContent className="max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Add school</DialogTitle>
-          <DialogDescription>Create a school with its subscription or a trial, and optionally upload its logo.</DialogDescription>
+          <DialogDescription>Create a school with a trial (or a standing tier), and optionally upload its logo.</DialogDescription>
         </DialogHeader>
         <form
           className="flex flex-col gap-4"

@@ -1,6 +1,6 @@
 import { db } from '@campuspilot/db';
 import { schoolTable } from '@campuspilot/db/schema/school';
-import { schoolTrialTable } from '@campuspilot/db/schema/school-trial';
+import { schoolBillingPeriodTable } from '@campuspilot/db/schema/school-billing';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 
@@ -33,7 +33,7 @@ import { readSchoolWriteFacts, resolveSchoolWriteRefusal, schoolNoPlanError } fr
 
 /**
  * A school without an active plan (no subscribed tier and no active trial,
- * docs/school-trials.md) is read-only exactly like a suspended one: reads
+ * docs/school-billing.md) is read-only exactly like a suspended one: reads
  * work, every change is refused with FORBIDDEN `data.reason =
  * 'SCHOOL_NO_PLAN'`, and nothing is deleted. Expiry is set up with
  * timestamps in the past, never by waiting.
@@ -58,7 +58,7 @@ const storedName = async (schoolId: string) =>
 
 /** Ends every trial of the school now by moving its end into the past, as time passing would. */
 const runOutTrials = (schoolId: string) =>
-  db.update(schoolTrialTable).set({ endsAt: new Date(Date.now() - 1000) }).where(eq(schoolTrialTable.schoolId, schoolId));
+  db.update(schoolBillingPeriodTable).set({ endsAt: new Date(Date.now() - 1000) }).where(eq(schoolBillingPeriodTable.schoolId, schoolId));
 
 describe('the write decision', () => {
   it('refuses a suspended school or one without a plan, and the suspension wins when both apply', () => {
@@ -240,18 +240,18 @@ describe('what the school\'s own apps are told about its plan', () => {
     const client = createTestClient(principal.session);
 
     const mine = new Map((await client.school.listMySchools()).map((school) => [school.id, school]));
-    expect(mine.get(subscribed.id)).toMatchObject({ hasActivePlan: true, trialEndsAt: null });
-    expect(mine.get(onTrial.id)).toMatchObject({ hasActivePlan: true, trialEndsAt: trial.endsAt.toISOString() });
+    expect(mine.get(subscribed.id)).toMatchObject({ hasActivePlan: true, planEndsAt: null });
+    expect(mine.get(onTrial.id)).toMatchObject({ hasActivePlan: true, planEndsAt: trial.endsAt.toISOString() });
     // A trial below the subscription gives nothing, so nothing is said about its end.
-    expect(mine.get(below.id)).toMatchObject({ hasActivePlan: true, trialEndsAt: null });
-    expect(mine.get(none.id)).toMatchObject({ hasActivePlan: false, trialEndsAt: null });
-    expect(await client.school.getSchool({ schoolId: onTrial.id })).toMatchObject({ hasActivePlan: true, trialEndsAt: trial.endsAt.toISOString() });
+    expect(mine.get(below.id)).toMatchObject({ hasActivePlan: true, planEndsAt: null });
+    expect(mine.get(none.id)).toMatchObject({ hasActivePlan: false, planEndsAt: null });
+    expect(await client.school.getSchool({ schoolId: onTrial.id })).toMatchObject({ hasActivePlan: true, planEndsAt: trial.endsAt.toISOString() });
     // Read-only, but readable: the facts are there for a school without a plan too.
-    expect(await client.school.getSchool({ schoolId: none.id })).toMatchObject({ hasActivePlan: false, trialEndsAt: null });
+    expect(await client.school.getSchool({ schoolId: none.id })).toMatchObject({ hasActivePlan: false, planEndsAt: null });
     await expect(client.school.updateSchool({ schoolId: onTrial.id, name: 'Renamed On A Trial' })).resolves.toMatchObject({
       name: 'Renamed On A Trial',
       hasActivePlan: true,
-      trialEndsAt: trial.endsAt.toISOString(),
+      planEndsAt: trial.endsAt.toISOString(),
     });
   });
 
@@ -260,7 +260,7 @@ describe('what the school\'s own apps are told about its plan', () => {
     const trial = await createTestSchoolTrial({ schoolId: school.id, tier: 'enterprise' });
     const admission = await createTestAdmission({ schoolId: school.id });
     const { client } = await createCadetLogin(admission.id);
-    await expect(client.getSchool()).resolves.toMatchObject({ isSuspended: false, hasActivePlan: true, trialEndsAt: trial.endsAt.toISOString() });
+    await expect(client.getSchool()).resolves.toMatchObject({ isSuspended: false, hasActivePlan: true, planEndsAt: trial.endsAt.toISOString() });
   });
 });
 

@@ -73,7 +73,7 @@ export const cadetLoginProcedure = co.use(async ({ context, next, procedure }) =
  * Portal unavailable" instead of sending the student back to sign-in.
  *
  * A suspended school, and a school without an active plan, is read-only
- * for its students too (docs/school-suspension.md, docs/school-trials.md):
+ * for its students too (docs/school-suspension.md, docs/school-billing.md):
  * after the feature check, every procedure that is not an explicit read is
  * refused with the read-only school error (`SCHOOL_SUSPENDED` or
  * `SCHOOL_NO_PLAN`). The actions on {@link cadetLoginProcedure} are not held

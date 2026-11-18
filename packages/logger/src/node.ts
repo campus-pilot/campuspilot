@@ -1,3 +1,9 @@
+/**
+ * Node logger (the package's default export condition; `browser.ts` is the
+ * browser one). Keep the file name free of a `.node` suffix: an extensionless
+ * import such as `./index.node` is read by Node and tsx as a native addon, so
+ * `.ts` is never tried and `tsx watch` fails with ERR_MODULE_NOT_FOUND.
+ */
 import { logEnv } from '@campuspilot/env/log';
 import { pino, type Logger, type LoggerOptions, type Bindings } from 'pino';
 import { CENSOR, sanitizeLogArgs, sanitizeLogRecord } from './sanitize';

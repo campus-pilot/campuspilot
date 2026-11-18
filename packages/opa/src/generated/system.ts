@@ -5,9 +5,11 @@ export const SYSTEM_ACTIONS = {
   CREATE_DEMO_SCHOOL: 'system.school.demo.create',
   CREATE_OAUTH_CLIENT: 'system.oauth_client.create',
   CREATE_SCHOOL: 'system.school.create',
+  DECIDE_SCHOOL_CREATION_REQUEST: 'system.school_creation_request.decide',
   DELETE_OAUTH_CLIENT: 'system.oauth_client.delete',
   DELETE_SCHOOL: 'system.school.delete',
   LIST_OAUTH_CLIENTS: 'system.oauth_client.list',
+  LIST_SCHOOL_CREATION_REQUESTS: 'system.school_creation_request.list',
   LIST_SCHOOLS: 'system.school.list',
   LIST_USERS: 'system.user.list',
   PURGE_DEMO_SCHOOL: 'system.school.demo.purge',
@@ -24,6 +26,7 @@ export const SYSTEM_ACTIONS = {
   UPDATE_OAUTH_CLIENT: 'system.oauth_client.update',
   UPDATE_SCHOOL: 'system.school.update',
   UPDATE_SCHOOL_FEATURE_FLAGS: 'system.school.feature_flags.update',
+  UPDATE_SUBSCRIPTION_PRICES: 'system.subscription_price.update',
   UPDATE_USER_SIGN_IN: 'system.user.sign_in.update',
 } as const;
 

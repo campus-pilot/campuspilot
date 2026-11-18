@@ -5,13 +5,15 @@ import { featureFlagsRouter } from "./feature-flags/feature-flags.router";
 import { demoSchoolRouter } from "./demo-school/demo-school.router";
 import { oauthClientRouter } from "./oauth-client/oauth-client.router";
 import { schoolRouter } from "./school/school.router";
-import { schoolTrialRouter } from "./school-trial/school-trial.router";
+import { schoolBillingRouter } from "./school-billing/school-billing.router";
+import { schoolCreationRequestRouter } from "./school-creation-request/school-creation-request.router";
 import { statsRouter } from "./stats/stats.router";
 import { userRouter } from "./user/user.router";
 
 export const systemAdminRouter = {
   ...schoolRouter,
-  ...schoolTrialRouter,
+  ...schoolBillingRouter,
+  ...schoolCreationRequestRouter,
   ...oauthClientRouter,
   ...demoSchoolRouter,
   ...statsRouter,

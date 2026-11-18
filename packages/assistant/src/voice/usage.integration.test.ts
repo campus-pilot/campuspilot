@@ -1,4 +1,4 @@
-import { schoolMonthSpendUsd } from '@campuspilot/api/assistant/spend';
+import { schoolWindowSpendUsd } from '@campuspilot/api/assistant/spend';
 import { assistantModelRequestTable } from '@campuspilot/db/schema/assistant';
 import { getRedisClient } from '@campuspilot/redis/client';
 import { asc, eq } from 'drizzle-orm';
@@ -57,7 +57,7 @@ describe('recordVoiceUsage', () => {
     const { schoolId } = await record({ textInputTokens: 1_000_000, audioInputTokens: 0, textOutputTokens: 0, audioOutputTokens: 1_000_000 });
     // The sum is cached; this school is new, so the first read computes it.
     await getRedisClient().flushdb();
-    expect(Number(await schoolMonthSpendUsd(db, schoolId))).toBeCloseTo(12.75, 8);
+    expect(Number(await schoolWindowSpendUsd(db, schoolId))).toBeCloseTo(12.75, 8);
   });
 
   it('saves no row for a modality without tokens, and nothing for an empty reply', async () => {

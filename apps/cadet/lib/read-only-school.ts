@@ -8,7 +8,7 @@ import {
 /**
  * What a student is told while their school is read-only: suspended
  * (docs/school-suspension.md) or without an active plan
- * (docs/school-trials.md), on the portal's notice and wherever a change they
+ * (docs/school-billing.md), on the portal's notice and wherever a change they
  * asked for was refused. Students contact their school, not CampusPilot: it
  * is the school's staff who are told to contact CampusPilot.
  */

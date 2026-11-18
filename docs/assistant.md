@@ -136,10 +136,11 @@ its own check, and the first that fails is returned with a message for the user:
    role list (`role_not_enabled`);
 5. the school is not suspended (`school_suspended`; a suspended school is
    read-only, see [School suspension](school-suspension.md)) and has an
-   active plan (`no_plan`; see [School trials](school-trials.md)); the
+   active plan (`no_plan`; see [School billing](school-billing.md)); the
    suspension is named when both apply;
-6. the school's saved spend in the current IST month is below
-   `monthlyLimitUsd` (`limit_reached`). The month spend is cached in Redis for
+6. the school's saved spend in its current billing period (the IST month for
+   a school on a standing tier alone; [School billing](school-billing.md#the-ai-limit-counts-per-period))
+   is below `monthlyLimitUsd` (`limit_reached`). The spend is cached in Redis for
    10 minutes, so a limit can be overshot by what is spent in that window.
 
 There is no OPA grant to use the assistant: the school's role list is the only
@@ -495,7 +496,7 @@ cached in Redis for an hour. Every answer carries `computedAt`, which each
 usage page shows ("Updated 11 Nov, 7:12 pm IST") next to a Refresh button;
 Refresh sends `refresh: true`, which computes the figures again from the saved
 rows and replaces the cached answer for everyone reading that range. Refresh
-does not touch the 10-minute spend cache the monthly limit uses.
+does not touch the 10-minute spend cache the spending limit uses.
 Provider consoles group days in their own time zone: compare months, not days.
 INR is shown only in the admin app, at a rate the viewer types, kept in the
 browser's localStorage and never sent to the API.

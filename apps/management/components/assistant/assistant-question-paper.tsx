@@ -27,6 +27,7 @@ import type { ReactNode } from 'react';
 
 import { RequirePermissions } from '@/components/require-permissions';
 import { useDownloadQuestionPaper } from '@/components/question-paper/use-question-paper-detail';
+import { VersionPdf } from '@/components/question-paper/version-pdf';
 import { requestErrorMessage } from '@/components/question-paper/question-paper-model';
 import { client, orpc } from '@/lib/orpc';
 
@@ -265,20 +266,24 @@ export function AssistantDraftCard({
   );
 }
 
+/** A saved version in the Preview dialog: its PDF, under what was removed from its HTML and its figure placeholders (as in the studio). */
 function VersionPreviewBody({ view, schoolId }: { view: AssistantQuestionPaperView; schoolId: string }) {
-  const preview = useQuery({
-    ...orpc.school.getQuestionPaperPreview.queryOptions({ input: { ...view, schoolId } }),
+  const scope = { ...view, schoolId };
+  const notes = useQuery({
+    ...orpc.school.getQuestionPaperPreview.queryOptions({ input: scope }),
     retry: retryUnlessRefused,
   });
-  if (preview.isPending) return <Skeleton className="h-full w-full rounded-xl" />;
-  if (preview.isError) return <PreviewMessage>{requestErrorMessage(preview.error, 'This version could not be previewed.')}</PreviewMessage>;
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto">
-      <RemovedList lines={preview.data.warnings.map((notice) => notice.message)} />
-      <PlaceholderNote count={preview.data.placeholderFigures} />
+      {notes.data ? (
+        <>
+          <RemovedList lines={notes.data.warnings.map((notice) => notice.message)} />
+          <PlaceholderNote count={notes.data.placeholderFigures} />
+        </>
+      ) : null}
       {/* A long list of removed parts scrolls this column instead of squeezing the paper away. */}
       <div className="min-h-80 flex-1">
-        <DocumentPreview html={preview.data.html} label="Question paper preview" fitPageWidth fill />
+        <VersionPdf scope={scope} versionNo={view.versionNo} />
       </div>
     </div>
   );

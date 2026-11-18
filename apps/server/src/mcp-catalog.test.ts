@@ -132,12 +132,16 @@ const HIDDEN_TOOLS = [
   // ability to work: a human platform decision, made in the admin app.
   'systemAdmin.suspendSchool',
   'systemAdmin.unsuspendSchool',
-  // So are a school's trials (docs/school-trials.md), and their history is
-  // only read where they are managed.
-  'systemAdmin.listSchoolTrials',
+  // So is a school's billing (docs/school-billing.md): its periods, payments
+  // and the price catalogue are read and changed only where they are managed.
+  'systemAdmin.getSchoolBilling',
   'systemAdmin.startSchoolTrial',
   'systemAdmin.updateSchoolTrial',
-  'systemAdmin.endSchoolTrial',
+  'systemAdmin.endSchoolBillingPeriod',
+  'systemAdmin.addSchoolBillingPeriods',
+  'systemAdmin.voidSchoolInvoice',
+  'systemAdmin.listSubscriptionPrices',
+  'systemAdmin.setSubscriptionPrice',
   // The school's assistant role list as the platform administrator edits it;
   // hidden like every assistant setting (school.getAssistantAccess,
   // school.updateAssistantRoles), so never offered to the assistant itself.
@@ -162,6 +166,16 @@ const HIDDEN_TOOLS = [
   // reads any paper with getQuestionPaper and saves its own edit instead.
   'school.listQuestionPaperCopySources',
   'school.copyQuestionPaperVersion',
+  // Opening a school and asking CampusPilot for more are a person's own
+  // decisions (docs/school-creation.md), and so is deciding such a request,
+  // or naming a school's owner.
+  'schoolCreation.getStatus',
+  'schoolCreation.createSchool',
+  'schoolCreation.requestMore',
+  'systemAdmin.listSchoolCreationRequests',
+  'systemAdmin.countPendingSchoolCreationRequests',
+  'systemAdmin.decideSchoolCreationRequest',
+  'systemAdmin.updateSchoolOwner',
 ];
 
 /**
