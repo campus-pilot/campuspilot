@@ -41,7 +41,12 @@ async function loadImage(file: File): Promise<HTMLImageElement> {
   }
 }
 
-async function prepareSchoolLogo(file: File): Promise<File> {
+/**
+ * Checks, resizes and compresses a logo in the browser. Exported so a caller
+ * can refuse a bad image before doing anything else, such as creating the
+ * school the logo is for.
+ */
+export async function prepareSchoolLogo(file: File): Promise<File> {
   if (!SCHOOL_LOGO_MIME_TYPES.some((type) => type === file.type)) {
     throw new Error('Choose a JPEG, PNG, or WebP image.');
   }
@@ -148,14 +153,12 @@ function uploadFormData(
   });
 }
 
-/** Compresses a logo locally, then uploads it through the permissioned blob endpoint. */
-export async function uploadSchoolLogo(
+/** Uploads a logo already passed through {@link prepareSchoolLogo} to the permissioned blob endpoint. */
+export async function uploadPreparedSchoolLogo(
   schoolId: string,
-  source: File,
+  logo: File,
   options: SchoolLogoUploadOptions = {},
 ): Promise<SchoolDetailsDto> {
-  options.signal?.throwIfAborted();
-  const logo = await prepareSchoolLogo(source);
   options.signal?.throwIfAborted();
   const formData = new FormData();
   formData.set(SCHOOL_LOGO_FIELD_NAME, logo);
@@ -169,4 +172,15 @@ export async function uploadSchoolLogo(
     options,
   );
   return schoolDetailsDtoSchema.parse(body);
+}
+
+/** Compresses a logo locally, then uploads it through the permissioned blob endpoint. */
+export async function uploadSchoolLogo(
+  schoolId: string,
+  source: File,
+  options: SchoolLogoUploadOptions = {},
+): Promise<SchoolDetailsDto> {
+  options.signal?.throwIfAborted();
+  const logo = await prepareSchoolLogo(source);
+  return uploadPreparedSchoolLogo(schoolId, logo, options);
 }
