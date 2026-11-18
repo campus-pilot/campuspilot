@@ -21,7 +21,7 @@ vi.mock('@modelcontextprotocol/client', () => ({
 }));
 
 import { catalogOf, mcpTool } from '../testing/turn';
-import { callTool, loadToolCatalog, toolCatalogForSchool } from './tools';
+import { callTool, loadToolCatalog, requiresApproval, toolCatalogForSchool } from './tools';
 
 const listed = (name: string, meta: Record<string, unknown> = {}) => ({
   name,
@@ -102,5 +102,21 @@ describe('tools of a school', () => {
     // The assistant has no notice tools: a school without notices loses nothing, so nothing is withheld.
     const catalog = catalogOf(mcpTool('school.listStudents', 'read', { features: ['studentManagement'] }), mcpTool('school.listQuestionPapers', 'read'));
     expect([...toolCatalogForSchool(catalog, new Set(['studentManagement'])).withheldFeatures]).toEqual([]);
+  });
+});
+
+describe('approval', () => {
+  it('asks for every write except one the API lists as skipping approval, and never for a read', async () => {
+    mcp.tools = [
+      listed('school.getQuestionPaper'),
+      { ...listed('school.saveQuestionPaperVersion', { [ASSISTANT_TOOL_META.skipsApproval]: true }), annotations: { readOnlyHint: false } },
+      { ...listed('school.updateStudent'), annotations: { readOnlyHint: false } },
+    ];
+    // Past the listing cache the tests above filled; this block is last so its own listing stays out of theirs.
+    vi.useFakeTimers({ now: Date.now() + 10 * 60_000, toFake: ['Date'] });
+    const { tools } = await loadToolCatalog('token').finally(() => vi.useRealTimers());
+    expect(requiresApproval(tools.get('school_getQuestionPaper')!)).toBe(false);
+    expect(requiresApproval(tools.get('school_saveQuestionPaperVersion')!)).toBe(false);
+    expect(requiresApproval(tools.get('school_updateStudent')!)).toBe(true);
   });
 });

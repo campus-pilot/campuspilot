@@ -118,8 +118,8 @@ function RoleAccessForm({ schoolId, access, canManage }: { schoolId: string; acc
 
 function limitText(access: AssistantAccessDto) {
   return access.monthlyLimitUsd === null
-    ? 'Your plan has no monthly limit.'
-    : `Your plan allows ${formatUsdText(String(access.monthlyLimitUsd))} of assistant use per calendar month; once it is reached the assistant is unavailable until the 1st.`;
+    ? 'Your plan has no assistant spending limit.'
+    : `Your plan allows ${formatUsdText(String(access.monthlyLimitUsd))} of assistant use every 28 days of a billing period, or every calendar month without one; once it is reached the assistant is unavailable until the next of these begins.`;
 }
 
 /**

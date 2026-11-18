@@ -58,6 +58,12 @@ export type AssistantTool = {
    * otherwise.
    */
   outputChars?: number;
+  /**
+   * A write the API lists with `skipsApproval` (an additive write the user can
+   * undo, such as saving a new question paper version): it runs without the
+   * approval card.
+   */
+  skipsApproval?: true;
 };
 
 export type AssistantToolCatalog = {
@@ -67,11 +73,12 @@ export type AssistantToolCatalog = {
 };
 
 /**
- * Approval policy: every write waits for the user's explicit decision; reads
- * run immediately. One function so a finer policy changes exactly here.
+ * Approval policy: every write waits for the user's explicit decision, unless
+ * the API lists it with `skipsApproval`; reads run immediately. One function
+ * so a finer policy changes exactly here.
  */
 export function requiresApproval(tool: AssistantTool): boolean {
-  return tool.source === 'mcp' && !tool.readOnly;
+  return tool.source === 'mcp' && !tool.readOnly && tool.skipsApproval !== true;
 }
 
 /** The display tool: always loaded, so the model can show views from the start. */
@@ -170,6 +177,7 @@ export async function loadToolCatalog(token: string): Promise<AssistantToolCatal
       ...(typeof meta[ASSISTANT_TOOL_META.outputChars] === 'number'
         ? { outputChars: meta[ASSISTANT_TOOL_META.outputChars] as number }
         : {}),
+      ...(meta[ASSISTANT_TOOL_META.skipsApproval] === true ? { skipsApproval: true as const } : {}),
     };
     if (tools.has(tool.modelName)) {
       throw new Error(`Assistant tool name collision: ${tool.modelName}.`);

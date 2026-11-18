@@ -71,7 +71,7 @@ describe('cadet web push subscriptions', () => {
 
   it("returns the student's own school's public details", async () => {
     const { client, school } = await student();
-    expect(await client.getSchool()).toEqual({ id: school.id, name: school.name, hasLogo: school.logoS3Key !== null, isSuspended: false, hasActivePlan: true, trialEndsAt: null });
+    expect(await client.getSchool()).toEqual({ id: school.id, name: school.name, hasLogo: school.logoS3Key !== null, isSuspended: false, hasActivePlan: true, planSource: 'standing', planEndsAt: null });
   });
 
   it('refuses endpoints that are not a known push service (SSRF guard)', async () => {

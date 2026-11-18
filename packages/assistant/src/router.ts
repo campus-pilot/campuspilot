@@ -419,6 +419,7 @@ export const assistantRouter = os.router({
           ...(input.pageContext ? { pageContext: input.pageContext } : {}),
           ...(attachments.length > 0 ? { attachments: attachments.map(toAttachmentRef) } : {}),
           ...(input.seed ? { seed: input.seed } : {}),
+          ...(input.tier === 'pro' ? { tier: 'pro' as const } : {}),
           author: { userId, name: context.session.user.name },
         },
         itemKey: userMessageItemKey(runId),

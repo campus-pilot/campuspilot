@@ -7,7 +7,8 @@ import type { ModelUsage, QuestionPaperModel } from './model';
 
 /**
  * The base key of the model requests of one attempt of a job. `n` is the
- * request's place in the job (1 the transcription, 2 the repair). The first
+ * request's place in the job (0 the figure route's decision, 1 the
+ * transcription, 2 the repair). The first
  * answered call is saved under the base key; every other billed call of the
  * same request (a failed attempt the provider billed, or a call repeated
  * because Restate re-ran the step after it was billed) adds `:attempt:{k}`.

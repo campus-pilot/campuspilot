@@ -180,9 +180,9 @@ export type AssistantComposerProps = {
     remove: (ref: AssistantAttachmentRef) => Promise<void>;
     onNotice: (message: string) => void;
   };
-  /** Left side of the toolbar, e.g. the trust cue. */
+  /** Left side of the toolbar, e.g. developer diagnostics. */
   leading?: ReactNode;
-  /** Right side of the toolbar, just before Send: the button that starts voice mode. */
+  /** Right side of the toolbar, just before Send: e.g. the trust cue, the model picker and the voice button. */
   trailing?: ReactNode;
   /**
    * Sections at the top of the box, above the message field: a change

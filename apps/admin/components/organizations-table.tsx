@@ -20,8 +20,8 @@ import { SchoolAvatar } from './school-avatar';
 import { SchoolBadges } from './school-badges';
 
 type OrganizationOrderField = 'name' | 'location' | 'createdAt' | 'updatedAt';
-/** `plan`: schools on an active trial, or schools without a plan (docs/school-trials.md). */
-type OrganizationFilters = { plan?: 'trial' | 'none' };
+/** `plan`: schools in an active billing period of a kind, or schools without a plan (docs/school-billing.md). */
+type OrganizationFilters = { plan?: 'trial' | 'paid' | 'complimentary' | 'none' };
 type OrganizationListController = DataTableListController<
   OrganizationOrderField,
   OrganizationFilters
@@ -34,6 +34,8 @@ const organizationFilters: TableFilterConfig<keyof OrganizationFilters>[] = [
     type: 'single',
     options: [
       { value: 'trial', label: 'On a trial' },
+      { value: 'paid', label: 'Paid period' },
+      { value: 'complimentary', label: 'Free period' },
       { value: 'none', label: 'No plan' },
     ],
   },

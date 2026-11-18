@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { assistantConversationAttention, type AssistantRunStatus } from '@campuspilot/assistant-contract/dto';
 import { istMonthOf } from '@campuspilot/api/assistant/ist';
-import { schoolMonthSpendUsd } from '@campuspilot/api/assistant/spend';
+import { schoolWindowSpendUsd } from '@campuspilot/api/assistant/spend';
 import { getRedisClient } from '@campuspilot/redis/client';
 import {
   assistantApprovalTable,
@@ -549,7 +549,7 @@ describe('deleting a conversation', () => {
     );
     const monthKey = `assistant:spend:${turn.schoolId}:${istMonthOf(new Date()).month}`;
     await getRedisClient().del(monthKey);
-    expect(await schoolMonthSpendUsd(db, turn.schoolId)).toBe('0.75000000');
+    expect(await schoolWindowSpendUsd(db, turn.schoolId)).toBe('0.75000000');
 
     await expect(remove(turn, turn.userId)).resolves.toEqual({ id: turn.conversationId });
 
@@ -558,7 +558,7 @@ describe('deleting a conversation', () => {
     // A run with costs cannot be hard-deleted: the costs would be dropped or unlinked.
     await expect(db.delete(assistantRunTable).where(eq(assistantRunTable.id, turn.runId))).rejects.toThrow();
     await getRedisClient().del(monthKey);
-    expect(await schoolMonthSpendUsd(db, turn.schoolId)).toBe('0.75000000');
+    expect(await schoolWindowSpendUsd(db, turn.schoolId)).toBe('0.75000000');
   });
 
   it('is refused without a session', async () => {
@@ -766,6 +766,14 @@ describe('images attached to a message', () => {
     const seed = { kind: 'question_paper', sessionId: 'ss', examSlug: 'half-yearly', classId: 'cl', subjectSlug: 'science', modeSlug: 'theory' };
     const sent = await startConversation(owner, { text: 'I want to update this question paper: add one', seed });
     expect(sent.item.body.seed).toEqual(seed);
+  });
+
+  it('keeps Pro on the message it was picked for, and nothing for Fast', async () => {
+    const owner = await newOwner();
+    const pro = await startConversation(owner, { text: 'Redraw question 6.', tier: 'pro' });
+    expect(pro.item.body.tier).toBe('pro');
+    const fast = await startConversation(owner, { text: 'Thanks.', tier: 'standard' });
+    expect(fast.item.body.tier).toBeUndefined();
   });
 
   it('refuses a seed that names no paper of the school, before anything is saved', async () => {

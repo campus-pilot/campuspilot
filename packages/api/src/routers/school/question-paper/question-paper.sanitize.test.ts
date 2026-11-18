@@ -2,7 +2,7 @@ import { QUESTION_PAPER_LIMITS as L } from '@campuspilot/question-paper/limits';
 import { EXAMPLE_ENGLISH_SCIENCE_HTML, EXAMPLE_HINDI_MATH_HTML } from '@campuspilot/question-paper/examples';
 import { describe, expect, it } from 'vitest';
 
-import { sanitizeQuestionPaperBody } from './question-paper.sanitize';
+import { renameReservedClasses, sanitizeQuestionPaperBody } from './question-paper.sanitize';
 
 const clean = (html: string) => sanitizeQuestionPaperBody(html);
 const FIGURE = 'qpf_0123456789abcdefghijk';
@@ -220,6 +220,30 @@ describe('question_paper_body sanitiser: hostile input', () => {
     expect(result.stats.mathNodes).toBe(1);
   });
 
+  it('halves the backslashes of a formula escaped twice, so it is not typeset as a line break and letters', () => {
+    const math = (tex: string) => clean(`<span data-math="${tex}"></span>`).html;
+    expect(math(String.raw`\\frac{4}{7}`)).toBe(String.raw`<span data-math="\frac{4}{7}"></span>`);
+    expect(math(String.raw`\\frac{5}{10} \\square \\frac{4}{10}`)).toBe(String.raw`<span data-math="\frac{5}{10} \square \frac{4}{10}"></span>`);
+    expect(math(String.raw`\\begin{bmatrix}1&amp;2\\\\3&amp;4\\end{bmatrix}`)).toBe(
+      String.raw`<span data-math="\begin{bmatrix}1&amp;2\\3&amp;4\end{bmatrix}"></span>`,
+    );
+  });
+
+  it('keeps a formula with any single backslash, and a line break with no command, as written', () => {
+    for (const tex of [String.raw`\frac{1}{2}`, String.raw`\begin{bmatrix}a\\b\end{bmatrix}`, String.raw`a \\ b`, String.raw`\\\\frac{1}{2}`]) {
+      expect(clean(`<span data-math="${tex}"></span>`).html).toBe(`<span data-math="${tex}"></span>`);
+    }
+  });
+
+  it('prints a placeholder written without a description as "Figure" instead of an empty figure', () => {
+    for (const figure of ['<figure data-placeholder></figure>', '<figure data-placeholder="  "></figure>']) {
+      const result = clean(figure);
+      expect(result.html).toBe('<figure data-placeholder="Figure"></figure>');
+      expect(result.stripped).toEqual([]);
+      expect(result.stats.placeholders).toBe(1);
+    }
+  });
+
   it('drops reserved class names and unknown attributes', () => {
     const result = clean('<div class="qp-body katex ok question-paper-document" id="qp-body-slot" data-x="1" title="t">x</div>');
     expect(result.html).toBe('<div class="ok">x</div>');
@@ -281,5 +305,36 @@ describe('question_paper_body sanitiser: hostile input', () => {
     clean(`<p ${'a="1" '.repeat(5000)}>x</p>` + '<'.repeat(50_000) + '<style>' + '{'.repeat(50_000));
     clean(`<style>${'a{'.repeat(20_000)}</style>`);
     expect(performance.now() - started).toBeLessThan(3_000);
+  });
+});
+
+describe('renaming the class names a fragment reserved by mistake', () => {
+  const PAPER = '<style>.qp-question{display:flex;gap:2mm}.qp-question .qp-marks{margin-left:auto}.katex-note{color:red}</style><div class="qp-question big"><span>1) Add.</span><span class="qp-marks">[2]</span></div>';
+
+  it('keeps the styling a paper written with qp- classes would otherwise lose', () => {
+    const stripped = clean(PAPER);
+    expect(stripped.html).toContain('<div class="big">');
+    expect(stripped.html).not.toContain('display:flex');
+    expect(stripped.stripped.join()).toContain('reserved by the page was removed');
+
+    const renamed = clean(renameReservedClasses(PAPER));
+    expect(renamed.stripped).toEqual([]);
+    expect(renamed.html).toContain('<div class="x-qp-question big">');
+    expect(renamed.html).toContain('<span class="x-qp-marks">');
+    expect(renamed.html).toContain('.qp-body .x-qp-question{display:flex;gap:2mm}');
+    expect(renamed.html).toContain('.qp-body .x-qp-question .x-qp-marks{margin-left:auto}');
+    expect(renamed.html).toContain('.qp-body .x-katex-note{color:red}');
+  });
+
+  it('leaves a stored fragment, with its .qp-body prefix, and one without reserved names exactly as it is', () => {
+    const stored = clean('<style>.q{display:flex}</style><div class="q">1)</div>').html;
+    expect(stored).toContain('.qp-body .q{display:flex}');
+    expect(renameReservedClasses(stored)).toBe(stored);
+    expect(renameReservedClasses(EXAMPLE_HINDI_MATH_HTML)).toBe(EXAMPLE_HINDI_MATH_HTML);
+  });
+
+  it('keeps the wrapper prefix and renames the class after it', () => {
+    expect(renameReservedClasses('<style>.qp-body .qp-q{color:red}</style>')).toBe('<style>.qp-body .x-qp-q{color:red}</style>');
+    expect(renameReservedClasses('<style>.qp-body{color:red}</style>')).toBe('<style>.x-qp-body{color:red}</style>');
   });
 });

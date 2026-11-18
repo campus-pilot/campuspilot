@@ -118,6 +118,23 @@ const COLOUR = /^(?:none|currentcolor|transparent|#[0-9a-f]{3,8}|[a-z]{3,20}|rgb
 const NUMBER_LIST = /^[0-9eE+\-., %a-z]{0,2000}$/;
 const FORBIDDEN_ATTRIBUTE_VALUE = /url\s*\(|javascript|data:|expression|@import|[<>\\]/i;
 
+const BACKSLASH_RUN = /\\+/g;
+const DOUBLED_COMMAND = /(?<!\\)\\\\[A-Za-z]/;
+
+/**
+ * A model that sends the paper as a JSON string sometimes escapes LaTeX twice, so `\frac{4}{7}` arrives as
+ * `\\frac{4}{7}`. KaTeX accepts that (a line break, then the letters "frac") and the paper would print italic words
+ * instead of a fraction. A formula whose backslashes all come in even runs, one of them a pair before a command, is
+ * read as escaped twice and every run is halved. Any single backslash means the formula was written as meant, so a
+ * real line break (`a\\b` inside a matrix next to `\begin`) is kept. Halving leaves a single backslash, so cleaning
+ * the result again changes nothing.
+ */
+function undoubleTexBackslashes(tex: string): string {
+  if (!DOUBLED_COMMAND.test(tex)) return tex;
+  if ([...tex.matchAll(BACKSLASH_RUN)].some((run) => run[0].length % 2 === 1)) return tex;
+  return tex.replace(BACKSLASH_RUN, (run) => '\\'.repeat(run.length / 2));
+}
+
 type Cleaner = (value: string) => string | null;
 
 const integer = (min: number, max: number): Cleaner => (value) => {
@@ -325,7 +342,7 @@ function cleanOnce(raw: string): Pass {
         cleaned = cleanDeclarations(value, report);
         if (cleaned !== '' && /url\s*\(/i.test(cleaned)) cleaned = '';
       } else if (lower === 'data-math' && tag === 'span') {
-        cleaned = value.normalize('NFC').trim();
+        cleaned = undoubleTexBackslashes(value.normalize('NFC').trim());
         if (cleaned === '') cleaned = null;
       } else if (lower === 'data-display' && tag === 'span') cleaned = /^(?:true|)$/i.test(value.trim()) ? 'true' : null;
       else if (lower === 'data-figure-id' && (tag === 'img' || tag === 'figure')) {
@@ -335,8 +352,8 @@ function cleanOnce(raw: string): Pass {
           continue;
         }
       } else if (lower === 'data-placeholder' && tag === 'figure') {
-        cleaned = value.replace(/\s+/g, ' ').trim().slice(0, L.placeholderChars);
-        if (cleaned === '') cleaned = null;
+        // A placeholder written without a description still prints its dashed box, so the teacher sees a figure is missing.
+        cleaned = value.replace(/\s+/g, ' ').trim().slice(0, L.placeholderChars) || 'Figure';
       } else if (lower === 'alt' && tag === 'img') cleaned = value.replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, L.altChars);
       else if (isSvg && SVG_ATTRIBUTES[lower]) cleaned = SVG_ATTRIBUTES[lower]!(value);
       else if (HTML_ATTRIBUTES[tag]?.[lower]) cleaned = HTML_ATTRIBUTES[tag]![lower]!(value);
@@ -488,6 +505,34 @@ function statsOf(elements: readonly ScannedElement[], styleTexts: readonly strin
   stats.styleChars = styleTexts.reduce((sum, text) => sum + text.length, 0);
   stats.figureIds = [...figureIds];
   return stats;
+}
+
+/** A class reference in a style sheet that names a reserved class (`.qp-question`, `.katex-x`, `.question-paper-y`). */
+const RESERVED_SELECTOR_CLASS = /\.((?:qp|katex|question-paper)[A-Za-z0-9_-]*)/gi;
+const STYLE_ELEMENT = /(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi;
+const CLASS_ATTRIBUTE = /(\sclass\s*=\s*)(["'])([^"']*)\2/gi;
+
+/**
+ * Renames the class names a fragment gives itself that the page reserves
+ * ({@link RESERVED_CLASS}: `qp-question` becomes `x-qp-question`), in its class
+ * attributes and its style sheets alike, so its rules still match its markup.
+ * The sanitiser would otherwise remove every such class and every rule that
+ * names one, and a paper written with them is saved without any of its own
+ * styling (seen on a photographed paper: 165 class names and all its rules).
+ * The page's own classes stay untouched because nothing written after this can
+ * name them; the one wrapper prefix a stored fragment carries (`.qp-body ` at
+ * the start of a selector) is kept, so a stored fragment passes unchanged.
+ *
+ * Used where nobody can read the sanitiser's report and correct the markup:
+ * the generation job. A chat agent is told what was stripped and fixes it.
+ */
+export function renameReservedClasses(html: string): string {
+  const renamed = (name: string) => (RESERVED_CLASS.test(name) ? `x-${name}` : name);
+  return html
+    .replace(CLASS_ATTRIBUTE, (_match, prefix: string, quote: string, value: string) => `${prefix}${quote}${value.split(/(\s+)/).map(renamed).join('')}${quote}`)
+    .replace(STYLE_ELEMENT, (_match, open: string, css: string, close: string) =>
+      open + css.replace(RESERVED_SELECTOR_CLASS, (whole: string, name: string, offset: number, text: string) => (name.toLowerCase() === 'qp-body' && /\s/.test(text[offset + whole.length] ?? '') ? whole : `.x-${name}`)) + close,
+    );
 }
 
 /**

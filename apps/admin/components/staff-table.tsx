@@ -137,6 +137,7 @@ function createStaffColumns(
       enableSorting: false,
       cell: ({ row }) => (
         <div className="flex min-w-56 flex-wrap gap-1">
+          {row.original.isOwner ? <Badge>Owner</Badge> : null}
           {row.original.roles.map(({ role }) => (
             <Badge key={role} variant="secondary">
               {roleLabels[role]}
@@ -154,9 +155,11 @@ function createStaffColumns(
       id: 'actions',
       header: '',
       enableSorting: false,
-      cell: ({ row }) => (
-        <StaffRowActions member={row.original} onRemove={onRemove} />
-      ),
+      // The owner cannot be removed (transfer ownership in Settings first), so there is nothing to offer.
+      cell: ({ row }) =>
+        row.original.isOwner ? null : (
+          <StaffRowActions member={row.original} onRemove={onRemove} />
+        ),
     },
   ];
 }

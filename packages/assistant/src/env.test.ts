@@ -93,5 +93,34 @@ describe('the assistant environment', () => {
       expect(issuesOf({ ...GEMINI, QUESTION_PAPER_PROVIDER: 'gemini' })).toEqual([]);
       expect(issuesOf({ GEMINI_API_KEY: 'key', QUESTION_PAPER_PROVIDER: 'gemini' })).toContain('QUESTION_PAPER_PROVIDER');
     });
+
+    describe('the figure route', () => {
+      const FIGURE = {
+        QUESTION_PAPER_STRONG_MODEL: 'gemini-3.8-flash',
+        QUESTION_PAPER_STRONG_PRICE_INPUT_USD_PER_MTOK: '0.75',
+        QUESTION_PAPER_STRONG_PRICE_OUTPUT_USD_PER_MTOK: '3.75',
+        QUESTION_PAPER_STRONG_PRICE_CACHE_READ_USD_PER_MTOK: '0.075',
+        QUESTION_PAPER_STRONG_PRICE_CACHE_WRITE_USD_PER_MTOK: '0',
+        QUESTION_PAPER_DECISION_PRICE_INPUT_USD_PER_MTOK: '0.1',
+      };
+
+      it('is off by default and on with all six settings, with gemini-decision-1 as the decision model', () => {
+        expect(assistantEnvSchema.parse({}).QUESTION_PAPER_STRONG_MODEL).toBeUndefined();
+        const parsed = assistantEnvSchema.parse({ ...GEMINI, ...FIGURE });
+        expect(parsed).toMatchObject({ QUESTION_PAPER_STRONG_MODEL: 'gemini-3.8-flash', QUESTION_PAPER_DECISION_MODEL: 'gemini-decision-1' });
+      });
+
+      it('refuses part of it, naming each missing setting', () => {
+        const { QUESTION_PAPER_DECISION_PRICE_INPUT_USD_PER_MTOK: _decision, QUESTION_PAPER_STRONG_PRICE_OUTPUT_USD_PER_MTOK: _output, ...partial } = FIGURE;
+        expect(issuesOf({ ...GEMINI, ...partial }).sort()).toEqual(['QUESTION_PAPER_DECISION_PRICE_INPUT_USD_PER_MTOK', 'QUESTION_PAPER_STRONG_PRICE_OUTPUT_USD_PER_MTOK']);
+        expect(issuesOf({ ...GEMINI, QUESTION_PAPER_DECISION_PRICE_INPUT_USD_PER_MTOK: '0.1' })).toHaveLength(5);
+      });
+
+      it('needs question papers on Gemini, with a Gemini key', () => {
+        const anthropic = Object.fromEntries(Object.entries(GEMINI).map(([key, value]) => [key.replace('GEMINI', 'ANTHROPIC'), value]));
+        expect(issuesOf({ ...anthropic, ASSISTANT_PROVIDER: 'anthropic', ...FIGURE })).toEqual(['QUESTION_PAPER_STRONG_MODEL', 'QUESTION_PAPER_STRONG_MODEL']);
+        expect(issuesOf({ ...GEMINI, ...anthropic, ASSISTANT_PROVIDER: 'anthropic', QUESTION_PAPER_PROVIDER: 'gemini', ...FIGURE })).toEqual([]);
+      });
+    });
   });
 });

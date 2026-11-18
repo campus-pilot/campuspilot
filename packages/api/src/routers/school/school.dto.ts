@@ -1,3 +1,4 @@
+import { schoolPlanSourceSchema } from "@campuspilot/db/feature-flags/catalogue";
 import { z } from "zod";
 
 export const mySchoolDtoSchema = z.object({
@@ -16,21 +17,24 @@ export const mySchoolDtoSchema = z.object({
   isSuspended: z.boolean(),
   /**
    * The school has an active plan: a subscription or an active trial
-   * (docs/school-trials.md). Without one it is read-only and management
+   * (docs/school-billing.md). Without one it is read-only and management
    * shows a permanent warning.
    */
   hasActivePlan: z.boolean(),
   /**
-   * The school subscribes to a tier. Without one, the end of the trial that
-   * gives its plan leaves it blocked, which the trial's notice says.
+   * The school has a standing tier (docs/school-billing.md), so it keeps a
+   * plan when its billing periods run out; without one it is then blocked,
+   * which the plan's ending notice says.
    */
   hasSubscription: z.boolean(),
+  /** Where the plan comes from: `standing`, or the active period's kind (`trial`, `paid`, `complimentary`); null without a plan. */
+  planSource: schoolPlanSourceSchema.nullable(),
   /**
-   * When the trial that gives the school its plan ends (ISO date-time);
-   * null when no trial gives the plan. Management warns in the trial's last
-   * days.
+   * When the billing periods that give the school its plan run out (ISO
+   * date-time; a payment made ahead moves it); null when a standing tier
+   * gives the plan or there is none. Management warns in the last days.
    */
-  trialEndsAt: z.iso.datetime().nullable(),
+  planEndsAt: z.iso.datetime().nullable(),
 });
 
 export type MySchoolDto = z.infer<typeof mySchoolDtoSchema>;

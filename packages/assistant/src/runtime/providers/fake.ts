@@ -1,6 +1,6 @@
 import type { AssistantUserMessageBody } from '@campuspilot/db/schema/assistant';
 import { type AttachmentMarker } from '../../transcript';
-import { attachmentLabel, attachmentNote, stubLongInputFields } from '../context';
+import { attachmentLabel, attachmentNote } from '../context';
 import type { AssistantPrompt } from '../prompt';
 import type { ModelPrices } from './config';
 import type { ProviderRegistry } from './registry';
@@ -42,36 +42,8 @@ export type FakeDocumentBlock = { type: 'document'; mimeType: string; byteLength
 export type FakeAttachmentMarkerBlock = AttachmentMarker;
 export type FakeBlock = FakeTextBlock | FakeToolUseBlock | FakeToolResultBlock | FakeImageBlock | FakeDocumentBlock | FakeAttachmentMarkerBlock;
 
-/** The fake's pruning and attachment rules (see {@link ContextAdapter}); same shape as the real adapters, in its own format. */
+/** How the fake shows an attachment (see {@link ContextAdapter}); same shape as the real adapters, in its own format. */
 export const fakeContext: ContextAdapter = {
-  isHumanTurn: (entry) => entry.role === 'user' && !(entry.content as FakeBlock[]).some((block) => block.type === 'tool_result'),
-  toolNamesByUseId(entries) {
-    const names = new Map<string, string>();
-    for (const entry of entries) {
-      for (const block of entry.content as FakeBlock[]) if (block.type === 'tool_use') names.set(block.id, block.name);
-    }
-    return names;
-  },
-  stubToolResults(entry, toolNames, stub, minChars) {
-    if (!(entry.content as FakeBlock[]).some((block) => block.type === 'tool_result')) return entry;
-    return {
-      ...entry,
-      content: (entry.content as FakeBlock[]).map((block) =>
-        block.type === 'tool_result' && block.content.length >= minChars
-          ? { ...block, content: stub({ toolName: toolNames.get(block.toolUseId) ?? block.toolName, chars: block.content.length }) }
-          : block,
-      ),
-    };
-  },
-  stubToolInputs(entry, stub, minChars) {
-    if (!(entry.content as FakeBlock[]).some((block) => block.type === 'tool_use')) return entry;
-    return {
-      ...entry,
-      content: (entry.content as FakeBlock[]).map((block) =>
-        block.type === 'tool_use' ? { ...block, input: stubLongInputFields(block.name, block.input, stub, minChars) } : block,
-      ),
-    };
-  },
   materializeAttachment(marker: AttachmentMarker, file: AttachmentFile) {
     if (file.kind === 'document') {
       if (marker.kind !== 'document') return [{ type: 'text', text: attachmentNote(marker, 'unreadable') }];
@@ -87,7 +59,8 @@ export const fakeContext: ContextAdapter = {
       { type: 'image', mimeType: file.mimeType, byteLength: file.bytes.byteLength },
     ];
   },
-  stubAttachment: (marker) => [{ type: 'text', text: attachmentNote(marker, 'old') }],
+  text: (text) => ({ type: 'text', text }),
+  image: ({ mimeType, bytes }) => ({ type: 'image', mimeType, byteLength: bytes.byteLength }),
 };
 
 /** A response that was not stopped, as the fake's script holds it. */
@@ -309,12 +282,23 @@ export const FAKE_PRICES: ModelPrices = {
   cacheWriteUsdPerMtok: '3.125',
 };
 
-/** A registry holding only the given provider, as a turn's `deps.providers`. */
-export function fakeProviderRegistry(provider: ModelProvider | null, prices: ModelPrices = FAKE_PRICES): ProviderRegistry {
+/**
+ * A registry holding only the given provider, as a turn's `deps.providers`,
+ * and optionally what answers Pro, with its own prices: a stronger model of
+ * the same provider, or another provider.
+ */
+export function fakeProviderRegistry(
+  provider: ModelProvider | null,
+  prices: ModelPrices = FAKE_PRICES,
+  pro: { provider: ModelProvider; prices: ModelPrices } | null = null,
+): ProviderRegistry {
+  const isPro = (id: string, model: string | undefined) =>
+    pro !== null && id === pro.provider.id && (id !== provider?.id || (model === pro.provider.model && model !== provider?.model));
   return {
     current: provider,
     unavailableReason: provider ? null : 'No provider is configured in this test.',
-    get: (id) => (provider && provider.id === id ? provider : null),
-    prices: (id) => (provider && provider.id === id ? prices : null),
+    get: (id, model) => (isPro(id, model) ? pro!.provider : provider && provider.id === id ? provider : null),
+    prices: (id, model) => (isPro(id, model) ? pro!.prices : provider && provider.id === id ? prices : null),
+    pro: (id) => (provider && provider.id === id ? (pro?.provider ?? null) : null),
   };
 }
