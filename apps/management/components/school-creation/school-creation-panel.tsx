@@ -7,8 +7,8 @@ import { Alert, AlertDescription, AlertTitle } from '@campuspilot/ui/components/
 import { Button } from '@campuspilot/ui/components/button';
 import { Clock3, Info } from 'lucide-react';
 import { orpc } from '@/lib/orpc';
-import { CreateSchoolForm } from './create-school-form';
-import { RequestMoreSchoolsForm } from './request-more-schools-form';
+import { CreateSchoolDialog } from './create-school-form';
+import { RequestMoreSchoolsDialog } from './request-more-schools-form';
 
 const dateFormatter = new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium' });
 
@@ -53,18 +53,18 @@ function ApprovedRequestNotice({ note }: { note: string }) {
   );
 }
 
-/** The person used their allowance: their request's state, and the form to ask again when nothing is pending. */
+/** The person used their allowance: their request's state, and the button to ask again when nothing is pending. */
 function LimitReached({ status }: { status: SchoolCreationStatusDto }) {
   const request = status.latestRequest;
   if (request?.status === 'pending') return <PendingRequestNotice request={request} />;
   return (
-    <div className="flex flex-col gap-4">
-      <p className="text-left text-sm text-muted-foreground">
+    <div className="flex flex-col items-center gap-4">
+      <p className="text-sm text-muted-foreground">
         You have created {status.used} of the {status.limit} school{status.limit === 1 ? '' : 's'} your account
-        allows, counting schools that were deleted or handed over. Tell us why you need more.
+        allows, counting schools that were deleted or handed over.
       </p>
       {request?.status === 'rejected' ? <RejectedRequestNotice request={request} /> : null}
-      <RequestMoreSchoolsForm currentLimit={status.limit} />
+      <RequestMoreSchoolsDialog currentLimit={status.limit} />
     </div>
   );
 }
@@ -72,13 +72,11 @@ function LimitReached({ status }: { status: SchoolCreationStatusDto }) {
 function StatusBody({ status }: { status: SchoolCreationStatusDto }) {
   if (status.refusal === null) {
     const note = approvalNoteOf(status);
-    return note ? (
-      <div className="flex flex-col gap-4">
-        <ApprovedRequestNotice note={note} />
-        <CreateSchoolForm limit={status.limit} used={status.used} />
+    return (
+      <div className="flex flex-col items-center gap-4">
+        {note ? <ApprovedRequestNotice note={note} /> : null}
+        <CreateSchoolDialog />
       </div>
-    ) : (
-      <CreateSchoolForm limit={status.limit} used={status.used} />
     );
   }
   if (status.refusal === 'limit_reached') return <LimitReached status={status} />;
@@ -92,14 +90,15 @@ function StatusBody({ status }: { status: SchoolCreationStatusDto }) {
 
 /**
  * Self-service school creation (docs/school-creation.md), decided by the
- * server's status: the create form while the person may create a school,
- * the request for more once their allowance is used, and the reason
- * otherwise (staff of another school, a demo account, an unverified email).
+ * server's status: the Create a school button (its form opens in a dialog)
+ * while the person may create a school, the button to ask for more once their
+ * allowance is used, and the reason otherwise (staff of another school, a
+ * demo account, an unverified email).
  */
 export function SchoolCreationPanel() {
   const statusQuery = useQuery(orpc.schoolCreation.getStatus.queryOptions());
   if (statusQuery.isPending) {
-    return <div className="h-64 w-full animate-pulse rounded-lg bg-muted" />;
+    return <div className="mx-auto h-9 w-40 animate-pulse rounded-md bg-muted" />;
   }
   if (!statusQuery.data) {
     return (
