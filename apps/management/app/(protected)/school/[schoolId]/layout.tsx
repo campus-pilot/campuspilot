@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
-import { Suspense, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { AssistantVoiceOverlay } from '@/components/assistant/voice/assistant-voice-overlay';
-import { NewSchoolWelcomeDialog } from '@/components/school-creation/new-school-welcome';
 import { SchoolInstallGate } from '@/components/school-install-gate';
 import { SchoolAccessBoundary } from '@/components/school-selection';
 
@@ -27,10 +26,6 @@ export default async function SelectedSchoolLayout({
         {children}
         {/* Above every page and both shells, so a voice session survives navigation inside the school. */}
         <AssistantVoiceOverlay schoolId={schoolId} />
-        {/* Reads the URL's search parameters, which need a Suspense boundary of their own. */}
-        <Suspense fallback={null}>
-          <NewSchoolWelcomeDialog schoolId={schoolId} />
-        </Suspense>
       </SchoolInstallGate>
     </SchoolAccessBoundary>
   );

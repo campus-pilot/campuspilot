@@ -16,6 +16,7 @@ import { addBillingPeriods } from '../billing/billing.contract';
 import { startTrialPeriod } from '../billing/billing.service';
 import { uniqueSlug } from '../workflows/demo-school/identity';
 import { slugifySchoolName } from '../workflows/demo-school/slug';
+import { offerSchoolOnboarding } from '../school-onboarding/school-onboarding.service';
 import {
   SCHOOL_CREATION_REFUSAL_MESSAGES,
   SCHOOL_CREATION_REFUSED_REASON,
@@ -128,7 +129,9 @@ export type CreateOwnSchoolInput = {
  * 4. switches the assistant on with its monthly limit (which also switches it
  *    on for the default roles);
  * 5. makes the person a member with the principal role;
- * 6. records the creation in the ledger.
+ * 6. records the creation in the ledger;
+ * 7. offers the school its guided setup (`school_onboarding`), which opens
+ *    as the owner's next screen.
  */
 export async function createOwnSchool(db: DatabaseExecutor, input: CreateOwnSchoolInput): Promise<{ schoolId: string }> {
   await lockUser(db, input.userId);
@@ -176,6 +179,7 @@ export async function createOwnSchool(db: DatabaseExecutor, input: CreateOwnScho
     .insert(schoolUserRoleTable)
     .values({ schoolId: school.id, userId: input.userId, role: 'principal', meta: null });
   await db.insert(schoolCreationTable).values({ userId: input.userId, schoolId: school.id });
+  await offerSchoolOnboarding(db, school.id);
   return { schoolId: school.id };
 }
 

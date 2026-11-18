@@ -172,6 +172,10 @@ const HIDDEN_TOOLS = [
   'schoolCreation.getStatus',
   'schoolCreation.createSchool',
   'schoolCreation.requestMore',
+  // So is the new school's guided setup: the owner's first walk through it.
+  'school.getOnboarding',
+  'school.completeOnboarding',
+  'school.skipOnboarding',
   'systemAdmin.listSchoolCreationRequests',
   'systemAdmin.countPendingSchoolCreationRequests',
   'systemAdmin.decideSchoolCreationRequest',

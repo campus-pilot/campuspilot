@@ -104,3 +104,25 @@ export const schoolCreationRequestTable = pgTable(
 );
 
 export type SchoolCreationRequestRow = typeof schoolCreationRequestTable.$inferSelect;
+
+/**
+ * The guided setup a self-created school is offered (docs/school-creation.md,
+ * "Guided setup"). A row exists only for a school that is offered it, written
+ * by the creation itself, so schools an administrator opened, demo schools and
+ * every school created before the guide never see it. Whether the guide was
+ * finished and whether someone chose to set up later are separate facts; a
+ * school set up later may still finish the guide while it has no session and
+ * no class.
+ */
+export const schoolOnboardingTable = pgTable("school_onboarding", {
+  schoolId: text("school_id")
+    .primaryKey()
+    .references(() => schoolTable.id, { onDelete: "cascade" }),
+  /** When the guide finished: its session, examinations, classes, subjects and plans were created. */
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  /** When someone chose Set up later; from then on the guide no longer opens on its own. */
+  skippedAt: timestamp("skipped_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type SchoolOnboardingRow = typeof schoolOnboardingTable.$inferSelect;
