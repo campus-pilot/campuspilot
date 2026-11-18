@@ -31,8 +31,8 @@ const inSidebar = (children: ReactNode) => (
 );
 
 const exams = [
-  { slug: 'periodic-test-1', name: 'Periodic Test 1' },
-  { slug: 'annual', name: 'Annual Examination', detail: 'Completed' },
+  { slug: 'periodic-test-1', name: 'Periodic Test 1', hasPlan: true },
+  { slug: 'annual', name: 'Annual Examination', detail: 'Completed', hasPlan: true },
 ];
 
 describe('QuestionPaperNavExams', () => {
@@ -69,6 +69,35 @@ describe('QuestionPaperNavExams', () => {
     expect(screen.getByText('Classes of Periodic Test 1')).toBeTruthy();
     expect(screen.queryByText('Classes of Annual Examination')).toBeNull();
     expect(screen.getByRole('link', { name: 'Add examination' }).getAttribute('href')).toBe('/settings/session/s1');
+  });
+});
+
+describe('QuestionPaperNavExams without a plan', () => {
+  it('lists an examination without a plan as disabled, saying so, and never reads its classes', () => {
+    const renderClasses = vi.fn(() => <p>classes</p>);
+    render(
+      inSidebar(
+        <QuestionPaperNavExams
+          exams={{
+            kind: 'ready',
+            data: [
+              { slug: 'half-yearly', name: 'Half Yearly', hasPlan: false },
+              { slug: 'old', name: 'Old Test', detail: 'Completed', hasPlan: false },
+            ],
+            refetchError: null,
+          }}
+          onRetry={() => undefined}
+          renderClasses={renderClasses}
+        />,
+      ),
+    );
+    const row = screen.getByRole('button', { name: /Half Yearly/ });
+    expect(row.hasAttribute('disabled')).toBe(true);
+    expect(row.textContent).toContain('No plan yet');
+    expect(screen.getByRole('button', { name: /Old Test/ }).textContent).toContain('No plan yet · Completed');
+    fireEvent.click(row);
+    expect(renderClasses).not.toHaveBeenCalled();
+    expect(screen.queryByText('No classes you can open')).toBeNull();
   });
 });
 

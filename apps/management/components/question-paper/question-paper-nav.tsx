@@ -20,8 +20,9 @@ import { orpc } from '@/lib/orpc';
 
 /**
  * The content of the sidebar's Question papers entry: the selected session's
- * examinations, each opening to the classes whose papers the person may
- * open; choosing a class lands on the examination's Question paper tab with
+ * examinations, each with a plan opening to the classes whose papers the
+ * person may open (one without a plan is listed disabled, "No plan yet");
+ * choosing a class lands on the examination's Question paper tab with
  * that class open (`?class=`). Mounted only while the entry is open, so
  * nothing is read until then. The entry itself is gated by the layout
  * (`READ_EXAMS`, `READ_EXAM_PLANS`, the assistant, a selected session).
@@ -35,6 +36,8 @@ export function QuestionPaperNav({ schoolId, sessionId }: { schoolId: string; se
         name: exam.name,
         // Completed exams stay listed (their papers are still viewable) with a note that they ended.
         detail: exam.status === 'completed' ? examStatusLabel(exam.status) : undefined,
+        // The same fact the exam workspace shows its Question paper tab by: an exam without a plan has no papers.
+        hasPlan: exam.planCount > 0,
       }),
     ),
     error: examsQuery.error,

@@ -9,6 +9,12 @@ export type ExamSearchItem = {
   slug: string;
   name: string;
   status: 'ready' | 'active' | 'completed' | null;
+  /**
+   * How many subject plans the examination has (`listExams` merges each
+   * exam's overview in). The exam workspace shows its Question paper tab only
+   * when this is above zero, so the question paper pickers read the same fact.
+   */
+  planCount: number;
 };
 
 /**

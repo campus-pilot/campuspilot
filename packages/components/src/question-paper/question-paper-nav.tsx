@@ -16,8 +16,14 @@ import type { QueryBoundaryState } from '../query-boundary';
  * the mobile sheet.
  */
 
-/** One examination of the session. `detail` is a short note beside its name (for example "Completed"). */
-export type QuestionPaperNavExam = { slug: string; name: string; detail?: string };
+/**
+ * One examination of the session. `detail` is a short note beside its name
+ * (for example "Completed"). `hasPlan` says whether the examination has any
+ * subject plan: its Question paper tab exists only then, so an examination
+ * without one is listed (it is part of the session) but cannot be opened,
+ * and says "No plan yet" rather than an empty class list.
+ */
+export type QuestionPaperNavExam = { slug: string; name: string; detail?: string; hasPlan: boolean };
 /** One class whose papers the person may open. */
 export type QuestionPaperNavClass = { classId: string; className: string };
 
@@ -82,7 +88,34 @@ function ExamRows({
   if (exams.kind === 'pending') return <NavNote>Loading examinations…</NavNote>;
   if (exams.kind === 'failed') return <NavReadError label="Examinations could not be loaded." onRetry={onRetry} />;
   if (exams.data.length === 0) return <NavNote>No examinations in this session</NavNote>;
-  return exams.data.map((exam) => <ExamDisclosure key={exam.slug} exam={exam} renderClasses={renderClasses} />);
+  return exams.data.map((exam) =>
+    exam.hasPlan ? (
+      <ExamDisclosure key={exam.slug} exam={exam} renderClasses={renderClasses} />
+    ) : (
+      <PlanlessExam key={exam.slug} exam={exam} />
+    ),
+  );
+}
+
+/**
+ * An examination without a plan: shown, so the session's list is complete,
+ * but disabled, since it has no papers yet and no Question paper tab. It
+ * says why instead of opening to a class list that would look like a
+ * permission problem.
+ */
+function PlanlessExam({ exam }: { exam: QuestionPaperNavExam }) {
+  const note = exam.detail ? `No plan yet · ${exam.detail}` : 'No plan yet';
+  return (
+    <SidebarMenuSubItem>
+      <SidebarMenuSubButton asChild aria-disabled className="w-full">
+        <button type="button" disabled>
+          <ChevronRight aria-hidden className="invisible" />
+          <span className="min-w-0 flex-1 truncate text-left">{exam.name}</span>
+          <span className="shrink-0 text-[10px] text-muted-foreground">{note}</span>
+        </button>
+      </SidebarMenuSubButton>
+    </SidebarMenuSubItem>
+  );
 }
 
 /** One examination; opening it shows (and reads) its classes. */
@@ -129,6 +162,9 @@ function ExamClasses({
  * shared combobox), since a school can have many classes. cmdk filters the
  * names on the client; the list itself is exactly what the server returned
  * (only classes the person may open), never narrowed by a rule of ours.
+ * It is shown only for an examination with a plan (`hasPlan`), so an empty
+ * list means the plan's classes are not ones the person may open, and says
+ * so; an examination without a plan says "No plan yet" in its row instead.
  * The search field is always shown: cmdk options are reached from it with
  * the arrow keys, so without it a keyboard could not reach them. The search
  * matches class names only (`matchesClassName`), never the ids that serve as

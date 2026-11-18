@@ -6,10 +6,10 @@ import { Button } from '@campuspilot/ui/components/button';
 import { CommandGroup, CommandItem } from '@campuspilot/ui/components/command';
 import { paletteItemClassName, ProviderStatus } from '@/components/command-palette-status';
 import { CommandRow } from '@/components/command-row';
-import { examStatusLabel, questionPaperClassHref } from '@/components/exam/exam-model';
+import { questionPaperClassHref } from '@/components/exam/exam-model';
 import { useAllExams, type ExamSearchItem } from '@/components/exam/use-all-exams';
 import { orpc } from '@/lib/orpc';
-import { rankByQuery, type QuestionPaperPickerStep } from './question-paper-list-model';
+import { examPickerDescription, rankByQuery, type QuestionPaperPickerStep } from './question-paper-list-model';
 
 /**
  * The command palette's way to a question paper: the "Question papers"
@@ -66,7 +66,13 @@ export function QuestionPaperPickerResults({
   );
 }
 
-/** The session's examinations, completed ones included (their papers can still be viewed). */
+/**
+ * The session's examinations, completed ones included (their papers can
+ * still be viewed). One without a plan (`planCount`, the fact the exam
+ * workspace shows its Question paper tab by) is listed but disabled and says
+ * "No plan yet", so its empty class step is never reached and never reads as
+ * a permission problem.
+ */
 function ExamStep({
   schoolId,
   sessionId,
@@ -95,9 +101,10 @@ function ExamStep({
           className={paletteItemClassName}
           key={exam.slug}
           value={`question-paper-exam:${exam.slug}`}
+          disabled={exam.planCount === 0}
           onSelect={() => onPickExam({ slug: exam.slug, name: exam.name })}
         >
-          <CommandRow icon={ClipboardCheck} label={exam.name} description={examStatusLabel(exam.status)} />
+          <CommandRow icon={ClipboardCheck} label={exam.name} description={examPickerDescription(exam)} />
         </CommandItem>
       ))}
     </CommandGroup>

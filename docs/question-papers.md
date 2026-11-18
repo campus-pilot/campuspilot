@@ -437,8 +437,11 @@ accordion, and three ways lead straight to one class.
 - **The accordion** (`QuestionPaperClassAccordion` in `packages/components/src/question-paper`).
   One class is open at a time (Radix `type="single"`, collapsible). The open class is the
   `class` query parameter (a class id), read with `useSearchParams` and written with
-  `router.replace(..., { scroll: false })`; collapsing removes it (`withClassParam`). No
-  `useState`, no effect. With no parameter every class is collapsed, also when there is only
+  `window.history.replaceState` (`replaceOpenClass`); collapsing removes it (`withClassParam`).
+  Not `router.replace`: the route is an async server component, so a router navigation
+  fetched its RSC payload on every toggle and the accordion waited for it. The App Router
+  (Next 14.1 and later) syncs `useSearchParams` with the History API, so the toggle
+  re-renders at once with no request and no scroll. No `useState`, no effect. With no parameter every class is collapsed, also when there is only
   one class. An id that is not in the list (no access, a stale link) opens nothing and is not
   an error (`openClassOf`). Closed classes are unmounted (Radix default, no `forceMount`), so
   the voice assistant's "open what I can see" finds only the open class's paper links; that
@@ -467,7 +470,12 @@ accordion, and three ways lead straight to one class.
   `packages/components/src/question-paper/question-paper-filtered-classes.tsx`, which takes
   the stored slugs and a store callback). Stored slugs the examination does not
   have are not shown and not deleted (`visibleModeSelection`, `mergeModeSelection`), so they
-  still apply on another examination that has them. A malformed entry is no filter. The
+  still apply on another examination that has them (a school's examinations, across
+  sessions, need not share their modes). A change stores this examination's choice first,
+  then those other slugs, capped at `MODE_FILTER_MAX_SLUGS` (100), so the oldest are
+  dropped and the entry never outgrows the storage bound (`modeFilterSchema`). The form
+  validates with the unbounded `modeSelectionSchema`, so a change is never rejected on
+  screen. A malformed entry is no filter. The
   form is keyed by the school and by how many times another tab changed this school's stored
   filter or cleared storage (`useModeFilterExternalRevision(schoolId)`, counted per school by
   `nextModeFilterRevisions`, so another school's change never closes this school's open
@@ -482,7 +490,9 @@ accordion, and three ways lead straight to one class.
   presentational parts in `packages/components/src/question-paper/question-paper-nav.tsx`). Under
   Examinations in the Academics group, an `AppShellNavigationDisclosure`: pressing it folds open
   the selected session's examinations (`useAllExams`, the session's exam order; completed ones
-  stay, marked "Completed"), and an examination folds open to its classes (`listQuestionPapers`
+  stay, marked "Completed"). An examination without a plan (`planCount` from `listExams`, the
+  fact the exam workspace shows its Question paper tab by) is listed disabled, "No plan yet",
+  since it has no tab and no papers; one with a plan folds open to its classes (`listQuestionPapers`
   with the tab's own input, so the tab opens on the cached list). Classes are a cmdk list with a
   search box that matches class names only. Choosing one asks the navigation guard, closes the
   mobile sheet and goes to the tab with `?class=` (`questionPaperClassHref`). Each list shows
@@ -500,7 +510,10 @@ accordion, and three ways lead straight to one class.
 - **The command palette.** The search-only *Question papers* command (same gates) opens a
   picker in the palette: an examination, then a class, with a back control and the palette's
   search filtering each step (`question-paper-palette.tsx`, `rankByQuery`,
-  `pickerEmptyMessage`). Choosing a class lands on the tab with `?class=`.
+  `pickerEmptyMessage`). An examination without a plan is listed disabled, "No plan yet"
+  (`examPickerDescription`), so "No classes you can open" is said only of an examination
+  with a plan whose classes the person may not open. Choosing a class lands on the tab
+  with `?class=`.
 
 ## The paper's screen
 
