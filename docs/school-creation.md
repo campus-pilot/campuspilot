@@ -136,8 +136,24 @@ allowances are human decisions.
 
 ## What management shows
 
-- A person with no school sees the create form on `/school` (or the reason they
-  cannot, or the request form once their allowance is used).
+- A person with no school sees "You are not part of a school yet" on `/school`
+  with a **Create a school** button, the button to ask for more once their
+  allowance is used, or the reason they cannot. No form is shown on the page.
+- **Create a school** opens a dialog: name, location, an optional
+  registration number and the logo (required). The logo is checked and
+  compressed in the browser before the school is created, so an unusable
+  image leaves no school behind; it is uploaded through the school's logo
+  route (`/api/blob/schools/{id}/logo`) right after. If that upload fails the
+  school still opens and the person is told to add the logo from Organization
+  settings: the creation is not undone, since its allowance would not come
+  back.
+- The new school opens with a welcome dialog (`?welcome=1`,
+  `components/school-creation/new-school-welcome.tsx`): the trial's plan and
+  end date, the assistant's limit and what happens when the trial ends, read
+  from the school list and the feature flags rather than the constants, plus
+  **Set up your first session** while the school has no active session. It
+  shows only while the school is on a trial; closing it removes the parameter.
+- **Ask for more schools** opens the request form in a dialog.
 - The school switcher offers **Create a school** (`/school/new`, the same
   panel) to people who may create one or ask for more; staff of a school they
   do not own do not see it.
@@ -148,6 +164,6 @@ allowances are human decisions.
   only from `createOwnSchool` and `updateSchoolOwner`.
 - A new way to remove members or change roles must keep the owner rules above.
 - Changing what a new school starts with: change the constants in
-  `school-creation.contract.ts` (shown to the person before they create) and
-  this guide.
+  `school-creation.contract.ts` and this guide. The welcome dialog reads the
+  school's actual plan and assistant limit, so it follows on its own.
 - Tests: `packages/api/src/school-creation/school-creation.integration.test.ts`.
