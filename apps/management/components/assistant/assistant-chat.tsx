@@ -40,7 +40,7 @@ import {
 import { draftSaved, draftSaveSpent, saveEventsOf, supersededDrafts } from '@campuspilot/components/question-paper/chat-cards-model';
 import { Button } from '@campuspilot/ui/components/button';
 import { Spinner } from '@campuspilot/ui/components/spinner';
-import { TooltipProvider } from '@campuspilot/ui/components/tooltip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@campuspilot/ui/components/tooltip';
 import { toast } from '@campuspilot/ui/lib/toast';
 import { cn } from '@campuspilot/ui/lib/utils';
 import { skipToken, useQuery } from '@tanstack/react-query';
@@ -153,7 +153,7 @@ export type AssistantChatProps = {
   seedText?: string;
   /** The welcome's words, for a surface about one thing; the general welcome otherwise. */
   welcome?: { title: string; text: string };
-  /** The quiet line under the message box about what the assistant asks before; a surface whose changes are saved without asking says so. */
+  /** The shield's tooltip in the message box toolbar, about what the assistant asks before; a surface whose changes are saved without asking says so. */
   trustCue?: string;
   /** The message box's hint, for a surface about one thing. While a turn works the box says it queues a follow-up, whatever this is. */
   placeholder?: string;
@@ -396,29 +396,28 @@ function ConversationTimeline({
   );
 }
 
-/**
- * The composer toolbar's left side: the Fast / Pro switch, a quiet trust cue,
- * then the conversation's developer diagnostics when the service sends them.
- */
-function ComposerToolbar({
-  schoolId,
-  conversationId,
-  trustCue,
-  modelSwitch,
-}: {
-  schoolId: string;
-  conversationId: string | null;
-  trustCue: string;
-  modelSwitch: ReactNode;
-}) {
+/** The composer toolbar's left side: the conversation's developer diagnostics, when the service sends them. */
+function ComposerDiagnostics({ schoolId, conversationId }: { schoolId: string; conversationId: string | null }) {
   const usage = useAssistantConversationUsage(schoolId, conversationId);
+  return usage ? <AssistantConversationUsage totals={usage} /> : null;
+}
+
+/** A quiet trust cue next to the model picker: a shield, with what the assistant may do on hover or focus. */
+function TrustCue({ text }: { text: string }) {
   return (
-    <>
-      {modelSwitch}
-      <ShieldCheck className="size-3.5 shrink-0" aria-hidden />
-      <span className="min-w-0 flex-1 truncate">{trustCue}</span>
-      {usage ? <AssistantConversationUsage totals={usage} /> : null}
-    </>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          role="img"
+          aria-label={text}
+          tabIndex={0}
+          className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        >
+          <ShieldCheck className="size-3.5" aria-hidden />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{text}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -917,15 +916,14 @@ export function AssistantChat({
                     requests
                   )
                 }
-                leading={
-                  <ComposerToolbar
-                    schoolId={schoolId}
-                    conversationId={conversationId}
-                    trustCue={trustCue}
-                    modelSwitch={<AssistantModelSwitch tier={tier} onChange={setPickedTier} disabled={!canWrite} />}
-                  />
+                leading={<ComposerDiagnostics schoolId={schoolId} conversationId={conversationId} />}
+                trailing={
+                  <>
+                    <TrustCue text={trustCue} />
+                    <AssistantModelSwitch tier={tier} onChange={setPickedTier} disabled={!canWrite} />
+                    {voiceOffered ? <AssistantVoiceButton onStart={chatVoice.start} /> : null}
+                  </>
                 }
-                trailing={voiceOffered ? <AssistantVoiceButton onStart={chatVoice.start} /> : null}
                 stopping={stopping}
                 onStop={
                   // Someone else's turn is stopped only with the right to continue the chat; one's own, always.

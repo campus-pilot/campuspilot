@@ -27,13 +27,13 @@ export function AssistantModelSwitch({ tier, onChange, disabled }: { tier: Assis
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild disabled={disabled}>
-        <Button type="button" variant="outline" size="lg" className="shrink-0 rounded-full" aria-label={`Model: ${current.label}`}>
+        <Button type="button" variant="ghost" size="sm" className="shrink-0 text-muted-foreground" aria-label={`Model: ${current.label}`}>
           <CurrentIcon data-icon="inline-start" aria-hidden />
           {current.label}
-          <ChevronDown data-icon="inline-end" className="text-muted-foreground" aria-hidden />
+          <ChevronDown data-icon="inline-end" aria-hidden />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent side="top" align="start" className="w-64">
+      <DropdownMenuContent side="top" align="end" className="w-64">
         <DropdownMenuLabel>Model</DropdownMenuLabel>
         <DropdownMenuRadioGroup
           value={tier}
