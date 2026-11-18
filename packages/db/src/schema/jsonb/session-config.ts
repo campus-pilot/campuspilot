@@ -185,12 +185,53 @@ export function findIntroducedExamNameClashes(
     const key = examNameKey(submitted[slug]!.name);
     groups.set(key, [...(groups.get(key) ?? []), slug]);
   }
-  const isNewOrRenamed = (slug: string) =>
-    !Object.hasOwn(stored, slug) ||
-    examNameKey(stored[slug]!.name) !== examNameKey(submitted[slug]!.name);
   return [...groups.values()].filter(
-    (slugs) => slugs.length > 1 && slugs.some(isNewOrRenamed),
+    (slugs) =>
+      slugs.length > 1 &&
+      slugs.some((slug) => isNewOrRenamedExam(stored, submitted, slug)),
   );
+}
+
+/**
+ * Whether the `submitted` exam under `slug` is new (its slug is not in
+ * `stored`) or renamed (its stored name has a different `examNameKey`). The
+ * exams a full replacement of a session's exams judges against the name
+ * rules; an exam kept under its slug with the same name key is not judged, so
+ * names stored before a rule existed keep saving.
+ */
+function isNewOrRenamedExam(
+  stored: Readonly<Record<string, { name: string }>>,
+  submitted: Readonly<Record<string, { name: string }>>,
+  slug: string,
+): boolean {
+  return (
+    !Object.hasOwn(stored, slug) ||
+    examNameKey(stored[slug]!.name) !== examNameKey(submitted[slug]!.name)
+  );
+}
+
+/**
+ * The slugs (sorted) of `submitted` exams that are new or renamed
+ * (`isNewOrRenamedExam`) and whose name has an empty `examNameKey`: a name
+ * made only of whitespace and invisible format characters, which
+ * `examNameSchema` refuses for a single exam. An exam stored with such a name
+ * and kept under its slug with it is not returned, so a session saved before
+ * the rule keeps saving unrelated settings. Used by `school.createSession`
+ * and `school.updateSession`, whose full-configuration input
+ * (`examConfigSchema`) cannot apply `examNameSchema` itself because it also
+ * parses stored configurations.
+ */
+export function findIntroducedBlankExamNames(
+  stored: Readonly<Record<string, { name: string }>>,
+  submitted: Readonly<Record<string, { name: string }>>,
+): string[] {
+  return Object.keys(submitted)
+    .sort()
+    .filter(
+      (slug) =>
+        examNameKey(submitted[slug]!.name) === '' &&
+        isNewOrRenamedExam(stored, submitted, slug),
+    );
 }
 
 /**

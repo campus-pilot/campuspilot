@@ -57,7 +57,8 @@ legacy plan was deleted).
   `updateExamClasses`: it is refused once the exam has ended (and, as for every
   plan change, while released to the Cadet Portal). A class already taking part
   may still get further plans.
-  `deleteExam` and session-config replacement remove a deleted exam's rows.
+  `deleteExam` and session-config replacement remove a deleted exam's rows once
+  the shared removal guard passes; these rows never block a removal themselves.
   `deleteClass` is a CONFLICT with a clear reason while the class takes part in
   any exam (instead of a foreign key error); take it out of the exam first.
 - `updateExamClasses` needs only the exam plan **update** permission although
@@ -111,7 +112,8 @@ legacy plan was deleted).
      callers that do not edit an earlier copy may leave it out, and then the save
      applies to whatever is stored.
    - **Exams with data.** Removing an exam slug that has recorded data is refused
-     with `CONFLICT` naming the exam (`session/session-exam-removal.ts`): plans (and their results), a timetable,
+     with `CONFLICT` naming the exam (`assertExamsHaveNoData` in
+     `session/session-exam-removal.ts`): plans (and their results), a timetable,
      a working-day limit that is set, student assessments, student remarks, a
      lifecycle that records anything beyond the bare `ready` row plan
      generation writes, a results notification record, or question papers.
@@ -119,7 +121,9 @@ legacy plan was deleted).
      and neither does the exam's class selection (`exam_class`), which is
      deleted with the exam once the guard passes. Only slugs the stored
      configuration defines and the submission leaves out are checked, so data
-     under a slug deleted earlier never blocks unrelated saves.
+     under a slug deleted earlier never blocks unrelated saves. `deleteExam`
+     applies the same guard, so deleting an exam never leaves its data behind
+     under a slug the session no longer defines.
 
    **Changing an exam's slug in session settings makes it a new exam**: the save
    adds the exam under the new slug and removes the old slug. The old slug's
@@ -141,8 +145,10 @@ legacy plan was deleted).
    `createSession` and `updateSession` refuse, with the same error, a submitted
    exam map that *introduces* a clash (`findIntroducedExamNameClashes`): a group of
    exams sharing a name that contains an exam that is new (its slug is not stored)
-   or renamed. Duplicates stored before the rule keep saving, so saving unrelated
-   settings never fails for such a session. The rule is not a refinement of
+   or renamed, and refuse a new or renamed exam whose name key is empty (only
+   invisible characters) with BAD_REQUEST. Duplicates and names stored before
+   these rules keep saving, so saving unrelated settings never fails for such a
+   session. The rule is not a refinement of
    `examConfigSchema`, which also parses stored configurations and DTOs, where a
    refinement would make stored duplicates unreadable.
 

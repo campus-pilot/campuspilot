@@ -5,6 +5,7 @@ import {
 } from '@campuspilot/db/schema/finance';
 import { examClassTable } from '@campuspilot/db/schema/exam';
 import {
+  findIntroducedBlankExamNames,
   findIntroducedExamNameClashes,
   sessionConfigSchema,
 } from '@campuspilot/db/schema/jsonb/session-config';
@@ -97,10 +98,21 @@ async function assertStudentSessionSettingsUnchanged(
  * unrelated settings. Comparing with the stored configuration instead refuses
  * only clashes the submission introduces (an exam that is new or renamed,
  * `findIntroducedExamNameClashes`), so stored duplicates keep saving.
+ *
+ * With the same grandfathering it also refuses, with BAD_REQUEST, a new or
+ * renamed exam whose name is only invisible characters (an empty
+ * `examNameKey`, `findIntroducedBlankExamNames`), the rule `examNameSchema`
+ * applies to `createExam` and `updateExam`.
  */
-function assertNoIntroducedExamNameClash(stored: unknown, submitted: unknown) {
+function assertIntroducedExamNamesAllowed(stored: unknown, submitted: unknown) {
   const previous = sessionConfigSchema.parse(stored ?? {});
   const next = sessionConfigSchema.parse(submitted ?? {});
+  // Checked first: two blank names would otherwise be reported as a clash.
+  const blank = findIntroducedBlankExamNames(previous.examConfig, next.examConfig);
+  if (blank.length)
+    throw rpcError.badRequest(
+      `Exam name must contain visible characters (${blank.join(', ')}).`,
+    );
   if (findIntroducedExamNameClashes(previous.examConfig, next.examConfig).length)
     throw examNameTakenError();
 }
@@ -263,7 +275,7 @@ export const schoolSessionRouter = {
           .limit(1);
         if (!school) throw rpcError.notFound('School');
         await assertStudentSessionSettingsUnchanged(context.db, schoolId, null, values.sessionConfig);
-        assertNoIntroducedExamNameClash(null, values.sessionConfig);
+        assertIntroducedExamNamesAllowed(null, values.sessionConfig);
 
         const [session] = await context.db
           .insert(schoolSessionTable)
@@ -399,7 +411,7 @@ export const schoolSessionRouter = {
             );
             // Compared with the configuration read under the session row lock,
             // which `createExam` and `updateExam` also take.
-            assertNoIntroducedExamNameClash(
+            assertIntroducedExamNamesAllowed(
               existingSession.sessionConfig,
               changes.sessionConfig,
             );
@@ -407,7 +419,7 @@ export const schoolSessionRouter = {
             // the old slug of an exam whose slug was changed in settings.
             // Refused while the removed slug has recorded data; checked under
             // the session row lock taken above.
-            await assertNoExamWithDataRemoved(
+            const removedExamSlugs = await assertNoExamWithDataRemoved(
               transaction,
               sessionId,
               previous.examConfig,
@@ -418,9 +430,6 @@ export const schoolSessionRouter = {
             // block a removal: they exist alongside plans (which do), except
             // for a legacy exam whose plans were deleted, where they are
             // leftovers of the selection, not recorded data.
-            const removedExamSlugs = Object.keys(previous.examConfig).filter(
-              (slug) => !Object.hasOwn(next.examConfig, slug),
-            );
             if (removedExamSlugs.length)
               await transaction
                 .delete(examClassTable)

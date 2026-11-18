@@ -165,33 +165,67 @@ export async function findExamSlugsWithData(
 }
 
 /**
+ * Refuses removing exams of a session that have recorded data
+ * (`findExamSlugsWithData`), with CONFLICT naming those exams by their stored
+ * name and slug. `slugs` are the exams being removed and `storedExams` the
+ * configuration read under the session lock. The one guard behind every way
+ * an exam definition is removed: `deleteExam` (`refusal: 'delete'`) and a
+ * full replacement through `updateSession` (`refusal: 'replace'`,
+ * `assertNoExamWithDataRemoved`), so neither leaves results notifications,
+ * assessments, remarks, question papers, lifecycle facts or a working-day
+ * limit behind under a slug the session no longer defines. The exam's class
+ * selection (`exam_class`) is not data here; callers delete it once this
+ * passes.
+ */
+export async function assertExamsHaveNoData(
+  tx: DatabaseTransaction,
+  sessionId: string,
+  storedExams: Readonly<Record<string, { name: string }>>,
+  slugs: readonly string[],
+  refusal: 'delete' | 'replace',
+): Promise<void> {
+  const withData = await findExamSlugsWithData(tx, sessionId, slugs);
+  if (!withData.length) return;
+  const labels = withData.map((slug) =>
+    Object.hasOwn(storedExams, slug)
+      ? `“${storedExams[slug]!.name}” (${slug})`
+      : slug,
+  );
+  const one = withData.length === 1;
+  const subject = one
+    ? `The examination ${labels[0]} has plans, a timetable, results, question papers or other recorded data`
+    : `The examinations ${labels.join(', ')} have plans, timetables, results, question papers or other recorded data`;
+  throw rpcError.conflict(
+    refusal === 'delete'
+      ? `${subject}, so ${one ? 'it' : 'they'} cannot be deleted.`
+      : `${subject}, so ${one ? 'it cannot be removed and its slug cannot be changed' : 'they cannot be removed and their slugs cannot be changed'}.`,
+  );
+}
+
+/**
  * Refuses a full replacement of a session's exams (`updateSession`) that
- * removes an exam with recorded data, with CONFLICT naming those exams by
- * their stored name and slug. An exam is removed when its slug is in
- * `storedExams` (the configuration read under the session lock) and not in
- * `submittedExams`. That includes changing an exam's slug in session
- * settings: the edited exam is saved as a new exam under the new slug and the
- * old slug is removed, so it is refused too while the old slug has data.
+ * removes an exam with recorded data (`assertExamsHaveNoData`). An exam is
+ * removed when its slug is in `storedExams` (the configuration read under the
+ * session lock) and not in `submittedExams`. That includes changing an exam's
+ * slug in session settings: the edited exam is saved as a new exam under the
+ * new slug and the old slug is removed, so it is refused too while the old
+ * slug has data.
  *
  * Only removed slugs are checked. Data under a slug the stored configuration
- * no longer defines (left by an exam deleted earlier) is not removed by the
- * save, so it never blocks saving unrelated settings.
+ * no longer defines (left by an exam deleted before `deleteExam` used this
+ * guard) is not removed by the save, so it never blocks saving unrelated
+ * settings. Returns the removed slugs, whose class selection the caller then
+ * deletes.
  */
 export async function assertNoExamWithDataRemoved(
   tx: DatabaseTransaction,
   sessionId: string,
   storedExams: Readonly<Record<string, { name: string }>>,
   submittedExams: Readonly<Record<string, unknown>>,
-): Promise<void> {
+): Promise<string[]> {
   const removed = Object.keys(storedExams).filter(
     (slug) => !Object.hasOwn(submittedExams, slug),
   );
-  const withData = await findExamSlugsWithData(tx, sessionId, removed);
-  if (!withData.length) return;
-  const labels = withData.map((slug) => `“${storedExams[slug]!.name}” (${slug})`);
-  throw rpcError.conflict(
-    withData.length === 1
-      ? `The examination ${labels[0]} has plans, a timetable, results, question papers or other recorded data, so it cannot be removed and its slug cannot be changed.`
-      : `The examinations ${labels.join(', ')} have plans, timetables, results, question papers or other recorded data, so they cannot be removed and their slugs cannot be changed.`,
-  );
+  await assertExamsHaveNoData(tx, sessionId, storedExams, removed, 'replace');
+  return removed;
 }

@@ -623,7 +623,7 @@ describe('school.updateSession stale saves (expectedUpdatedAt)', () => {
   });
 });
 
-describe('school.updateSession exam removal', () => {
+describe('exam removal (updateSession and deleteExam)', () => {
   type Scope = { schoolId: string; sessionId: string };
 
   /** Saves the latest configuration without `examSlug`, as the settings screen does after a removal. */
@@ -734,6 +734,45 @@ describe('school.updateSession exam removal', () => {
       });
     });
 
+  for (const [label, write] of recordedData)
+    it(`refuses deleting an exam with ${label} through deleteExam, naming it`, async () => {
+      const stored = {
+        first_term: { name: 'First Term', order: 1 },
+        unit_test_1: { name: 'Unit Test 1', order: 2 },
+      };
+      const { scope, manager } = await schoolWithActiveSession(stored);
+      await write(scope, 'unit_test_1');
+      const error = await rejection(
+        manager.school.deleteExam({ ...scope, examSlug: 'unit_test_1' }),
+      );
+      expect(error).toMatchObject({ code: 'CONFLICT' });
+      expect(String((error as Error).message)).toContain(
+        '“Unit Test 1” (unit_test_1) has plans, a timetable, results, question papers or other recorded data, so it cannot be deleted',
+      );
+      expect(await storedExamConfig(scope.sessionId)).toEqual(stored);
+      // The exam without data is deleted.
+      await manager.school.deleteExam({ ...scope, examSlug: 'first_term' });
+      expect(await storedExamConfig(scope.sessionId)).toEqual({
+        unit_test_1: { name: 'Unit Test 1', order: 2 },
+      });
+    });
+
+  it('deletes an exam through deleteExam whose rows only record nothing', async () => {
+    const { scope, manager } = await schoolWithActiveSession({
+      unit_test_1: { name: 'Unit Test 1', order: 1 },
+    });
+    await db.insert(examLifecycleTable).values({ ...scope, examSlug: 'unit_test_1' });
+    await db
+      .insert(examAssessmentSettingsTable)
+      .values({ ...scope, examSlug: 'unit_test_1', totalWorkingDays: null });
+    expect(await manager.school.deleteExam({ ...scope, examSlug: 'unit_test_1' })).toEqual({
+      slug: 'unit_test_1',
+      name: 'Unit Test 1',
+      order: 1,
+    });
+    expect(await storedExamConfig(scope.sessionId)).toEqual({});
+  });
+
   it('refuses changing the slug of an exam with recorded data, which removes the old slug', async () => {
     const stored = { unit_test_1: { name: 'Unit Test 1', order: 1 } };
     const { scope, manager } = await schoolWithActiveSession(stored);
@@ -787,5 +826,91 @@ describe('school.updateSession exam removal', () => {
       'annual',
       'first_term',
     ]);
+  });
+});
+
+describe('school.createSession / school.updateSession invisible-only exam names', () => {
+  it('refuses a new exam whose name is only invisible characters, without changing the session', async () => {
+    const stored = { first_term: { name: 'First Term', order: 1 } };
+    const { scope, manager } = await schoolWithActiveSession(stored);
+    for (const name of ['\u200b', ' \u200b\u200d ', '\ufeff\u2060']) {
+      const session = await manager.school.getSession(scope);
+      await expect(
+        manager.school.updateSession({
+          ...scope,
+          sessionConfig: withExams(session, { ...stored, unit_test_1: { name, order: 2 } }),
+          expectedUpdatedAt: sessionVersionToken(session.updatedAt),
+        }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    }
+    expect(await storedExamConfig(scope.sessionId)).toEqual(stored);
+  });
+
+  it('refuses renaming an exam to only invisible characters', async () => {
+    const stored = { first_term: { name: 'First Term', order: 1 } };
+    const { scope, manager } = await schoolWithActiveSession(stored);
+    const session = await manager.school.getSession(scope);
+    await expect(
+      manager.school.updateSession({
+        ...scope,
+        sessionConfig: withExams(session, { first_term: { name: '\u200b\u200b', order: 1 } }),
+        expectedUpdatedAt: sessionVersionToken(session.updatedAt),
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(await storedExamConfig(scope.sessionId)).toEqual(stored);
+  });
+
+  it('keeps saving an exam stored with such a name before the rule, while it keeps its slug and name', async () => {
+    const stored = {
+      ghost: { name: '\u200b', order: 1 },
+      first_term: { name: 'First Term', order: 2 },
+    };
+    const { scope, manager } = await schoolWithActiveSession(stored);
+    const session = await manager.school.getSession(scope);
+    const next = { ...stored, annual: { name: 'Annual', order: 3 } };
+    await manager.school.updateSession({
+      ...scope,
+      sessionConfig: withExams(session, next),
+      expectedUpdatedAt: sessionVersionToken(session.updatedAt),
+    });
+    expect(await storedExamConfig(scope.sessionId)).toEqual(next);
+    // Moving it to another slug makes it a new exam, which is judged.
+    const latest = await manager.school.getSession(scope);
+    await expect(
+      manager.school.updateSession({
+        ...scope,
+        sessionConfig: withExams(latest, {
+          first_term: next.first_term,
+          annual: next.annual,
+          ghost_2: { name: '\u200b', order: 1 },
+        }),
+        expectedUpdatedAt: sessionVersionToken(latest.updatedAt),
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  it('refuses creating a session with such an exam', async () => {
+    const { scope, manager } = await schoolWithActiveSession();
+    await expect(
+      manager.school.createSession({
+        schoolId: scope.schoolId,
+        sessionStartYear: 2030,
+        sessionEndYear: 2031,
+        sessionConfig: sessionConfigSchema.parse({
+          examConfig: { unit_test_1: { name: '\u200d', order: 1 } },
+        }),
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    const created = await manager.school.createSession({
+      schoolId: scope.schoolId,
+      sessionStartYear: 2030,
+      sessionEndYear: 2031,
+      sessionConfig: sessionConfigSchema.parse({
+        examConfig: { unit_test_1: { name: 'Unit Test 1', order: 1 } },
+      }),
+    });
+    expect(created.sessionConfig?.examConfig).toEqual({
+      unit_test_1: { name: 'Unit Test 1', order: 1 },
+    });
   });
 });

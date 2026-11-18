@@ -7,7 +7,8 @@ import {
   findExamNameClash,
   nextExamOrder,
 } from '@campuspilot/db/schema/jsonb/session-config';
-import { examClassTable, examPlanTable, examTimetableTable } from '@campuspilot/db/schema/exam';
+import { examClassTable } from '@campuspilot/db/schema/exam';
+import { assertExamsHaveNoData } from '../session/session-exam-removal';
 import { resolvePaginationInput } from '../../../paginations';
 import { pageResult, route } from './exam.pagination';
 import { examNameTakenError, getExam, getExamSession } from './exam.service';
@@ -16,7 +17,7 @@ import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
 import { protectedProcedure } from '../../../index';
 import { requireSchoolPermission } from '../../../permissions/school';
 import { ORPCError } from '@orpc/server';
-import { rpcError, toRpcError } from '../../../errors';
+import { toRpcError } from '../../../errors';
 import {
   EXAM_SLUG_TAKEN_MESSAGE,
   EXAM_SLUG_TAKEN_REASON,
@@ -299,7 +300,7 @@ export const schoolExamDefinitionRouter = {
     .route(
       route(
         'Delete a session exam',
-        'Remove an exam definition only after all its plans and optional timetable have been deleted. Its record of the classes taking part is removed with it.',
+        'Remove an exam definition that has no recorded data: refused (CONFLICT) while it has plans, results, a timetable, a working-day limit, student assessments or remarks, a started or completed lifecycle, a results notification record or question papers. Its record of the classes taking part is removed with it.',
       ),
     )
     .meta({
@@ -317,30 +318,18 @@ export const schoolExamDefinitionRouter = {
       try {
         return await context.db.transaction(async (tx) => {
           const { session, exam } = await getExam(tx, input, 'update');
-          const [plan] = await tx
-            .select({ id: examPlanTable.id })
-            .from(examPlanTable)
-            .where(
-              and(
-                eq(examPlanTable.sessionId, session.id),
-                eq(examPlanTable.examSlug, input.examSlug),
-              ),
-            )
-            .limit(1);
-          const [timetable] = await tx
-            .select({ id: examTimetableTable.id })
-            .from(examTimetableTable)
-            .where(
-              and(
-                eq(examTimetableTable.sessionId, session.id),
-                eq(examTimetableTable.examSlug, input.examSlug),
-              ),
-            )
-            .limit(1);
-          if (plan || timetable)
-            throw rpcError.conflict(
-              'Delete this exam’s plans and timetable before deleting the exam.',
-            );
+          // The removal guard `updateSession` uses too: plans (and results),
+          // a timetable, a set working-day limit, student assessments and
+          // remarks, a lifecycle beyond the bare `ready` row, a results
+          // notification record or question papers keep the exam. Checked
+          // under the session row lock taken above.
+          await assertExamsHaveNoData(
+            tx,
+            session.id,
+            session.config.examConfig,
+            [input.examSlug],
+            'delete',
+          );
           // Classes may still take part without plans (after deleting every
           // legacy plan); that selection belongs to the exam and goes with it.
           await tx.delete(examClassTable).where(examClassWhere(input));

@@ -3,6 +3,7 @@ import {
   examNameSchema,
   examSlugSchema,
   findExamNameClash,
+  findIntroducedBlankExamNames,
   findIntroducedExamNameClashes,
   nextExamOrder,
   sessionConfigSchema,
@@ -449,6 +450,23 @@ describe('exam name rule', () => {
       }),
     ).toEqual([]);
     expect(findIntroducedExamNameClashes({}, {})).toEqual([]);
+  });
+
+  it('reports a new or renamed exam whose name is only invisible characters, not one stored that way', () => {
+    const stored = { ghost: { name: '\u200b' }, final: { name: 'Final' } };
+    expect(findIntroducedBlankExamNames(stored, stored)).toEqual([]);
+    // Kept under its slug with the same key (empty), it is not judged.
+    expect(findIntroducedBlankExamNames(stored, { ...stored, ghost: { name: ' \u200d ' } })).toEqual([]);
+    expect(
+      findIntroducedBlankExamNames(stored, {
+        ...stored,
+        final: { name: '\u2060' },
+        added: { name: '\ufeff' },
+        moved: { name: '\u200b' },
+        fine: { name: 'Unit Test' },
+      }),
+    ).toEqual(['added', 'final', 'moved']);
+    expect(findIntroducedBlankExamNames({}, { a: { name: '\u200b' } })).toEqual(['a']);
   });
 
   it('treats every exam of a new session as new', () => {
