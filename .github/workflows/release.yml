@@ -201,6 +201,7 @@ jobs:
               VITE_CALENDAR_URL=${{ vars.VITE_CALENDAR_URL }}
               VITE_STAFF_LOGIN_URL=${{ vars.VITE_STAFF_LOGIN_URL }}
               VITE_STUDENT_LOGIN_URL=${{ vars.VITE_STUDENT_LOGIN_URL || '' }}
+              VITE_META_PIXEL_ID=${{ vars.VITE_META_PIXEL_ID || '' }}
           - name: api
             file: apps/server/Dockerfile
             image: ghcr.io/campus-pilot/campuspilot-plus-api

@@ -15,6 +15,8 @@ export const env = createEnv({
     VITE_STAFF_LOGIN_URL: z.url(),
     /** Optional until a dedicated student and family workspace is deployed. */
     VITE_STUDENT_LOGIN_URL: z.url().optional(),
+    /** The Meta Pixel (dataset) ID; without it the website loads no pixel. Digits only, since it is written into an inline script. */
+    VITE_META_PIXEL_ID: z.string().regex(/^\d{5,25}$/).optional(),
   },
   runtimeEnv: (import.meta as any).env,
   emptyStringAsUndefined: true,
