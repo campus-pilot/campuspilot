@@ -202,11 +202,22 @@ the implementation and APIs in more detail.
   distinction: a name and a slug derived from it with the session settings rule,
   saved by `school.createExam` into the session configuration and listed last. It
   needs `CREATE_EXAM` and an active session, like every other exam mutation. Exam
-  names are unique in a session (trimmed, ignoring case): the Create examination
-  dialog and the session settings Add/Edit examination dialog (`exam-dialog-model.ts`)
-  show a clash beside the name field, and the server refuses it. There
+  names are unique in a session (`examNameKey`: ignoring case, spacing
+  differences, invisible characters and Unicode compatibility forms): the Create
+  examination dialog and the session settings Add/Edit examination dialog
+  (`exam-dialog-model.ts`) show a clash beside the name field, and the server
+  refuses it. Both dialogs share the name rule (`examNameSchema`, up to 200
+  characters) and the slug rule (`examSlugSchema`). Changing an exam's slug in
+  session settings makes it a new exam and removes the old slug, which the server
+  refuses while the old slug has plans, results or other recorded data. There
   is no Create Exam action inside an examination's workspace. Plan creation
   snapshots the existing subjects/modes.
+- Session settings save the whole configuration with the `updatedAt` it was
+  loaded from (`expectedUpdatedAt`). A save refused as stale (an exam was created
+  from the Examinations list meanwhile) keeps the edits on screen, disables Save
+  and offers "Load latest settings" next to it; the view never replaces the
+  edits by itself. Every save refusal is shown next to the Save control
+  (`session-save-model.ts`).
 - Generating plans leaves the examination Not started. Starting it is a separate,
   explicit school governance action. Completing and reopening are exam-wide.
   The normal UI has no per-subject plan approval prerequisite.

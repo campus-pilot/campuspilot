@@ -8,7 +8,7 @@ import {
   SessionDetailsView,
   UnsavedChangesDialog,
   type SchoolSessionDto,
-  type SessionConfig,
+  type SessionSaveRequest,
 } from '@campuspilot/components/session';
 import {
   AlertDialog,
@@ -31,6 +31,7 @@ import { LoaderCircle, Trash2 } from 'lucide-react';
 import { schoolHref } from '@/app/(protected)/school/[schoolId]/school-route';
 import { client, orpc } from '@/lib/orpc';
 import { SessionFinanceSettings } from './session-finance-settings';
+import { reportSessionSave, toSessionSaveInput } from './session-save';
 
 
 export function SessionDetail({
@@ -122,12 +123,12 @@ export function SessionDetail({
 
   // Mutations
   const updateSessionMutation = useMutation({
-    mutationFn: async (payload: { sessionConfig: SessionConfig | null }) => {
+    mutationFn: async (payload: SessionSaveRequest) => {
       if (!session) return;
       return await client.school.updateSession({
         schoolId,
         sessionId: session.id,
-        sessionConfig: payload.sessionConfig,
+        ...toSessionSaveInput(payload),
       });
     },
     onSuccess: (updated) => {
@@ -238,9 +239,16 @@ export function SessionDetail({
         onActivate={() => activateSessionMutation.mutate()}
         onSave={
           session.isActive
-            ? async (updates) => {
-                await updateSessionMutation.mutateAsync(updates);
-              }
+            ? (request) =>
+                reportSessionSave(
+                  () => updateSessionMutation.mutateAsync(request),
+                  () =>
+                    queryClient.invalidateQueries({
+                      queryKey: orpc.school.getSession.queryKey({
+                        input: { schoolId, sessionId },
+                      }),
+                    }),
+                )
             : undefined
         }
         onDirtyChange={session.isActive ? setIsSessionDirty : undefined}

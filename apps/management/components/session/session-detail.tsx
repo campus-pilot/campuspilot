@@ -7,7 +7,8 @@ import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authoriza
 import { AppShellAlert } from '@campuspilot/components/app-shell';
 import {
   SessionDetailsView,
-  type SessionConfig,
+  type SessionSaveRequest,
+  type SessionSaveResult,
 } from '@campuspilot/components/session';
 import {
   AlertDialog,
@@ -32,6 +33,7 @@ import { RequirePermissions } from '@/components/require-permissions';
 import { schoolHref } from '@/components/school-route';
 import { client, orpc } from '@/lib/orpc';
 import { SessionFinanceSettings } from './session-finance-settings';
+import { sessionSaveRefusal, toUpdateSessionInput } from './session-save-model';
 
 export function SessionDetail({
   schoolId,
@@ -51,20 +53,45 @@ export function SessionDetail({
     orpc.school.getSession.queryOptions({ input: { schoolId, sessionId } }),
   );
   const session = sessionQuery.data;
+  const refreshSession = async () => {
+    await queryClient.invalidateQueries({
+      queryKey: orpc.school.getSession.queryKey({
+        input: { schoolId, sessionId },
+      }),
+    });
+    await queryClient.invalidateQueries({
+      queryKey: orpc.school.listSessions.queryKey({ input: { schoolId } }),
+    });
+  };
   const updateSessionMutation = useMutation({
-    mutationFn: (payload: { sessionConfig: SessionConfig | null }) =>
-      client.school.updateSession({ schoolId, sessionId, ...payload }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({
-        queryKey: orpc.school.getSession.queryKey({
-          input: { schoolId, sessionId },
-        }),
-      });
-      await queryClient.invalidateQueries({
-        queryKey: orpc.school.listSessions.queryKey({ input: { schoolId } }),
-      });
-    },
+    mutationFn: (request: SessionSaveRequest) =>
+      client.school.updateSession(
+        toUpdateSessionInput({ schoolId, sessionId }, request),
+      ),
+    onSuccess: refreshSession,
   });
+  /**
+   * Saves the settings view's edit and reports the outcome to it, which shows
+   * a refusal next to Save (`sessionSaveRefusal`). Before reporting a stale,
+   * name or uncertain refusal the session is read again, so the view's
+   * "Load latest settings" shows what is stored now.
+   */
+  const saveSession = async (
+    request: SessionSaveRequest,
+  ): Promise<SessionSaveResult> => {
+    try {
+      const saved = await updateSessionMutation.mutateAsync(request);
+      return { status: 'saved', session: saved };
+    } catch (error) {
+      const refusal = sessionSaveRefusal(error);
+      if (refusal.refetch) await refreshSession();
+      return {
+        status: 'refused',
+        message: refusal.message,
+        reviewLatest: refusal.reviewLatest,
+      };
+    }
+  };
   const activateSessionMutation = useMutation({
     mutationFn: () => client.school.activateSession({ schoolId, sessionId }),
     onSuccess: async () => {
@@ -137,9 +164,7 @@ export function SessionDetail({
           <SessionDetailsView
             session={session}
             isSaving={updateSessionMutation.isPending}
-            onSave={async (updates) => {
-              await updateSessionMutation.mutateAsync(updates);
-            }}
+            onSave={saveSession}
             onDirtyChange={setIsSessionDirty}
             showStudentSettings={studentManagement}
           />

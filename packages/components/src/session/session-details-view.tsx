@@ -1,11 +1,12 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Badge } from '@campuspilot/ui/components/badge';
 import { Button } from '@campuspilot/ui/components/button';
 import {
   CheckCircle2,
   LoaderCircle,
+  RefreshCw,
   Save,
   Undo2,
 } from 'lucide-react';
@@ -13,20 +14,35 @@ import { AttendanceSection } from './attendance-section';
 import { CoScholasticSection } from './co-scholastic-section';
 import { ExaminationSection } from './examination-section';
 import { GradingScaleSection } from './grading-scale-section';
+import {
+  SAVE_UNCERTAIN_MESSAGE,
+  configsDiffer,
+  sessionDraftState,
+  type SessionEdits,
+  type SessionSaveRefusal,
+} from './session-draft-model';
 import type {
   CoScholasticArea,
   ExamDefinition,
   GradeDefinition,
   SchoolSessionDto,
   SessionConfig,
+  SessionSaveRequest,
+  SessionSaveResult,
 } from './types';
 
 export interface SessionDetailsViewProps {
   session: SchoolSessionDto;
   isSaving?: boolean;
-  onSave?: (updates: { sessionConfig: SessionConfig | null }) =>
-    | Promise<void>
-    | void;
+  /**
+   * Saves the edited configuration and reports what became of it
+   * (`SessionSaveResult`); the app makes the request, the view never calls
+   * the API. The request carries the `updatedAt` of the session the edit was
+   * started from (`basedOnUpdatedAt`), which the app must send as
+   * `updateSession`'s `expectedUpdatedAt`. A rejected promise is shown as a
+   * save whose outcome is unknown.
+   */
+  onSave?: (request: SessionSaveRequest) => Promise<SessionSaveResult>;
   onDirtyChange?: (isDirty: boolean) => void;
   onActivate?: () => void;
   isActivating?: boolean;
@@ -41,17 +57,145 @@ export interface SessionDetailsViewProps {
 }
 
 /**
- * Normalizes session config ensuring undefined records become null/empty
- * to allow stable equality comparisons.
+ * The editing state of the settings view.
+ *
+ * With no edits the view shows the newest known session, so a refetch (an
+ * exam created from the Examinations list, another save) shows at once.
+ * The first edit pins the session it was made on (`basedOn`); the draft and
+ * the dirty state are compared with that copy, not with later refetches, and
+ * the save sends its `updatedAt`, so the server refuses the save as stale
+ * instead of replacing what changed meanwhile.
+ *
+ * When the newest known session is newer than `basedOn` (`isOutdated`), or a
+ * save was refused as stale or ended with an unknown outcome
+ * (`refusal.reviewLatest`), the edits stay on screen, Save is unavailable
+ * and the user loads the latest settings explicitly (`loadLatest`, which
+ * discards the edits). The view does not replace the edits by itself: the
+ * user decides when to give them up. Other refusals (a taken name, an exam
+ * that cannot be removed, permission, a read-only school) are shown next to
+ * Save and cleared by the next edit, so the user can correct and save again.
  */
-function normalizeSessionConfig(config: SessionConfig | null | undefined) {
-  if (!config) return null;
-  return {
-    examConfig: config.examConfig ?? {},
-    coScholasticAreas: config.coScholasticAreas ?? {},
-    gradingScale: config.gradingScale ?? {},
-    attendanceTracking: config.attendanceTracking ?? { enabled: false },
-  };
+function useSessionDraft(
+  session: SchoolSessionDto,
+  onSave: SessionDetailsViewProps['onSave'],
+  onDirtyChange: SessionDetailsViewProps['onDirtyChange'],
+) {
+  const [edits, setEdits] = useState<SessionEdits | null>(null);
+  const [lastSaved, setLastSaved] = useState<SchoolSessionDto | null>(null);
+  const [refusal, setRefusal] = useState<SessionSaveRefusal | null>(null);
+
+  const { basedOn, draft, isDirty, needsReview, message } = sessionDraftState({
+    session,
+    lastSaved,
+    edits,
+    refusal,
+  });
+
+  function applyEdit(next: SessionConfig) {
+    const dirty = configsDiffer(next, basedOn.sessionConfig);
+    setEdits(dirty ? { config: next, basedOn } : null);
+    if (!refusal?.reviewLatest) setRefusal(null);
+    onDirtyChange?.(dirty);
+  }
+
+  /** Drops the edits and shows the newest known session (Discard, Load latest settings). */
+  function loadLatest() {
+    setEdits(null);
+    setRefusal(null);
+    onDirtyChange?.(false);
+  }
+
+  async function save() {
+    if (!onSave || !edits || !isDirty || needsReview) return;
+    setRefusal(null);
+    let result: SessionSaveResult;
+    try {
+      result = await onSave({
+        sessionConfig: edits.config,
+        basedOnUpdatedAt: edits.basedOn.updatedAt,
+      });
+    } catch {
+      result = { status: 'refused', message: SAVE_UNCERTAIN_MESSAGE, reviewLatest: true };
+    }
+    if (result.status === 'saved') {
+      setLastSaved(result.session);
+      setEdits(null);
+      onDirtyChange?.(false);
+      return;
+    }
+    setRefusal({ message: result.message, reviewLatest: result.reviewLatest });
+  }
+
+  return { draft, isDirty, needsReview, message, applyEdit, loadLatest, save };
+}
+
+/**
+ * The Save control, with Discard (or Load latest settings when the edit is
+ * based on an outdated read) beside it and the save feedback under it.
+ */
+function SessionSaveToolbar({
+  isDirty,
+  isSaving,
+  needsReview,
+  message,
+  onLoadLatest,
+  onSave,
+}: {
+  isDirty: boolean;
+  isSaving: boolean;
+  needsReview: boolean;
+  message: string | null;
+  onLoadLatest: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <div className="flex flex-col items-end gap-1.5 self-end sm:self-auto">
+      <div className="flex items-center gap-2">
+        {needsReview ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={isSaving}
+            onClick={onLoadLatest}
+          >
+            <RefreshCw className="size-3.5" />
+            Load latest settings
+          </Button>
+        ) : isDirty ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={isSaving}
+            onClick={onLoadLatest}
+          >
+            <Undo2 className="size-3.5" />
+            Discard
+          </Button>
+        ) : null}
+        <Button
+          type="button"
+          variant={isDirty && !needsReview ? 'default' : 'secondary'}
+          size="sm"
+          disabled={!isDirty || isSaving || needsReview}
+          onClick={onSave}
+        >
+          {isSaving ? (
+            <LoaderCircle className="size-3.5 animate-spin" />
+          ) : (
+            <Save className="size-3.5" />
+          )}
+          {isSaving ? 'Saving changes…' : isDirty ? 'Save changes' : 'Saved'}
+        </Button>
+      </div>
+      {message ? (
+        <p role="alert" className="max-w-md text-right text-xs text-destructive">
+          {message}
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 /**
@@ -71,96 +215,55 @@ export function SessionDetailsView({
   // Historical sessions remain visible for reference, but all configuration
   // changes must go through the one session currently active for the school.
   const isEditable = session.isActive && onSave !== undefined;
-  const [draftSessionConfig, setDraftSessionConfig] =
-    useState<SessionConfig | null>(() => session.sessionConfig);
-
-  function computeDirty(nextSession: SessionConfig | null) {
-    const originalSessionNormalized = normalizeSessionConfig(
-      session.sessionConfig,
-    );
-    const draftSessionNormalized = normalizeSessionConfig(nextSession);
-    return (
-      JSON.stringify(originalSessionNormalized) !==
-      JSON.stringify(draftSessionNormalized)
-    );
-  }
-
-  // Compute dirty status by serializing the drafts against baseline props
-  const isDirty = useMemo(() => {
-    return computeDirty(draftSessionConfig);
-  }, [session.sessionConfig, draftSessionConfig]);
-
-  function notifyDirty(nextSession: SessionConfig | null) {
-    onDirtyChange?.(computeDirty(nextSession));
-  }
-
-  function handleReset() {
-    setDraftSessionConfig(session.sessionConfig);
-    onDirtyChange?.(false);
-  }
+  const { draft: draftSessionConfig, isDirty, needsReview, message, applyEdit, loadLatest, save } =
+    useSessionDraft(session, onSave, onDirtyChange);
 
   function handleExamConfigChange(
     nextExamConfig: Record<string, ExamDefinition>,
   ) {
-    const nextSession: SessionConfig = {
+    applyEdit({
       examConfig: nextExamConfig,
       coScholasticAreas: draftSessionConfig?.coScholasticAreas ?? {},
       gradingScale: draftSessionConfig?.gradingScale ?? {},
       attendanceTracking: draftSessionConfig?.attendanceTracking ?? {
         enabled: false,
       },
-    };
-    setDraftSessionConfig(nextSession);
-    notifyDirty(nextSession);
+    });
   }
 
   function handleCoScholasticChange(
     nextAreas: Record<string, CoScholasticArea>,
   ) {
-    const nextSession: SessionConfig = {
+    applyEdit({
       examConfig: draftSessionConfig?.examConfig ?? {},
       coScholasticAreas: nextAreas,
       gradingScale: draftSessionConfig?.gradingScale ?? {},
       attendanceTracking: draftSessionConfig?.attendanceTracking ?? {
         enabled: false,
       },
-    };
-    setDraftSessionConfig(nextSession);
-    notifyDirty(nextSession);
+    });
   }
 
   function handleGradingScaleChange(
     nextScale: Record<string, GradeDefinition>,
   ) {
-    const nextSession: SessionConfig = {
+    applyEdit({
       examConfig: draftSessionConfig?.examConfig ?? {},
       coScholasticAreas: draftSessionConfig?.coScholasticAreas ?? {},
       gradingScale: nextScale,
       attendanceTracking: draftSessionConfig?.attendanceTracking ?? {
         enabled: false,
       },
-    };
-    setDraftSessionConfig(nextSession);
-    notifyDirty(nextSession);
+    });
   }
 
   function handleAttendanceChange(enabled: boolean) {
-    const nextSession: SessionConfig = {
+    applyEdit({
       examConfig: draftSessionConfig?.examConfig ?? {},
       coScholasticAreas: draftSessionConfig?.coScholasticAreas ?? {},
       gradingScale: draftSessionConfig?.gradingScale ?? {},
       attendanceTracking: { enabled },
-    };
-    setDraftSessionConfig(nextSession);
-    notifyDirty(nextSession);
-  }
-
-  async function handleSubmitSave() {
-    if (!onSave) return;
-    await onSave({
-      sessionConfig: draftSessionConfig,
     });
-    onDirtyChange?.(false);
   }
 
   return (
@@ -198,38 +301,14 @@ export function SessionDetailsView({
         </div>
 
         {isEditable ? (
-          <div className="flex items-center gap-2 self-end sm:self-auto">
-            {isDirty ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={isSaving}
-                onClick={handleReset}
-              >
-                <Undo2 className="size-3.5" />
-                Discard
-              </Button>
-            ) : null}
-            <Button
-              type="button"
-              variant={isDirty ? 'default' : 'secondary'}
-              size="sm"
-              disabled={!isDirty || isSaving}
-              onClick={handleSubmitSave}
-            >
-              {isSaving ? (
-                <LoaderCircle className="size-3.5 animate-spin" />
-              ) : (
-                <Save className="size-3.5" />
-              )}
-              {isSaving
-                ? 'Saving changes…'
-                : isDirty
-                  ? 'Save changes'
-                  : 'Saved'}
-            </Button>
-          </div>
+          <SessionSaveToolbar
+            isDirty={isDirty}
+            isSaving={isSaving ?? false}
+            needsReview={needsReview}
+            message={message}
+            onLoadLatest={loadLatest}
+            onSave={() => void save()}
+          />
         ) : null}
       </div>
 
