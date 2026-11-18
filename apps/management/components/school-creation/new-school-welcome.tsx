@@ -1,11 +1,9 @@
 'use client';
 
-import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { formatUsdText } from '@campuspilot/assistant-contract/money';
 import { BILLING_PERIOD_DAYS } from '@campuspilot/api/billing/billing.contract';
-import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import { schoolTierCatalogue } from '@campuspilot/api/routers/school/feature-flags/feature-flags.dto';
 import type { MySchoolDto } from '@campuspilot/api/routers/school/school.dto';
 import { Button } from '@campuspilot/ui/components/button';
@@ -19,8 +17,8 @@ import {
 } from '@campuspilot/ui/components/dialog';
 import { Bot, CalendarClock, Sparkles, type LucideIcon } from 'lucide-react';
 import { orpc } from '@/lib/orpc';
-import { RequirePermissions } from '../require-permissions';
 import { useSchoolFeature } from '../require-feature';
+import { CreateSessionButton } from '../session/create-session-button';
 import { schoolHref } from '../school-route';
 
 /**
@@ -78,8 +76,10 @@ function AssistantFact({ schoolId }: { schoolId: string }) {
 }
 
 /**
- * The first step for a school without an active session: setting one up,
- * for people who may create sessions. Otherwise the dialog only closes.
+ * The first step for a school without an active session: creating one in
+ * place, for people who may create sessions. The first session becomes
+ * active, so the entry page behind the dialog opens it and the welcome
+ * (whose parameter that navigation drops) closes with it.
  */
 function WelcomeActions({ schoolId, onClose }: { schoolId: string; onClose: () => void }) {
   const activeSessionQuery = useQuery(
@@ -93,17 +93,10 @@ function WelcomeActions({ schoolId, onClose }: { schoolId: string; onClose: () =
   if (activeSessionQuery.data?.items.length !== 0) return <DialogFooter>{close}</DialogFooter>;
   return (
     <DialogFooter>
-      <RequirePermissions
-        permissions={{ action: SCHOOL_ACTIONS.CREATE_SESSION, resource: { kind: 'school', schoolId } }}
-        fallback={close}
-      >
-        <Button type="button" variant="outline" onClick={onClose}>
-          Later
-        </Button>
-        <Button asChild>
-          <Link href={schoolHref(schoolId, '/settings/session')}>Set up your first session</Link>
-        </Button>
-      </RequirePermissions>
+      <Button type="button" variant="outline" onClick={onClose}>
+        Later
+      </Button>
+      <CreateSessionButton schoolId={schoolId} label="Create your first session" fallback={close} />
     </DialogFooter>
   );
 }

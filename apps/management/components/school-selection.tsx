@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { AuthLoading } from '@/components/auth-loading';
 import { orpc } from '@/lib/orpc';
 import { schoolHref, schoolSessionHref } from './school-route';
+import { CreateSessionButton } from './session/create-session-button';
 import { storeSchoolSessionId } from './session-selection';
 
 const ACTIVE_SCHOOL_KEY = 'campuspilot.management.activeSchoolId';
@@ -132,6 +133,28 @@ export function SchoolEntryRedirect({ schoolId }: { schoolId: string }) {
  * A direct school entry intentionally resets that school's remembered session
  * to the currently active session before opening its dashboard.
  */
+/**
+ * A school without an active session, where every workspace page waits for
+ * one: says so and offers to create one. A session created while none is
+ * active becomes active, and the refreshed session query then opens it.
+ */
+function NoActiveSession({ schoolId }: { schoolId: string }) {
+  return (
+    <main className="grid min-h-[50vh] place-items-center px-6">
+      <section className="flex max-w-md flex-col items-center gap-4 text-center">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-lg font-semibold">No active academic session</h1>
+          <p className="text-sm text-muted-foreground">
+            Classes, examinations and the dashboard belong to an academic session. Create one to start working in this
+            school.
+          </p>
+        </div>
+        <CreateSessionButton schoolId={schoolId} />
+      </section>
+    </main>
+  );
+}
+
 export function SchoolSessionEntryRedirect({ schoolId }: { schoolId: string }) {
   const activeSessionQuery = useQuery(
     orpc.school.listSessions.queryOptions({
@@ -145,14 +168,12 @@ export function SchoolSessionEntryRedirect({ schoolId }: { schoolId: string }) {
 
   const activeSession = activeSessionQuery.data?.items[0];
   if (!activeSession) {
-    return (
+    return activeSessionQuery.isError ? (
       <main className="grid min-h-[50vh] place-items-center px-6">
-        <p className="text-sm text-muted-foreground">
-          {activeSessionQuery.isError
-            ? 'Unable to load the active school session.'
-            : 'This school does not have an active session.'}
-        </p>
+        <p className="text-sm text-muted-foreground">Unable to load the active school session.</p>
       </main>
+    ) : (
+      <NoActiveSession schoolId={schoolId} />
     );
   }
 

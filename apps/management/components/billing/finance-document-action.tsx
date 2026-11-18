@@ -23,6 +23,7 @@ import { RequirePermissions } from '@/components/require-permissions';
 import { schoolHref } from '@/components/school-route';
 import { client, orpc } from '@/lib/orpc';
 import { DocumentDownload } from '@/components/documents/document-generator';
+import { CreateSessionButton } from '../session/create-session-button';
 
 export type { StatementSession } from '@campuspilot/components/documents/statement-session';
 
@@ -173,7 +174,10 @@ function StatementSessionRequirement({ schoolId, session }: { schoolId: string; 
       <Alert>
         <CircleAlert aria-hidden />
         <AlertTitle>No academic session is available</AlertTitle>
-        <AlertDescription>Create an academic session before generating a statement.</AlertDescription>
+        <AlertDescription className="flex flex-col items-start gap-2">
+          Create an academic session before generating a statement.
+          <CreateSessionButton schoolId={schoolId} variant="outline" />
+        </AlertDescription>
       </Alert>
     );
   }

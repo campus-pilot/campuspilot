@@ -292,6 +292,7 @@ export default function SchoolWorkspaceLayout({
         schoolId={schoolId}
         selectedSessionId={selectedSessionId}
         sessions={sessions}
+        hasNoSessions={sessionsQuery.isSuccess && sessions.length === 0}
       />
     ),
     footerLinks: [
