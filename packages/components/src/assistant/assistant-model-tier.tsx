@@ -11,12 +11,12 @@ import {
 import { ChevronDown, Sparkles, Zap } from 'lucide-react';
 
 /** What Pro costs, said wherever it can be picked. */
-const PRO_COST = 'Each Pro message uses more of your school’s assistant budget.';
+const PRO_COST = 'Uses up your school’s assistant limit faster.';
 
 const TIERS = [
-  { value: 'standard', label: 'Fast', hint: 'Quick answers for everyday requests.', icon: Zap },
-  { value: 'pro', label: 'Pro', hint: `Sharper answers: reads photos and figures more carefully. ${PRO_COST}`, icon: Sparkles },
-] as const satisfies ReadonlyArray<{ value: AssistantModelTier; label: string; hint: string; icon: typeof Zap }>;
+  { value: 'standard', label: 'Fast', hint: 'Quick answers for everyday requests.', cost: null, icon: Zap },
+  { value: 'pro', label: 'Pro', hint: 'Sharper answers: reads photos and figures more carefully.', cost: PRO_COST, icon: Sparkles },
+] as const satisfies ReadonlyArray<{ value: AssistantModelTier; label: string; hint: string; cost: string | null; icon: typeof Zap }>;
 
 const isTier = (value: string): value is AssistantModelTier => TIERS.some((tier) => tier.value === value);
 
@@ -41,12 +41,13 @@ export function AssistantModelSwitch({ tier, onChange, disabled }: { tier: Assis
             if (isTier(value)) onChange(value);
           }}
         >
-          {TIERS.map(({ value, label, hint, icon: Icon }) => (
+          {TIERS.map(({ value, label, hint, cost, icon: Icon }) => (
             <DropdownMenuRadioItem key={value} value={value} className="items-start">
               <Icon className="mt-0.5" aria-hidden />
               <span className="flex flex-col gap-0.5">
                 <span className="font-medium">{label}</span>
                 <span className="text-muted-foreground">{hint}</span>
+                {cost ? <span className="font-medium">{cost}</span> : null}
               </span>
             </DropdownMenuRadioItem>
           ))}

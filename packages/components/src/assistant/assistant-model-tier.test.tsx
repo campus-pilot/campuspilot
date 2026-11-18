@@ -15,7 +15,7 @@ describe('AssistantModelSwitch', () => {
     expect(screen.getByRole('button', { name: 'Model: Fast' }).textContent).toContain('Fast');
     open(/^Model: Fast$/);
     const fast = screen.getByRole('menuitemradio', { name: /^Fast/ });
-    const pro = screen.getByRole('menuitemradio', { name: /^Pro.*uses more of your school’s assistant budget/ });
+    const pro = screen.getByRole('menuitemradio', { name: /^Pro.*Uses up your school’s assistant limit faster/ });
     expect(fast.getAttribute('aria-checked')).toBe('true');
     expect(pro.getAttribute('aria-checked')).toBe('false');
     fireEvent.click(pro);
@@ -32,7 +32,7 @@ describe('AssistantProSuggestion', () => {
     const onDismiss = vi.fn();
     render(<AssistantProSuggestion onUsePro={onUsePro} onDismiss={onDismiss} />);
     expect(screen.getByText('Not happy with the answers? Try Pro.')).toBeTruthy();
-    expect(screen.getByText(/uses more of your school’s assistant budget/)).toBeTruthy();
+    expect(screen.getByText(/Uses up your school’s assistant limit faster/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Use Pro' }));
     fireEvent.click(screen.getByRole('button', { name: 'Keep Fast' }));
     expect(onUsePro).toHaveBeenCalledTimes(1);
