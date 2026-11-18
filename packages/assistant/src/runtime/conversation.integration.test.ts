@@ -12,6 +12,7 @@ import { db } from '../db';
 import * as store from '../store';
 import { getRunToken } from '../run-token';
 import { createFakeRunContext, SimulatedCrash, type FakeRunContext } from '../testing/run-context';
+import { paperPageLabel } from './context';
 import {
   catalogOf,
   finishWithoutApproval,
@@ -19,6 +20,7 @@ import {
   readTurn,
   requestStop,
   respondToApproval,
+  seedNextTurn,
   seedTurn,
   toolSuccess,
   waitForPendingApproval,
@@ -38,7 +40,6 @@ import {
   type AssistantConversationDeps,
   type RunAccessCheck,
 } from './conversation';
-import { toolInputStub } from './context';
 import {
   createFakeProvider,
   FAKE_PRICES,
@@ -572,25 +573,6 @@ describe('a write tool call', () => {
         ),
       ),
     ).toEqual(['awaiting_approval', 'running', 'succeeded']);
-  });
-
-  it('carrying a copied context note is refused before approval and never run', async () => {
-    const note = toolInputStub({ toolName: writeCall.name, field: 'name', chars: 4_674 });
-    const copied = { ...writeCall, input: { ...writeCall.input, name: note } };
-    const { provider, turn, invoke } = await arrange({
-      script: [fakeReply({ toolUses: [copied] }), fakeReply({ text: 'I will write it again.' })],
-    });
-
-    await invoke().done;
-
-    expect(callToolMock).not.toHaveBeenCalled();
-    const [result] = toolResultsSentTo(provider.calls[1]);
-    expect(result).toMatchObject({ toolUseId: copied.id, isError: true });
-    expect(JSON.parse(result!.content)).toMatchObject({ code: 'BAD_REQUEST', message: expect.stringContaining('`name`') });
-    const { run, toolCalls, approvals } = await readTurn(turn);
-    expect(run.status).toBe('completed');
-    expect(toolCalls).toEqual([]);
-    expect(approvals).toEqual([]);
   });
 
   it('is never called when the user declines, and the model is told so', async () => {
@@ -1381,5 +1363,118 @@ describe('a deleted conversation', () => {
     expect(provider.calls).toHaveLength(0);
     const { run } = await readTurn(turn);
     expect(run).toMatchObject({ status: 'cancelled', errorCode: 'conversation_deleted', modelRequestCount: 0 });
+  });
+});
+
+describe('Fast and Pro', () => {
+  const STRONG_PRICES = { inputUsdPerMtok: '0.75', outputUsdPerMtok: '3.75', cacheReadUsdPerMtok: '0.075', cacheWriteUsdPerMtok: '0' };
+
+  /** Sends one message per entry of `tiers` in one conversation and returns the model each run called and billed. */
+  async function talk(tiers: Array<'standard' | 'pro'>, strongConfigured = true) {
+    const base = createFakeProvider({ id: 'gemini', model: 'default-model', whenExhausted: fakeReply({ text: 'Changed.' }) });
+    const strong = createFakeProvider({ id: 'gemini', model: 'strong-model', whenExhausted: fakeReply({ text: 'Changed.' }) });
+    const registry = strongConfigured ? fakeProviderRegistry(base, FAKE_PRICES, { provider: strong, prices: STRONG_PRICES }) : fakeProviderRegistry(base, FAKE_PRICES);
+    const processRun = createRunProcessor({ providers: registry, log, checkAccess: async () => ({ allowed: true as const }) });
+    const bodyOf = (tier: 'standard' | 'pro') => (tier === 'pro' ? { tier: 'pro' as const } : {});
+    let turn = await seedTurn({ provider: 'gemini', text: 'Make the paper.', body: bodyOf(tiers[0]!) });
+    const runs: Array<{ requested: string[]; inputPrices: string[] }> = [];
+    for (const [index, tier] of tiers.entries()) {
+      if (index > 0) turn = await seedNextTurn(turn, `Change ${index + 1}.`, bodyOf(tier));
+      await processRun(createFakeRunContext(), turn.input);
+      const requests = await modelRequestsOf(turn.runId);
+      runs.push({ requested: requests.map((row) => row.requestedModel), inputPrices: requests.map((row) => row.inputUsdPerMtok) });
+    }
+    return { runs, base, strong };
+  }
+
+  it('never switches by itself: every message stays on the standard model however long the chat gets', async () => {
+    const { runs, strong } = await talk(['standard', 'standard', 'standard', 'standard', 'standard']);
+    expect(runs.map((run) => run.requested)).toEqual(Array.from({ length: 5 }, () => ['default-model']));
+    expect(strong.calls).toHaveLength(0);
+  });
+
+  it('answers a message sent with Pro on the stronger model, billed at its own prices, with the whole conversation, and the next Fast one on the standard model', async () => {
+    const { runs, base, strong } = await talk(['standard', 'standard', 'pro', 'standard']);
+    expect(runs.map((run) => run.requested)).toEqual([['default-model'], ['default-model'], ['strong-model'], ['default-model']]);
+    expect(runs[1]!.inputPrices).toEqual([expect.stringMatching(/^2\.50*$/)]);
+    expect(runs[2]!.inputPrices).toEqual([expect.stringMatching(/^0\.750*$/)]);
+    expect(base.calls).toHaveLength(3);
+    // The stronger model reads the conversation so far: the two earlier messages and their answers, then the new one.
+    expect(strong.calls[0]!.transcript.filter((entry) => entry.role === 'user')).toHaveLength(3);
+  });
+
+  it('answers Pro on another provider, which reads the other provider\'s turns as a handoff and its own as stored', async () => {
+    const fast = createFakeProvider({ id: 'gemini', model: 'flash-lite', whenExhausted: fakeReply({ text: 'Fast answer.' }) });
+    const pro = createFakeProvider({ id: 'anthropic', model: 'sonnet', whenExhausted: fakeReply({ text: 'Pro answer.' }) });
+    const processRun = createRunProcessor({ providers: fakeProviderRegistry(fast, FAKE_PRICES, { provider: pro, prices: STRONG_PRICES }), log, checkAccess: async () => ({ allowed: true as const }) });
+    let turn = await seedTurn({ provider: 'gemini', text: 'Make the paper.' });
+    await processRun(createFakeRunContext(), turn.input);
+    turn = await seedNextTurn(turn, 'Redraw question 6.', { tier: 'pro' });
+    await processRun(createFakeRunContext(), turn.input);
+    expect((await modelRequestsOf(turn.runId)).map((row) => [row.provider, row.requestedModel, row.inputUsdPerMtok])).toEqual([['anthropic', 'sonnet', expect.stringMatching(/^0\.750*$/)]]);
+    turn = await seedNextTurn(turn, 'Thanks, now fix question 2.');
+    await processRun(createFakeRunContext(), turn.input);
+
+    const textOf = (entry: { content: unknown[] }) => JSON.stringify(entry.content);
+    // Pro reads the Fast turn as the user's message and a note of what Fast said, not as Fast's stored turn.
+    const proSaw = pro.calls[0]!.transcript;
+    expect(proSaw.map((entry) => entry.role)).toEqual(['user', 'assistant', 'user']);
+    expect(textOf(proSaw[0]!)).toContain('Make the paper.');
+    expect(textOf(proSaw[1]!)).toContain('answered by another model');
+    expect(textOf(proSaw[1]!)).toContain('Fast answer.');
+    expect(textOf(proSaw[2]!)).toContain('Redraw question 6.');
+    // Back on Fast: its own turn as stored, the Pro turn as a handoff, then the new message.
+    const fastSaw = fast.calls.at(-1)!.transcript;
+    expect(fastSaw.map((entry) => entry.role)).toEqual(['user', 'assistant', 'user', 'assistant', 'user']);
+    expect(textOf(fastSaw[1]!)).not.toContain('answered by another model');
+    expect(textOf(fastSaw[3]!)).toContain('answered by another model');
+    expect(textOf(fastSaw[3]!)).toContain('Pro answer.');
+    expect(textOf(fastSaw[4]!)).toContain('fix question 2');
+  });
+
+  it('answers Pro with the standard model when no stronger model is configured', async () => {
+    const { runs } = await talk(['pro', 'pro'], false);
+    expect(runs.map((run) => run.requested)).toEqual([['default-model'], ['default-model']]);
+  });
+});
+
+describe('a conversation shared with a question paper', () => {
+  const PAPER = { sessionId: 'sess_test', examSlug: 'annual', classId: 'cls_test', subjectSlug: 'maths', modeSlug: 'written' };
+  const pages = [1, 2].map((position) => ({ pageId: `qpg_${position}`, position, total: 2, mimeType: 'image/jpeg', bytes: new Uint8Array(64) }));
+
+  async function run(paper: typeof PAPER | null) {
+    const provider = createFakeProvider({ script: [fakeReply({ text: 'I can see both pages.' })] });
+    const asked: unknown[] = [];
+    const processRun = createRunProcessor({
+      providers: fakeProviderRegistry(provider),
+      log,
+      checkAccess: async () => ({ allowed: true as const }),
+      loadPaperPages: async (input) => {
+        asked.push(input);
+        return pages;
+      },
+    });
+    const turn = await seedTurn({ text: 'Check question 6 against the photo.', paper });
+    await processRun(createFakeRunContext(), turn.input);
+    return { provider, asked, turn };
+  }
+
+  it('shows the model the paper\'s photographed pages before the first message', async () => {
+    const { provider, asked, turn } = await run(PAPER);
+    expect(asked).toEqual([{ schoolId: turn.schoolId, paper: PAPER }]);
+    const first = provider.calls[0]!.transcript[0]!.content;
+    expect(first).toEqual([
+      { type: 'text', text: paperPageLabel(pages[0]!) },
+      { type: 'image', mimeType: 'image/jpeg', byteLength: 64 },
+      { type: 'text', text: paperPageLabel(pages[1]!) },
+      { type: 'image', mimeType: 'image/jpeg', byteLength: 64 },
+      { type: 'text', text: 'Check question 6 against the photo.' },
+    ]);
+  });
+
+  it('never loads pages for a conversation that is not shared with a paper', async () => {
+    const { provider, asked } = await run(null);
+    expect(asked).toEqual([]);
+    expect(JSON.stringify(provider.calls[0]!.transcript)).not.toContain('qpg_');
   });
 });

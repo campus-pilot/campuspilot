@@ -49,7 +49,10 @@ export async function seedTurn({
   conversationModel = 'conversation-start-model',
   schoolId: givenSchoolId,
   body: extraBody = {},
+  paper = null,
 }: {
+  /** The question paper the conversation is shared with (none by default). */
+  paper?: store.PaperKeyParts | null;
   text?: string;
   /** More fields of the user message's body (attachments, a seed). */
   body?: Partial<AssistantUserMessageBody>;
@@ -72,6 +75,7 @@ export async function seedTurn({
       title: text,
       provider,
       model: conversationModel,
+      paper,
     });
     await store.insertRun(tx, emit, {
       id: runId,
@@ -97,6 +101,16 @@ export async function seedTurn({
     userId,
     input: { runId, user: { name: 'Asha Rao', email: 'asha.rao@school.test' } },
   };
+}
+
+/** Saves the user's next message in a seeded conversation: a new queued run and its user message, as `sendMessage` does. */
+export async function seedNextTurn(turn: SeededTurn, text: string, extraBody: Partial<AssistantUserMessageBody> = {}): Promise<SeededTurn> {
+  const runId = generateId('run');
+  await store.assistantTransaction(db, async (tx, emit) => {
+    await store.insertRun(tx, emit, { id: runId, conversationId: turn.conversationId, schoolId: turn.schoolId, userId: turn.userId, clientRequestId: randomUUID(), surface: 'panel' });
+    await store.insertItem(tx, emit, { conversationId: turn.conversationId, runId, kind: 'user_message', status: 'complete', body: { text, ...extraBody }, itemKey: userMessageItemKey(runId) });
+  });
+  return { ...turn, runId, input: { ...turn.input, runId } };
 }
 
 /** Everything a turn left in the database, in display and model order. */

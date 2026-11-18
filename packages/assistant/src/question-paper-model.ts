@@ -1,8 +1,9 @@
-import type { QuestionPaperModel } from '@campuspilot/api/workflows/question-paper/model';
+import type { QuestionPaperFigureRoute, QuestionPaperModel } from '@campuspilot/api/workflows/question-paper/model';
 
 import { createAnthropicProvider } from './runtime/providers/anthropic';
-import { questionPaperSettings, type QuestionPaperSettings } from './runtime/providers/config';
+import { questionPaperStrongSettings, questionPaperSettings, type QuestionPaperStrongSettings, type QuestionPaperSettings } from './runtime/providers/config';
 import { createGeminiProvider } from './runtime/providers/gemini';
+import { createGeminiDecisionModel } from './runtime/providers/gemini-decisions';
 import { billedUsageOf, type ModelProvider } from './runtime/providers/types';
 
 /**
@@ -49,4 +50,29 @@ export function createQuestionPaperModel(): QuestionPaperModel | undefined {
   if (!settings) return undefined;
   const create = settings.id === 'anthropic' ? createAnthropicProvider : createGeminiProvider;
   return questionPaperModelOf(create({ apiKey: settings.apiKey, model: settings.model }), settings);
+}
+
+/** The figure route from its settings: the figure model as a question paper model, and the decision model. */
+export function questionPaperFigureRouteOf(settings: QuestionPaperStrongSettings): QuestionPaperFigureRoute {
+  const decision = createGeminiDecisionModel({ apiKey: settings.decision.apiKey, model: settings.decision.model });
+  return {
+    model: questionPaperModelOf(createGeminiProvider({ apiKey: settings.strong.apiKey, model: settings.strong.model }), settings.strong),
+    decision: {
+      provider: 'gemini',
+      model: settings.decision.model,
+      prices: { inputUsdPerMtok: settings.decision.inputUsdPerMtok, outputUsdPerMtok: '0', cacheReadUsdPerMtok: '0', cacheWriteUsdPerMtok: '0' },
+      decide: ({ images, question }) => decision.decideYesNo(images, question),
+    },
+  };
+}
+
+/**
+ * The process's figure route from the environment (`QUESTION_PAPER_STRONG_*`
+ * and the decision model's price), or `undefined` when it is off. Called once
+ * at boot by `apps/worker`, which passes the result to
+ * `configureQuestionPaperFigureRoute`.
+ */
+export function createQuestionPaperFigureRoute(): QuestionPaperFigureRoute | undefined {
+  const settings = questionPaperStrongSettings();
+  return settings ? questionPaperFigureRouteOf(settings) : undefined;
 }

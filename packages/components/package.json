@@ -32,6 +32,7 @@
     "@tanstack/react-table": "^8.21.3",
     "libphonenumber-js": "^1.13.15",
     "lucide-react": "catalog:",
+    "pdfjs-dist": "6.5.438",
     "react": "catalog:",
     "react-markdown": "^10.1.0",
     "recharts": "3.8.0",

@@ -9,6 +9,7 @@ export * from './assistant-copy-button';
 export * from './assistant-diagnostics';
 export * from './assistant-empty-state';
 export * from './assistant-markdown';
+export * from './assistant-model-tier';
 export * from './assistant-rows';
 export * from './assistant-timeline';
 export * from './assistant-voice';

@@ -29,6 +29,7 @@ import { handleSchoolLogoUpload } from '@campuspilot/api/routers/system-admin/sc
 import { handleSchoolLogoBlob } from '@campuspilot/api/routers/school/logo/logo.blob';
 import {
   handleQuestionPaperPageRead,
+  handleQuestionPaperVersionPdfRead,
   handleQuestionPaperPageStore,
   handleQuestionPaperPageUpload,
 } from '@campuspilot/api/routers/school/question-paper/question-paper.http';
@@ -315,6 +316,19 @@ app.get(`${QUESTION_PAPER_PAGES_PATH}/:pageId/:variant`, async (context) => {
     (error) => reportUploadError(context.var.logger, 'question-paper.page.read.error', key, error),
   );
 });
+
+/** The PDF of a saved version, for the paper's screen to draw (pdf.js); the same file as Download PDF. */
+app.get(
+  '/api/blob/schools/:schoolId/sessions/:sessionId/exams/:examSlug/classes/:classId/question-papers/:subjectSlug/:modeSlug/versions/:versionNo/pdf',
+  async (context) => {
+    const key = questionPaperKey(context);
+    const versionNo = context.req.param('versionNo');
+    const apiContext = await createContext({ context });
+    return handleQuestionPaperVersionPdfRead(apiContext, { key, versionNo }, (error) =>
+      reportUploadError(context.var.logger, 'question-paper.version-pdf.read.error', { ...key, versionNo }, error),
+    );
+  },
+);
 
 app.post('/api/blob/users/me/profile-image', async (context) => {
   const apiContext = await createContext({ context });

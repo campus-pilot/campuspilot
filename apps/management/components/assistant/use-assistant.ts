@@ -5,6 +5,7 @@ import {
   assistantConversationAttention,
   type AssistantConversationListItemDto,
   type AssistantItemDto,
+  type AssistantModelTier,
   type AssistantRunDto,
   type AssistantStreamEvent,
   type AssistantSurface,
@@ -13,6 +14,7 @@ import {
   activeRun,
   assistantAnnouncement,
   buildAssistantTimeline,
+  conversationModelTier,
   lastUserText,
   sumAssistantUsage,
   approvalsByDecider,
@@ -301,6 +303,7 @@ const selectUsage = structural((state) => {
   return usage.length ? sumAssistantUsage(usage) : null;
 });
 const selectLastUserText = structural((state) => lastUserText(state.items) ?? undefined);
+const selectModelTier = structural((state) => conversationModelTier(state.items));
 /**
  * The open conversation with its attention as of now. The stream holds
  * every run of the conversation, live, so the attention is worked out from
@@ -403,6 +406,11 @@ export function useConfirmedItemIds(schoolId: string, conversationId: string | n
 /** The user's latest message in the conversation, for Up-arrow recall. */
 export function useLastUserText(schoolId: string, conversationId: string | null): string | undefined {
   return useConversationQuery(schoolId, conversationId, selectLastUserText).data;
+}
+
+/** The tier the conversation's latest message was sent with, and how many messages the user sent (see `conversationModelTier`). */
+export function useConversationModelTier(schoolId: string, conversationId: string | null) {
+  return useConversationQuery(schoolId, conversationId, selectModelTier).data ?? { tier: null, userMessages: 0 };
 }
 
 /** What the chat's live region says right now (see `assistantAnnouncement`). */
@@ -527,12 +535,12 @@ export function useSendAssistantMessage(schoolId: string, surface: AssistantSurf
    * it (in the order shown; only their ids go to the server); `seed` names the
    * screen a new conversation starts from and is valid only without a
    * `conversationId`; `shareWithPaper` shares that new conversation with the
-   * seed's question paper.
+   * seed's question paper; `tier` picks Fast or Pro for this message.
    */
   const send = (
     text: string,
     conversationId: string | null,
-    extras: { attachments?: AssistantAttachmentRef[]; seed?: QuestionPaperSeed | null; shareWithPaper?: boolean; screen?: boolean } = {},
+    extras: { attachments?: AssistantAttachmentRef[]; seed?: QuestionPaperSeed | null; shareWithPaper?: boolean; screen?: boolean; tier?: AssistantModelTier } = {},
   ) => {
     const clientRequestId = crypto.randomUUID();
     return mutation
@@ -545,6 +553,7 @@ export function useSendAssistantMessage(schoolId: string, surface: AssistantSurf
         pageContext: currentPageContext(extras.screen ?? false),
         ...(extras.attachments?.length ? { attachments: extras.attachments } : {}),
         ...(extras.seed && !conversationId ? { seed: extras.seed, shareWithPaper: extras.shareWithPaper ?? false } : {}),
+        ...(extras.tier === 'pro' ? { tier: 'pro' as const } : {}),
       })
       .catch((error: unknown) => {
         // The composer marks the missing files and keeps the words, so no failed copy of the message stays whose Retry would fail the same way.

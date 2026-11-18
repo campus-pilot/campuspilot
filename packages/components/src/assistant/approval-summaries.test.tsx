@@ -29,6 +29,16 @@ describe('approval summaries', () => {
     expect(approvalSummaryOf(TOOL, { ...input, expectedVersionNo: 0 }, facts)?.sentence).toContain('as version 1 of');
   });
 
+  it('counts the changes of an edit and names the version it becomes, keeping the edits themselves listed', () => {
+    const edit = { ...input, draftId: undefined, edits: [{ find: '(b) 127', replace: '(b) 128' }, { find: '[2]', replace: '[3]' }] };
+    const summary = approvalSummaryOf('school.editQuestionPaper', edit, facts)!;
+    expect(summary.sentence).toBe('Make 2 changes to version 3 of Mathematics (Oral), Class 5, Annual Examination and save them as version 4.');
+    expect(summary.detailKeys.has('edits')).toBe(false);
+    expect(approvalSummaryOf('school.editQuestionPaper', { ...edit, edits: [edit.edits[0]] }, { paperLabel: null, draftOrdinal: null })?.sentence).toBe(
+      'Make 1 change to version 3 of this paper and save it as version 4.',
+    );
+  });
+
   it('degrades to plain words while a name or the draft is unknown', () => {
     expect(approvalSummaryOf(TOOL, input, { paperLabel: null, draftOrdinal: null })?.sentence).toBe(
       'Save the draft as version 4 of this paper.',

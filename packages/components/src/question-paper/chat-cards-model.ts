@@ -229,6 +229,29 @@ export function unsavedDraftOf(
   return found;
 }
 
+/**
+ * Whether a save of `draftId` for this paper went through in the conversation.
+ * The assistant saves a valid draft by itself (by its draftId), so its card
+ * then shows the draft as saved rather than offering Save again. A save of
+ * the same text for another paper does not count (a draft id hashes the text
+ * alone, see {@link saveDraftMessage}).
+ */
+export function draftSaved(rows: readonly AssistantTimelineRow[], paper: DraftPaperKey, draftId: string): boolean {
+  const wanted = paperScopeOf({ schoolId: '', html: '', ...paper });
+  const savedThis = (call: Extract<AssistantTimelineRow, { kind: 'approval' }>['call']) =>
+    call.body.toolName.endsWith('saveQuestionPaperVersion') &&
+    call.status === 'succeeded' &&
+    savedPaperScopeOf(call.body.input) === wanted &&
+    (call.body.input as { draftId?: unknown } | null)?.draftId === draftId;
+  const visit = (row: AssistantTimelineRow): boolean => {
+    if (row.kind === 'approval') return savedThis(row.call);
+    if (row.kind === 'activity') return row.calls.some(savedThis);
+    if (row.kind === 'work') return row.folded.some(visit);
+    return false;
+  };
+  return rows.some(visit);
+}
+
 /** What the conversation holds, in order, that matters to whether a draft's Save is still pending. */
 export type DraftSaveEvent =
   | { kind: 'message'; text: string }

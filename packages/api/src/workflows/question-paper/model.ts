@@ -71,3 +71,38 @@ export function configureQuestionPaperModel(model: QuestionPaperModel | undefine
 export function getQuestionPaperModel(): QuestionPaperModel | undefined {
   return configured;
 }
+
+/** A yes or no question about the photographed pages, as the decision model reads it. */
+export type DecisionQuestion = { instructions: string; trueDescription: string; falseDescription: string };
+
+/**
+ * A model that answers a closed question about images with a calibrated
+ * probability instead of text (Gemini's decision model). It is billed for its
+ * input only, so its prices other than input are zero.
+ */
+export interface QuestionPaperDecisionModel {
+  readonly provider: 'gemini';
+  readonly model: string;
+  readonly prices: QuestionPaperModel['prices'];
+  /** The probability, between 0.01 and 0.99, that the answer to `question` is yes. */
+  decide(input: { images: Array<Extract<TextPart, { type: 'image' }>>; question: DecisionQuestion }): Promise<{ probability: number; usage: ModelUsage; answeredModel: string }>;
+}
+
+/**
+ * The figure route: a paper whose photographs have a diagram to redraw is
+ * written by `model` (a stronger one) instead of the question paper model;
+ * `decision` tells such a paper apart before the transcription.
+ */
+export type QuestionPaperFigureRoute = { model: QuestionPaperModel; decision: QuestionPaperDecisionModel };
+
+let figureRoute: QuestionPaperFigureRoute | undefined;
+
+/** Sets (or, with `undefined`, clears) the process's figure route. Called once at boot by the worker. */
+export function configureQuestionPaperFigureRoute(route: QuestionPaperFigureRoute | undefined) {
+  figureRoute = route;
+}
+
+/** The process's figure route, or `undefined` when it is off (every paper is written by the question paper model). */
+export function getQuestionPaperFigureRoute(): QuestionPaperFigureRoute | undefined {
+  return figureRoute;
+}
