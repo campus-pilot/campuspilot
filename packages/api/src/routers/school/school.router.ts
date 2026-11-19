@@ -37,6 +37,7 @@ import {
 } from "./school.dto";
 import { schoolSessionFinanceRouter } from "./session-finance/session-finance.router";
 import { schoolSessionRouter } from "./session/session.router";
+import { schoolOnboardingRouter } from "./onboarding/onboarding.router";
 import { schoolStudentRouter } from "./student/student.router";
 
 /**
@@ -224,5 +225,6 @@ export const schoolRouter = {
   ...schoolMemberRouter,
   ...gateRouterOnSchoolFeature("studentManagement", schoolSessionFinanceRouter),
   ...schoolSessionRouter,
+  ...schoolOnboardingRouter,
   ...gateRouterOnSchoolFeature("studentManagement", schoolStudentRouter),
 };

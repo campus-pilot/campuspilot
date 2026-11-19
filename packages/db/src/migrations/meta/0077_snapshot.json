@@ -1,5 +1,5 @@
 {
-  "id": "e332fa21-c75d-4729-856a-3b1a58a2004f",
+  "id": "55784b55-b7f0-4ef7-b220-dd528ab89de1",
   "prevId": "631e69ac-8df4-4217-8d0c-4dd1ed20746b",
   "version": "7",
   "dialect": "postgresql",
@@ -14758,6 +14758,58 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.school_onboarding": {
+      "name": "school_onboarding",
+      "schema": "",
+      "columns": {
+        "school_id": {
+          "name": "school_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "skipped_at": {
+          "name": "skipped_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "school_onboarding_school_id_school_id_fk": {
+          "name": "school_onboarding_school_id_school_id_fk",
+          "tableFrom": "school_onboarding",
+          "tableTo": "school",
+          "columnsFrom": [
+            "school_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.notice_class": {
       "name": "notice_class",
       "schema": "",
@@ -15218,87 +15270,6 @@
           "value": "\"notice\".\"version\" >= 1"
         }
       },
-      "isRLSEnabled": false
-    },
-    "public.whatsapp_media_upload": {
-      "name": "whatsapp_media_upload",
-      "schema": "",
-      "columns": {
-        "phone_number_id": {
-          "name": "phone_number_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "share_key": {
-          "name": "share_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "school_id": {
-          "name": "school_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "media_id": {
-          "name": "media_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "uploaded_at": {
-          "name": "uploaded_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {
-        "whatsapp_media_upload_school_id_idx": {
-          "name": "whatsapp_media_upload_school_id_idx",
-          "columns": [
-            {
-              "expression": "school_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "whatsapp_media_upload_school_id_school_id_fk": {
-          "name": "whatsapp_media_upload_school_id_school_id_fk",
-          "tableFrom": "whatsapp_media_upload",
-          "tableTo": "school",
-          "columnsFrom": [
-            "school_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "whatsapp_media_upload_phone_number_id_share_key_pk": {
-          "name": "whatsapp_media_upload_phone_number_id_share_key_pk",
-          "columns": [
-            "phone_number_id",
-            "share_key"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
       "isRLSEnabled": false
     }
   },

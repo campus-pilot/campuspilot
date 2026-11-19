@@ -29,11 +29,11 @@ function NoSchoolsEmptyState() {
           </span>
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">
-              You are not part of a school yet
+              Set up your school
             </h1>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              Create your own school, or ask a school administrator to invite
-              you to theirs.
+              Create your school to start a free trial, or ask a school
+              administrator to invite you to theirs.
             </p>
           </div>
           <div className="w-full max-w-md">

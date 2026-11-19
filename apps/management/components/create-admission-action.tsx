@@ -36,7 +36,25 @@ const emptyAdmission: AdmissionFormValue = {
 /** A password issued with a new admission, kept only until staff close the dialog. */
 type IssuedForAdmission = { studentName: string; details: IssuedCadetPasswordDetails };
 
-export function CreateAdmissionAction({ schoolId }: { schoolId: string }) {
+/**
+ * "New admission" with its feature and permission gates (separate gates; the
+ * action needs both), so the Admission navbar and empty states render the
+ * same entry point.
+ */
+export function CreateAdmissionAction({ schoolId, variant = 'default' }: { schoolId: string; variant?: 'default' | 'outline' }) {
+  return (
+    <RequireFeature schoolId={schoolId} feature="studentManagement">
+      <RequirePermissions permissions={[
+        { action: SCHOOL_ACTIONS.CREATE_ADMISSION, resource: { kind: 'school', schoolId } },
+        { action: SCHOOL_ACTIONS.LIST_CLASSES, resource: { kind: 'school', schoolId } },
+      ]}>
+        <CreateAdmissionButton schoolId={schoolId} variant={variant} />
+      </RequirePermissions>
+    </RequireFeature>
+  );
+}
+
+function CreateAdmissionButton({ schoolId, variant }: { schoolId: string; variant: 'default' | 'outline' }) {
   const [open, setOpen] = useState(false);
   const [issued, setIssued] = useState<IssuedForAdmission | null>(null);
   const queryClient = useQueryClient();
@@ -58,7 +76,7 @@ export function CreateAdmissionAction({ schoolId }: { schoolId: string }) {
   );
   return (
     <>
-      <Button type="button" size="sm" onClick={() => setOpen(true)}><Plus aria-hidden />New admission</Button>
+      <Button type="button" size="sm" variant={variant} onClick={() => setOpen(true)}><Plus aria-hidden />New admission</Button>
       {open ? (
         // The checkbox is offered only in schools that have the Cadet Portal
         // and only to staff who may issue its passwords; the server checks

@@ -111,6 +111,7 @@ export default function SchoolSettingsLayout({
         schoolId={schoolId}
         selectedSessionId={selectedSessionId}
         sessions={sessions}
+        hasNoSessions={sessionsQuery.isSuccess && sessions.length === 0}
       />
     ),
     navbarActions: resolveManagementPageActions(page, params),

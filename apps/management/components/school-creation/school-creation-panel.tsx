@@ -7,7 +7,7 @@ import { Alert, AlertDescription, AlertTitle } from '@campuspilot/ui/components/
 import { Button } from '@campuspilot/ui/components/button';
 import { Clock3, Info } from 'lucide-react';
 import { orpc } from '@/lib/orpc';
-import { CreateSchoolDialog } from './create-school-form';
+import { CreateSchoolForm } from './create-school-form';
 import { RequestMoreSchoolsDialog } from './request-more-schools-form';
 
 const dateFormatter = new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium' });
@@ -73,9 +73,9 @@ function StatusBody({ status }: { status: SchoolCreationStatusDto }) {
   if (status.refusal === null) {
     const note = approvalNoteOf(status);
     return (
-      <div className="flex flex-col items-center gap-4">
+      <div className="flex flex-col gap-4">
         {note ? <ApprovedRequestNotice note={note} /> : null}
-        <CreateSchoolDialog />
+        <CreateSchoolForm />
       </div>
     );
   }
@@ -90,8 +90,8 @@ function StatusBody({ status }: { status: SchoolCreationStatusDto }) {
 
 /**
  * Self-service school creation (docs/school-creation.md), decided by the
- * server's status: the Create a school button (its form opens in a dialog)
- * while the person may create a school, the button to ask for more once their
+ * server's status: the create-school form while the person may create a
+ * school, the button to ask for more once their
  * allowance is used, and the reason otherwise (staff of another school, a
  * demo account, an unverified email).
  */

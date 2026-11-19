@@ -255,9 +255,11 @@ export function LoginForm() {
         </form.Subscribe>
       </form>
 
+      {/* Anyone may open a school of their own (docs/school-creation.md); staff of a school sign in with the account it gave them. */}
       <FieldDescription className="text-center">
-        Your account is created by your school. Contact your administrator if
-        you need access.
+        New to CampusPilot? Continue with Google to set up your school and
+        start a free trial. Staff sign in with the account their school gave
+        them.
       </FieldDescription>
     </div>
   );
