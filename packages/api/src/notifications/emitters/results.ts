@@ -109,7 +109,7 @@ export async function previewResultRelease(db: DatabaseExecutor, scope: ExamScop
   if (existing) return { kind: 'already_notified', notifiedAt: existing.publishedAt };
   const roster = await publicationRoster(db, scope);
   const recipients = await resolveAdmissionRecipients(db, scope.schoolId, roster.map((row) => row.admissionId));
-  return { kind: 'first_release', forecast: forecastDeliveries('exam.results_published', await schoolDeliveryFacts(db, scope.schoolId), recipients) };
+  return { kind: 'first_release', forecast: forecastDeliveries('exam.results_published', await schoolDeliveryFacts(db, scope.schoolId, 'exam.results_published'), recipients) };
 }
 
 /**
@@ -127,7 +127,7 @@ export async function notifyFirstResultRelease(tx: DatabaseExecutor, scope: Exam
   const roster = await publicationRoster(tx, scope);
   if (roster.length === 0) return [];
   const recipients = await resolveAdmissionRecipients(tx, scope.schoolId, roster.map((row) => row.admissionId));
-  const forecast = forecastDeliveries('exam.results_published', await schoolDeliveryFacts(tx, scope.schoolId), recipients);
+  const forecast = forecastDeliveries('exam.results_published', await schoolDeliveryFacts(tx, scope.schoolId, 'exam.results_published'), recipients);
   const id = generateId('examResultPublication');
   await tx.insert(examResultPublicationTable).values({
     id,
@@ -199,7 +199,7 @@ export async function previewStudentResult(db: Database, scope: StudentResultSco
     async (tx) => {
       const { student } = await studentForResult(tx, scope);
       const recipients = await resolveAdmissionRecipients(tx, scope.schoolId, [student.admissionId]);
-      return forecastDeliveries('exam.results_published', await schoolDeliveryFacts(tx, scope.schoolId), recipients);
+      return forecastDeliveries('exam.results_published', await schoolDeliveryFacts(tx, scope.schoolId, 'exam.results_published'), recipients);
     },
     { isolationLevel: 'repeatable read', accessMode: 'read only' },
   );
@@ -244,7 +244,7 @@ async function sendStudentResultOnce(db: Database, scope: StudentResultScope & {
     async (tx) => {
       const { exam, student } = await studentForResult(tx, scope);
       const recipients = await resolveAdmissionRecipients(tx, scope.schoolId, [student.admissionId]);
-      const forecast = forecastDeliveries('exam.results_published', await schoolDeliveryFacts(tx, scope.schoolId), recipients);
+      const forecast = forecastDeliveries('exam.results_published', await schoolDeliveryFacts(tx, scope.schoolId, 'exam.results_published'), recipients);
       const result = await notify(tx, {
         type: 'exam.results_published',
         schoolId: scope.schoolId,

@@ -329,6 +329,12 @@ takes away the WhatsApp copy alone; the inbox and web push are unaffected.
 The platform switch `WHATSAPP_ENABLED` still applies to every school
 (`skipped: disabled`); a school needs both.
 
+A type can also need a feature **on one channel only**
+(`notificationTypeChannelRequiredFeatures`), decided at the same points as a
+channel's feature. Today: the WhatsApp copy of `exam.results_published` needs
+`cadet`, because its fixed text sends the guardian to the Cadet Portal for the
+results; the inbox row and web push of results are unaffected.
+
 | Surface | Behaviour when off |
 | --- | --- |
 | Fan-out (`planNotificationRows`, `decideDeliveries`) | The WhatsApp copy of every notification is planned `skipped: feature_disabled`. The dispatched event journals which channels lacked their feature (`channelsWithoutFeature`). |
@@ -463,7 +469,8 @@ showing past spend.
    document types, and the pinned key lists in tests. If the feature has
    notifications, name it in `notificationRequiredFeatures` for each of its
    types; if it is a notification channel's, in
-   `notificationChannelRequiredFeatures`. Update the tier table at the top of
+   `notificationChannelRequiredFeatures`; if one type needs it on one channel
+   only, in `notificationTypeChannelRequiredFeatures`. Update the tier table at the top of
    this guide. A demo school is on `DEMO_SCHOOL_TIER`: check that the demo
    should have the feature, and adjust it in `createDemoSchool` if not.
 2. If it has settings, give it a settings page in the admin app and name it

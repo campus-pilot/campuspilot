@@ -131,7 +131,7 @@ describe('notice notifications', () => {
     });
   });
 
-  it('notifies exactly the students of the chosen classes, in their own inbox, with the notice PDF on WhatsApp rendered once', async () => {
+  it('notifies exactly the students of the chosen classes, in their own inbox, with the notice PDF on WhatsApp rendered and uploaded once', async () => {
     const noticeId = await publish({ title: 'Grade 6 picnic', toStaff: false, cadetScope: 'selected_classes', classIds: [grade6] });
     expect((await eventsOf(noticeId)).map((event) => (event.data as { admissionId: string }).admissionId).sort()).toEqual([asha, bela].sort());
 
@@ -154,15 +154,15 @@ describe('notice notifications', () => {
     expect(copies.every((copy) => copy.revision === null)).toBe(true);
     expect(messages).toHaveLength(2);
     for (const message of messages) {
-      expect(message.template.name).toBe('school_document');
-      expect(message.template.components[0]).toMatchObject({ type: 'header', parameters: [{ type: 'document', document: { filename: 'Notice Grade 6 picnic.pdf' } }] });
+      expect(message.template.name).toBe('notice_document');
+      expect(message.template.components[0]).toMatchObject({ type: 'header', parameters: [{ type: 'document', document: { id: 'media-1', filename: 'Notice Grade 6 picnic.pdf' } }] });
       const text = Object.fromEntries(message.template.components[1]!.parameters.map((parameter) => [parameter.parameter_name, parameter.text]));
-      expect(text).toMatchObject({ school_name: 'Notice Delivery School', document_name: 'school notice', reference: 'Grade 6 picnic' });
+      expect(Object.keys(text)).toEqual(['student_name', 'school_name', 'notice_title']);
+      expect(text).toMatchObject({ school_name: 'Notice Delivery School', notice_title: 'Grade 6 picnic' });
       expect(['Asha Six', 'Bela Six']).toContain(text.student_name);
     }
-    // Both recipients got the very same bytes: one render, cached, reused.
-    expect(uploads).toHaveLength(2);
-    expect(Buffer.from(uploads[0]!).equals(Buffer.from(uploads[1]!))).toBe(true);
+    // One render, cached, and one upload: the second recipient reuses its media ID.
+    expect(uploads).toHaveLength(1);
     expect((await PDFDocument.load(uploads[0]!)).getPageCount()).toBe(1);
     await expect(getS3Client().send(new HeadObjectCommand({ Bucket: env.S3_BUCKET, Key: noticePdfKey(schoolId, noticeId, 'full') }))).resolves.toMatchObject({ ContentType: 'application/pdf' });
 

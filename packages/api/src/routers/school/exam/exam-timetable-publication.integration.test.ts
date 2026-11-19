@@ -2,6 +2,10 @@ import { db } from '@campuspilot/db';
 import { examLifecycleTable } from '@campuspilot/db/schema/exam';
 import { notificationEventTable } from '@campuspilot/db/schema/notification';
 import { and, eq, like } from 'drizzle-orm';
+import { env } from '@campuspilot/env/server';
+import { getS3Client } from '@campuspilot/s3/client';
+import { HeadObjectCommand } from '@aws-sdk/client-s3';
+import { PDFDocument } from 'pdf-lib';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import {
@@ -14,6 +18,7 @@ import {
 import { expectRpcCode } from '../../../../test/finance/assertions';
 import { createSchoolStaffSession, createTestClient, setTestSchoolFeature, type TestClient } from '../../../../test/fixtures';
 import { createCadetTestClient, signInCadet, type CadetCredentials } from '../../../../test/cadet';
+import { createTimetableDocumentSource } from '../../../notifications/documents/timetable';
 import { selectableExamClassIds } from './exam.dto';
 
 /** Signs in through the Cadet Portal with the password the principal issued. */
@@ -177,5 +182,45 @@ describe('exam timetable publication', () => {
     await principal.school.publishExamTimetable(scope);
     await expectRpcCode(outsider.getTimetable(scope), 'NOT_FOUND');
     expect((await outsider.listTimetables({})).items).toHaveLength(0);
+  });
+
+  it("attaches the PDF of the message's own publication on WhatsApp, rendered once and shared with the portal download", async () => {
+    const source = createTimetableDocumentSource();
+    const context = { schoolId: scope.schoolId };
+    await principal.school.saveExamTimetable({ ...scope, config });
+    const first = await principal.school.publishExamTimetable(scope);
+    // The student event names the publication it is about.
+    const [event] = await events('exam.timetable_published');
+    expect(event!.data).toMatchObject({ timetableId: first.id, publicationNumber: 1 });
+    const request = { kind: 'timetable' as const, sessionId: scope.sessionId, examSlug: scope.examSlug, timetableId: first.id, publicationNumber: 1, filename: 'Timetable.pdf' };
+
+    // No Timetable template selected: the message is the timetable_published text.
+    await expect(source.available(context)).resolves.toBe(false);
+    await expect(source.produce(request, context)).resolves.toBe('template_unavailable');
+    const template = await principal.school.selectMarketplaceTemplate({ schoolId: scope.schoolId, documentType: 'timetable', slug: 'timetable-default', expectedRevisionId: null });
+    await expect(source.available(context)).resolves.toBe(true);
+
+    const document = await source.produce(request, context);
+    if (!document || document === 'template_unavailable') throw new Error('Expected a timetable PDF.');
+    const key = `schools/${scope.schoolId}/exam-timetables/${first.id}-1-${template.artifact.id}.pdf`;
+    expect(document).toMatchObject({ mimeType: 'application/pdf', templateRevisionId: template.artifact.id, shareKey: key });
+    expect((await PDFDocument.load(document.bytes)).getPageCount()).toBeGreaterThanOrEqual(1);
+    await expect(getS3Client().send(new HeadObjectCommand({ Bucket: env.S3_BUCKET, Key: key }))).resolves.toMatchObject({ ContentType: 'application/pdf' });
+    // The second recipient and the portal read the same cached object: no second render.
+    const again = await source.produce(request, context);
+    expect(again !== null && again !== 'template_unavailable' && Buffer.from(again.bytes).equals(Buffer.from(document.bytes))).toBe(true);
+    const student = await cadetClient(studentCredentials);
+    const download = await student.getTimetableDownload(scope);
+    expect(Buffer.from(await (await fetch(download.url)).arrayBuffer()).equals(Buffer.from(document.bytes))).toBe(true);
+
+    // Withdrawn: that publication is no longer the published one, even though its PDF is cached.
+    await principal.school.withdrawExamTimetable(scope);
+    await expect(source.produce(request, context)).resolves.toBeNull();
+    // Published again: the old message never gets the new publication's PDF; the new one does.
+    await principal.school.saveExamTimetable({ ...scope, config });
+    await principal.school.publishExamTimetable(scope);
+    await expect(source.produce(request, context)).resolves.toBeNull();
+    const second = await source.produce({ ...request, publicationNumber: 2 }, context);
+    expect(second).toMatchObject({ shareKey: `schools/${scope.schoolId}/exam-timetables/${first.id}-2-${template.artifact.id}.pdf` });
   });
 });

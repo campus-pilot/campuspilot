@@ -1,13 +1,10 @@
-import { db as defaultDb, type Database, type DatabaseExecutor } from '@campuspilot/db';
+import type { DatabaseExecutor } from '@campuspilot/db';
 import { studentTable } from '@campuspilot/db/schema/student';
 import { and, eq } from 'drizzle-orm';
 
 import { rpcError } from '../../errors';
 import { buildDocumentContexts } from '../../routers/school/document/document.context';
 import { documentSourceSchema } from '../../routers/school/document/document.dto';
-import { selectedDocumentTemplateTypes } from '../../routers/school/document/document.selected-template';
-import type { WhatsAppDocumentSource } from '../channels/whatsapp/documents';
-import { renderNotificationDocument } from './render';
 
 /**
  * Builds the report-card context of exactly one student of an examination,
@@ -40,32 +37,4 @@ export async function buildStudentReportCardContexts(
     reportSections: {},
   });
   return buildDocumentContexts(db, schoolId, source);
-}
-
-/**
- * The report card attached to an `exam.results_published` WhatsApp message
- * (D-9): one student's report card rendered with the school's selected
- * report-card template. Results that no longer qualify (the exam was
- * reopened and a result unapproved) produce no PDF and the delivery fails
- * with `document_unavailable`.
- */
-export function createReportCardDocumentSource(db: Database = defaultDb): WhatsAppDocumentSource<'report_card'> {
-  return {
-    available: async ({ schoolId }) => (await selectedDocumentTemplateTypes(db, schoolId, ['report_card'])).has('report_card'),
-    produce: (request, { schoolId }) =>
-      renderNotificationDocument(
-        {
-          schoolId,
-          documentType: 'report_card',
-          buildContexts: async (database) => {
-            const data = await database.transaction(
-              (tx) => buildStudentReportCardContexts(tx, schoolId, request),
-              { isolationLevel: 'repeatable read', accessMode: 'read only' },
-            );
-            return data.contexts;
-          },
-        },
-        db,
-      ),
-  };
 }
