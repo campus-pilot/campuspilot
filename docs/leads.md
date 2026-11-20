@@ -1,8 +1,8 @@
 # Website leads (demo requests)
 
-The website's `/book-demo` page collects demo requests with a two-step form
-instead of a calendar embed. Each submission is a **lead**: saved first, then
-alerted to the team on WhatsApp in the background.
+The website's `/contact` page ("Contact us") collects demo requests with a
+two-step form instead of a calendar embed. Each submission is a **lead**:
+saved first, then alerted to the team on WhatsApp in the background.
 
 ## Flow
 

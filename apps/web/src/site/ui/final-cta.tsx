@@ -5,7 +5,7 @@ type FinalCtaProps = {
   title?: React.ReactNode;
   description?: React.ReactNode;
   /**
-   * Secondary action next to "Log in". Defaults to "Talk to us" → `/contact`;
+   * Secondary action next to "Log in". Defaults to "Contact us" → `/contact`;
    * pass another link (e.g. on `/contact` itself) or `null` to show only the primary button.
    */
   secondary?: { href: string; label: string } | null;
@@ -15,7 +15,7 @@ type FinalCtaProps = {
 export function FinalCta({
   title = "See CampusPilot with your school in mind.",
   description = "A focused walkthrough of your sessions, classes, fee structures and exams — and what AI-ready means for your records.",
-  secondary = { href: "/contact", label: "Talk to us" },
+  secondary = { href: "/contact", label: "Contact us" },
 }: FinalCtaProps) {
   return (
     <section className="cp-final-cta" aria-labelledby="cp-final-cta-title">

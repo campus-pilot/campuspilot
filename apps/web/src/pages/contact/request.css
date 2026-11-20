@@ -1,5 +1,7 @@
 /*
- * `/book-demo` — the site's most important conversion page. Prefix: `pg-book-`.
+ * `/contact` — the contact form, demo agenda and prep checklist (formerly the
+ * book-a-demo page; the `pg-book-` prefix is kept). The channel cards and
+ * switchboard live in `page.css`.
  * Base styles are the finished state; keyframes animate from the initial state
  * so `prefers-reduced-motion` (handled globally in site.css) simply skips them.
  */
@@ -693,12 +695,6 @@
   line-height: 1.5;
 }
 
-/* ------------------------------------------------------- contact fallback */
-
-.pg-book-fallback .cp-hero-actions {
-  flex-wrap: wrap;
-}
-
 /* ---------------------------------------------------------- scroll motion */
 
 @supports (animation-timeline: view()) {
@@ -812,10 +808,6 @@
 
   .pg-book-pad-list li {
     gap: 14px;
-  }
-
-  .pg-book-fallback .cp-btn {
-    width: 100%;
   }
 
   .pg-book-form {

@@ -2,7 +2,7 @@ import { phoneNumberSchema } from '@campuspilot/db/phone';
 import { z } from 'zod';
 
 /**
- * The website's demo request form (`/book-demo`). Shared by the API and the
+ * The website's demo request form ("Contact us", `/contact`). Shared by the API and the
  * web app, so both accept exactly the same answers. Kept free of server
  * imports: the web bundle imports this file.
  *

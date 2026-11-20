@@ -4,7 +4,8 @@ import { ButtonLink, ButtonRow } from "@/site/ui/button";
 import { PageHero } from "@/site/ui/page-hero";
 import { DemoRequestCard } from "./demo-request-form";
 
-export function BookDemoHero() {
+/** `/contact` hero: the contact form is the page's main action. */
+export function ContactHero() {
   return (
     <PageHero
       eyebrow="Contact us"

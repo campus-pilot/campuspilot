@@ -21,7 +21,7 @@ async function solvedHeader() {
 function submission(overrides: Partial<DemoRequestSubmission['response']> = {}): DemoRequestSubmission {
   return {
     submissionId: crypto.randomUUID(),
-    sourcePath: '/book-demo',
+    sourcePath: '/contact',
     response: {
       name: 'Asha Verma',
       phone: '+919876543210',
@@ -58,7 +58,7 @@ describe('demo request submission', () => {
       id: leadId,
       form: 'book_demo',
       formVersion: 1,
-      sourcePath: '/book-demo',
+      sourcePath: '/contact',
       userAgent: 'vitest',
       alertStatus: 'pending',
       response: expect.objectContaining({ phone: '+919876543210', whatsappNumber: '+919876543210', preferredContact: 'whatsapp' }),

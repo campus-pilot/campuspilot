@@ -13,7 +13,6 @@ import {
   LayoutDashboard,
   LayoutGrid,
   Library,
-  Mail,
   Megaphone,
   MessageSquareText,
   NotebookPen,
@@ -121,8 +120,7 @@ const resourceGroups: readonly NavGroup[] = [
   {
     label: "Talk to us",
     items: [
-      { href: "/book-demo", label: "Contact us", description: "Tell us about your school", icon: MessageSquareText, motion: "write" },
-      { href: "/contact", label: "Contact", description: "WhatsApp, call or email", icon: Mail, motion: "tap" },
+      { href: "/contact", label: "Contact us", description: "A short form, WhatsApp, call or email", icon: MessageSquareText, motion: "write" },
     ],
   },
 ];

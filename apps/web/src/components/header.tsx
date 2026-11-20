@@ -106,7 +106,7 @@ function MobileNavigation() {
       <details><summary>Solutions <ChevronDown /></summary><MenuItems links={solutionLinks} /></details>
       <details><summary>Resources <ChevronDown /></summary><MenuItems links={resourceLinks} /></details>
       <div className="marketing-mobile-actions">
-        <Link className="marketing-mobile-login" to="/book-demo" onClick={closeMenu}>Contact us</Link>
+        <Link className="marketing-mobile-login" to="/contact" onClick={closeMenu}>Contact us</Link>
         <Link className="marketing-mobile-demo" to="/login" onClick={closeMenu}>Log in <ArrowRight /></Link>
       </div>
     </nav>
@@ -125,7 +125,7 @@ export default function Header() {
         </nav>
         <div className="marketing-header-actions">
           <ThemeToggle />
-          <Link className="marketing-login" to="/book-demo">Contact us</Link>
+          <Link className="marketing-login" to="/contact">Contact us</Link>
           <Link className="marketing-button marketing-button-dark marketing-header-cta" to="/login">Log in <ArrowRight /></Link>
           <details className="marketing-mobile-menu"><summary aria-label="Open navigation"><Menu aria-hidden="true" /></summary><MobileNavigation /></details>
         </div>

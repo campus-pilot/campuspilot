@@ -17,7 +17,7 @@ export function FinalCta() {
       <div className="marketing-container final-cta-inner">
         <span className="final-cta-icon"><Sparkles aria-hidden="true" /></span>
         <div><small>SEE CAMPUSPILOT IN ACTION</small><h2>A calmer way to run your school.</h2><p>We’ll focus the walkthrough on the workflows that matter to you.</p></div>
-        <div><Link className="marketing-button marketing-button-light" to="/login">Log in <ArrowRight /></Link><Link className="marketing-button marketing-button-outline-light" to="/book-demo">Contact us</Link></div>
+        <div><Link className="marketing-button marketing-button-light" to="/login">Log in <ArrowRight /></Link><Link className="marketing-button marketing-button-outline-light" to="/contact">Contact us</Link></div>
       </div>
     </section>
   );
@@ -26,7 +26,7 @@ export function FinalCta() {
 const footerLinks = [
   ["Platform", [["Overview", "/product"], ["Features", "/features"], ["AI ready", "/ai-ready"], ["Security", "/security"]]],
   ["Workflows", [["Admissions", "/features/admissions"], ["Billing", "/features/billing"], ["Examinations", "/features/examinations"], ["Documents", "/features/documents"]]],
-  ["Company", [["For schools", "/solutions"], ["Contact us", "/book-demo"], ["Contact", "/contact"], ["Log in", "/login"]]],
+  ["Company", [["For schools", "/solutions"], ["Contact us", "/contact"], ["Log in", "/login"]]],
 ] as const;
 
 export function MarketingFooter() {

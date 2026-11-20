@@ -44,7 +44,7 @@ function HeroCopy() {
           See how it works <ChevronRight aria-hidden="true" />
         </a>
       </div>
-      <Link className="cp-hero-note cp-hero-login" to="/book-demo">Contact us</Link>
+      <Link className="cp-hero-note cp-hero-login" to="/contact">Contact us</Link>
     </div>
   );
 }

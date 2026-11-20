@@ -107,7 +107,7 @@ function LoginDialog({ dialogRef }: { dialogRef: React.RefObject<HTMLDialogEleme
         </div>
         <p className="cp-login-foot">
           New to CampusPilot?{" "}
-          <Link to="/book-demo" onClick={close}>
+          <Link to="/contact" onClick={close}>
             Contact us
           </Link>
         </p>

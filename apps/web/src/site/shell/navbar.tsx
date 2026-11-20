@@ -207,7 +207,7 @@ export function BrandMark() {
 function HeaderActions() {
   return (
     <div className="cp-header-actions">
-      <Link className="cp-login" to="/book-demo">Contact us</Link>
+      <Link className="cp-login" to="/contact">Contact us</Link>
       <LoginButton className="cp-btn cp-btn-primary cp-btn-sm">
         Log in <ChevronRight aria-hidden="true" />
       </LoginButton>
@@ -244,7 +244,7 @@ function MobilePanel({ isOpen, onNavigate }: { isOpen: boolean; onNavigate: () =
         ))}
       </nav>
       <div className="cp-mobile-actions">
-        <Link className="cp-btn cp-btn-light" to="/book-demo" onClick={onNavigate}>Contact us</Link>
+        <Link className="cp-btn cp-btn-light" to="/contact" onClick={onNavigate}>Contact us</Link>
         <LoginButton className="cp-btn cp-btn-primary" onOpen={onNavigate}>
           Log in <ArrowRight aria-hidden="true" />
         </LoginButton>

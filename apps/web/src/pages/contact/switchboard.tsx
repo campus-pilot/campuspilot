@@ -1,4 +1,4 @@
-import { ArrowRight, CalendarDays, LogIn, Signpost, type LucideIcon } from "lucide-react";
+import { ArrowRight, ClipboardList, LogIn, Signpost, type LucideIcon } from "lucide-react";
 import { Link } from "react-router";
 
 import { LoginButton } from "@/site/shell/login-dialog";
@@ -45,7 +45,7 @@ const routes: readonly ContactRoute[] = [
   {
     need: "You want to see it working",
     example: "A 30-minute walkthrough with your sessions, fees and exams in mind.",
-    target: { kind: "page", href: "/book-demo", label: "Contact us", icon: CalendarDays, emphasis: true },
+    target: { kind: "page", href: "#request", label: "Fill in the form", icon: ClipboardList, emphasis: true },
   },
   {
     need: "You already use CampusPilot",
