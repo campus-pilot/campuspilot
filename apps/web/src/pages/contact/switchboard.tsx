@@ -45,7 +45,7 @@ const routes: readonly ContactRoute[] = [
   {
     need: "You want to see it working",
     example: "A 30-minute walkthrough with your sessions, fees and exams in mind.",
-    target: { kind: "page", href: "/book-demo", label: "Book a demo", icon: CalendarDays, emphasis: true },
+    target: { kind: "page", href: "/book-demo", label: "Contact us", icon: CalendarDays, emphasis: true },
   },
   {
     need: "You already use CampusPilot",

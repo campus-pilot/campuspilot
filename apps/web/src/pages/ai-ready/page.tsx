@@ -1,6 +1,7 @@
 import { Sparkles } from "lucide-react";
 
 import { AiArt } from "@/site/signature";
+import { LoginCta } from "@/site/shell/login-dialog";
 import { ButtonLink, ButtonRow } from "@/site/ui/button";
 import { FaqSection } from "@/site/ui/faq";
 import { FinalCta } from "@/site/ui/final-cta";
@@ -25,7 +26,7 @@ function AiReadyHero() {
       description="Today, the AI assistants your team already uses can answer from your live CampusPilot records, with the same permissions as the person asking. Inside CampusPilot, AI already drafts question papers for teachers to refine. Next, more of the routine work will be prepared for a person to approve."
       actions={
         <ButtonRow>
-          <ButtonLink href="/book-demo">Book a demo</ButtonLink>
+          <LoginCta />
           <ButtonLink href="#reach" tone="light">See who reaches what</ButtonLink>
         </ButtonRow>
       }

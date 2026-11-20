@@ -78,7 +78,7 @@ export function DashboardPage() {
               Log in <ArrowRight aria-hidden="true" />
             </LoginButton>
             <ButtonLink href="/book-demo" size="lg" tone="light">
-              Book a demo
+              Contact us
             </ButtonLink>
           </ButtonRow>
         }

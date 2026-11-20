@@ -3077,7 +3077,7 @@ button.cp-hero-login {
 }
 
 /* Home hero: a quiet text link in the note's place and type. */
-button.cp-hero-login {
+.cp-hero-login {
   padding: 0;
   text-decoration: underline;
   text-decoration-color: var(--cp-line-strong);
@@ -3085,7 +3085,7 @@ button.cp-hero-login {
   transition: color 0.2s ease, text-decoration-color 0.2s ease;
 }
 
-button.cp-hero-login:hover {
+.cp-hero-login:hover {
   color: var(--cp-ink);
   text-decoration-color: currentColor;
 }

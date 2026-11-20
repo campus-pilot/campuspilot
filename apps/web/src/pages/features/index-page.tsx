@@ -1,5 +1,6 @@
 import { LayoutGrid } from "lucide-react";
 
+import { LoginCta } from "@/site/shell/login-dialog";
 import { ButtonLink, ButtonRow } from "@/site/ui/button";
 import { FinalCta } from "@/site/ui/final-cta";
 import { PageHero } from "@/site/ui/page-hero";
@@ -20,7 +21,7 @@ function FeaturesHero() {
       description="CampusPilot connects a school's working year, from the first admission enquiry to class placement, fees, examinations, results and documents. Each detail is entered once and flows on."
       actions={
         <ButtonRow>
-          <ButtonLink href="/book-demo">Book a demo</ButtonLink>
+          <LoginCta />
           <ButtonLink href="#connect" tone="light">See how they connect</ButtonLink>
         </ButtonRow>
       }

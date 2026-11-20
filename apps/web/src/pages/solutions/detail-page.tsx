@@ -3,6 +3,7 @@ import { Link } from "react-router";
 
 import { featureDirectory, solutionData, solutionDirectory, type DetailData, type SolutionSlug } from "@/site/content/catalog";
 import { NotebookSection } from "@/site/signature";
+import { LoginCta } from "@/site/shell/login-dialog";
 import { ButtonLink, ButtonRow } from "@/site/ui/button";
 import { FinalCta } from "@/site/ui/final-cta";
 import { PageHero } from "@/site/ui/page-hero";
@@ -23,7 +24,7 @@ function SolutionHero({ slug, data, role }: { slug: SolutionSlug; data: DetailDa
       description={data.description}
       actions={
         <ButtonRow>
-          <ButtonLink href="/book-demo">Book a demo</ButtonLink>
+          <LoginCta />
           <ButtonLink href="/solutions" tone="light">All solutions</ButtonLink>
         </ButtonRow>
       }

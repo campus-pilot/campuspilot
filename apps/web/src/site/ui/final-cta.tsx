@@ -1,10 +1,11 @@
+import { LoginCta } from "../shell/login-dialog";
 import { ButtonLink, ButtonRow } from "./button";
 
 type FinalCtaProps = {
   title?: React.ReactNode;
   description?: React.ReactNode;
   /**
-   * Secondary action next to "Book a demo". Defaults to "Talk to us" → `/contact`;
+   * Secondary action next to "Log in". Defaults to "Talk to us" → `/contact`;
    * pass another link (e.g. on `/contact` itself) or `null` to show only the primary button.
    */
   secondary?: { href: string; label: string } | null;
@@ -21,7 +22,7 @@ export function FinalCta({
       <h2 id="cp-final-cta-title">{title}</h2>
       <p>{description}</p>
       <ButtonRow center>
-        <ButtonLink href="/book-demo" size="lg">Book a demo</ButtonLink>
+        <LoginCta size="lg" />
         {secondary ? (
           <ButtonLink href={secondary.href} size="lg" tone="light">{secondary.label}</ButtonLink>
         ) : null}

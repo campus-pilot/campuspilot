@@ -2,7 +2,7 @@ import { ButtonLink, ButtonRow } from "@/site/ui/button";
 import { channels } from "@/pages/contact-channels/channels";
 
 /**
- * Closing band for `/book-demo`. A "Book a demo" final CTA would point back at
+ * Closing band for `/book-demo`. A "Contact us" final CTA would point back at
  * this very page, so it offers the direct channels instead, styled like the
  * shared final CTA.
  */

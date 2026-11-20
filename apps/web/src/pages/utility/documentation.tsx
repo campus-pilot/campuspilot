@@ -75,7 +75,7 @@ const paths: readonly [string, string, string][] = [
   ["/features", "Explore every feature", "Admissions, academics, fees, exams, documents and dashboards."],
   ["/ai-ready", "See what AI-ready means", "How assistants work with your records, within each person's access."],
   ["/contact", "Ask us directly", "WhatsApp, call or email with any question about your setup."],
-  ["/book-demo", "Book a walkthrough", "30 minutes, built around your school."],
+  ["/book-demo", "Contact us", "Tell us about your school; we'll reach out."],
 ];
 
 function PathLink({ href, title, text }: { href: string; title: string; text: string }) {
@@ -119,7 +119,7 @@ export function DocumentationPage() {
         actions={
           <ButtonRow>
             <ButtonLink href="/book-demo" size="lg">
-              Book a demo
+              Contact us
             </ButtonLink>
             <ButtonLink href="/features" size="lg" tone="light">
               Explore features

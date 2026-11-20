@@ -332,7 +332,7 @@ function StepHeader({ step }: { step: Step }) {
   return (
     <div className="pg-book-form-head">
       <span className="pg-book-form-progress">Step {school ? 2 : 1} of 2</span>
-      <h2 id="pg-book-form-title">{school ? "About your school" : "Request a demo"}</h2>
+      <h2 id="pg-book-form-title">{school ? "About your school" : "Get in touch"}</h2>
       <p>{school ? "Two quick numbers so we can tailor the walkthrough." : "Tell us who to talk to. It takes under a minute."}</p>
     </div>
   );

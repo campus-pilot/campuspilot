@@ -10,7 +10,7 @@ const signposts: readonly [string, LucideIcon, string, string][] = [
   ["/", House, "Home", "What CampusPilot does for your school."],
   ["/features", LayoutGrid, "Features", "Admissions, fees, exams, documents and more."],
   ["/solutions", UsersRound, "Solutions", "For leaders, office teams, teachers and groups."],
-  ["/book-demo", CalendarDays, "Book a demo", "A 30-minute walkthrough for your school."],
+  ["/book-demo", CalendarDays, "Contact us", "Tell us about your school; we'll reach out."],
 ];
 
 function SignpostLink({ href, icon: Icon, title, text }: { href: string; icon: LucideIcon; title: string; text: string }) {
@@ -69,7 +69,7 @@ export function NotFoundPage() {
               Back to home
             </ButtonLink>
             <ButtonLink href="/book-demo" size="lg" tone="light">
-              Book a demo
+              Contact us
             </ButtonLink>
           </ButtonRow>
         }

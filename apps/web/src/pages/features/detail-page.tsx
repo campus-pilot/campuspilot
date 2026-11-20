@@ -1,5 +1,6 @@
 import { featureData, type FeatureSlug } from "@/site/content/catalog";
 import { featureArt } from "@/site/signature";
+import { LoginCta } from "@/site/shell/login-dialog";
 import { ButtonLink, ButtonRow } from "@/site/ui/button";
 import { FaqSection } from "@/site/ui/faq";
 import { FinalCta } from "@/site/ui/final-cta";
@@ -27,7 +28,7 @@ function FeatureHero({ slug }: { slug: FeatureSlug }) {
       description={data.description}
       actions={
         <ButtonRow>
-          <ButtonLink href="/book-demo">Book a demo</ButtonLink>
+          <LoginCta />
           <ButtonLink href="/features" tone="light">All features</ButtonLink>
         </ButtonRow>
       }

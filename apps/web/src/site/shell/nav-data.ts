@@ -121,7 +121,7 @@ const resourceGroups: readonly NavGroup[] = [
   {
     label: "Talk to us",
     items: [
-      { href: "/book-demo", label: "Book a demo", description: "A walkthrough for your school", icon: MessageSquareText, motion: "write" },
+      { href: "/book-demo", label: "Contact us", description: "Tell us about your school", icon: MessageSquareText, motion: "write" },
       { href: "/contact", label: "Contact", description: "WhatsApp, call or email", icon: Mail, motion: "tap" },
     ],
   },
