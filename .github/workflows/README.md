@@ -46,10 +46,10 @@ They are browser-public build settings embedded into frontend assets.
 | `NEXT_PUBLIC_MCP_URL` | `campuspilot-plus-management`, `campuspilot-plus-admin` | `https://api.campuspilot.in/mcp` (must equal the server's `MCP_RESOURCE_URL`) |
 | `VITE_SERVER_URL` | `campuspilot-plus-web` | `https://api.campuspilot.in` |
 | `VITE_CONTACT_EMAIL` | `campuspilot-plus-web` | `shubhaman47@gmail.com` |
-| `VITE_CONTACT_PHONE_NUMBER` | `campuspilot-plus-web` | `+917023908472` |
-| `VITE_CONTACT_PHONE_LABEL` | `campuspilot-plus-web` | `+91 70239 08472` |
-| `VITE_WHATSAPP_NUMBER` | `campuspilot-plus-web` | `917023908472` |
-| `VITE_WHATSAPP_LABEL` | `campuspilot-plus-web` | `+91 70239 08472` |
+| `VITE_CONTACT_PHONE_NUMBER` | `campuspilot-plus-web` | `+917209063639` |
+| `VITE_CONTACT_PHONE_LABEL` | `campuspilot-plus-web` | `+91 72090 63639` |
+| `VITE_WHATSAPP_NUMBER` | `campuspilot-plus-web` | `917209063639` |
+| `VITE_WHATSAPP_LABEL` | `campuspilot-plus-web` | `+91 72090 63639` |
 | `VITE_STAFF_LOGIN_URL` | `campuspilot-plus-web` | `https://app.campuspilot.in/auth/login` |
 | `VITE_STUDENT_LOGIN_URL` | `campuspilot-plus-web` | Optional; an unset or empty value disables the Students & Families login choice. Do not point this at the system-admin app |
 
