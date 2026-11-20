@@ -1,6 +1,6 @@
 /*
- * Shared contact-channel links (WhatsApp, call, email) used by `/book-demo`
- * and `/contact`. Loaded by both routes' `links`. Prefix: `pg-cc-`.
+ * Contact-channel cards (WhatsApp, call, email) on `/contact`, loaded by its
+ * route's `links`. Prefix: `pg-cc-`.
  */
 
 .pg-cc-sr {
@@ -36,95 +36,6 @@
   border-color: color-mix(in oklch, var(--cp-primary) 22%, var(--cp-line));
   background: var(--cp-accent-soft);
   color: var(--cp-accent);
-}
-
-/* ------------------------------------------------------------------ row */
-
-.pg-cc-row {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 14px 16px;
-  border: 1px solid var(--cp-line);
-  border-radius: 16px;
-  background: var(--cp-surface);
-  color: var(--cp-ink);
-  text-decoration: none;
-  transition: border-color 0.2s ease, box-shadow 0.25s ease, transform 0.25s var(--cp-ease);
-}
-
-.pg-cc-row:hover {
-  border-color: var(--cp-line-strong);
-  box-shadow: 0 6px 20px -12px rgb(0 0 0 / 0.25);
-  transform: translateY(-1px);
-}
-
-.pg-cc-row:hover .pg-cc-icon {
-  transform: rotate(-6deg) scale(1.05);
-}
-
-.pg-cc-row[data-recommended] {
-  border-color: color-mix(in oklch, var(--cp-primary) 34%, var(--cp-line));
-  box-shadow: 0 0 0 4px color-mix(in oklch, var(--cp-primary) 8%, transparent);
-}
-
-.pg-cc-row-text {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.pg-cc-row-text b {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
-.pg-cc-row-text em {
-  padding: 2px 8px;
-  border-radius: 99px;
-  background: var(--cp-accent-soft);
-  color: var(--cp-accent);
-  font-size: 11.5px;
-  font-style: normal;
-  font-weight: 600;
-}
-
-.pg-cc-row-text small {
-  overflow: hidden;
-  color: var(--cp-muted);
-  font: 500 13px/1.4 var(--cp-mono);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.pg-cc-row-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  flex: none;
-  color: var(--cp-ink-2);
-  font-size: 13px;
-  font-weight: 550;
-}
-
-.pg-cc-row-action svg {
-  width: 15px;
-  height: 15px;
-  color: var(--cp-subtle);
-  transition: transform 0.25s var(--cp-ease), color 0.2s ease;
-}
-
-.pg-cc-row:hover .pg-cc-row-action svg {
-  color: var(--cp-ink);
-  transform: translate(2px, -2px);
 }
 
 /* ----------------------------------------------------------------- card */
@@ -231,15 +142,6 @@
 }
 
 @media (max-width: 640px) {
-  .pg-cc-row {
-    gap: 12px;
-    padding: 12px 14px;
-  }
-
-  .pg-cc-row-action {
-    font-size: 0;
-  }
-
   .pg-cc-card {
     padding: 20px;
   }

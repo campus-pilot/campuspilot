@@ -1,5 +1,4 @@
 import {
-  ArrowRight,
   Check,
   ChevronRight,
   ClipboardCheck,
@@ -18,7 +17,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router";
 
-import { LoginButton } from "@/site/shell/login-dialog";
+import { LoginCta } from "@/site/shell/login-dialog";
 
 /* ------------------------------------------------------------------ copy */
 
@@ -40,14 +39,12 @@ function HeroCopy() {
         seeing only what each person is allowed to see.
       </p>
       <div className="cp-hero-actions">
-        <Link className="cp-btn cp-btn-primary cp-btn-lg" to="/book-demo">
-          Book a demo <ArrowRight aria-hidden="true" />
-        </Link>
+        <LoginCta size="lg" />
         <a className="cp-btn cp-btn-light cp-btn-lg" href="#how-it-works">
           See how it works <ChevronRight aria-hidden="true" />
         </a>
       </div>
-      <LoginButton className="cp-hero-note cp-hero-login">Log in</LoginButton>
+      <Link className="cp-hero-note cp-hero-login" to="/contact">Contact us</Link>
     </div>
   );
 }

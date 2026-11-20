@@ -207,10 +207,10 @@ export function BrandMark() {
 function HeaderActions() {
   return (
     <div className="cp-header-actions">
-      <LoginButton className="cp-login">Log in</LoginButton>
-      <Link className="cp-btn cp-btn-primary cp-btn-sm" to="/book-demo">
-        Book a demo <ChevronRight aria-hidden="true" />
-      </Link>
+      <Link className="cp-login" to="/contact">Contact us</Link>
+      <LoginButton className="cp-btn cp-btn-primary cp-btn-sm">
+        Log in <ChevronRight aria-hidden="true" />
+      </LoginButton>
     </div>
   );
 }
@@ -244,10 +244,10 @@ function MobilePanel({ isOpen, onNavigate }: { isOpen: boolean; onNavigate: () =
         ))}
       </nav>
       <div className="cp-mobile-actions">
-        <LoginButton className="cp-btn cp-btn-light" onOpen={onNavigate}>Log in</LoginButton>
-        <Link className="cp-btn cp-btn-primary" to="/book-demo" onClick={onNavigate}>
-          Book a demo <ArrowRight aria-hidden="true" />
-        </Link>
+        <Link className="cp-btn cp-btn-light" to="/contact" onClick={onNavigate}>Contact us</Link>
+        <LoginButton className="cp-btn cp-btn-primary" onOpen={onNavigate}>
+          Log in <ArrowRight aria-hidden="true" />
+        </LoginButton>
       </div>
     </div>
   );

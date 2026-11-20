@@ -14,6 +14,7 @@ import {
 } from '@campuspilot/api/workflows/question-paper';
 import { configureQuestionPaperFigureRoute, configureQuestionPaperModel } from '@campuspilot/api/workflows/question-paper/model';
 import { imageDerivativeControlService } from '@campuspilot/api/workflows/image-derivatives';
+import { leadAlertWorkflow, leadControlService } from '@campuspilot/api/workflows/lead-alert';
 import {
   notificationControlService,
   notificationDispatchWorkflow,
@@ -61,6 +62,8 @@ export function startWorker() {
       questionPaperControlService,
       questionPaperGenerationWorkflow,
       imageDerivativeControlService,
+      leadControlService,
+      leadAlertWorkflow,
       ...createAssistantWorkerServices(),
     ],
   });

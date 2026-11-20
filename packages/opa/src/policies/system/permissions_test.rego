@@ -382,3 +382,30 @@ test_school_principal_cannot_decide_school_creation_requests if {
     "resource": {"kind": "system"},
   }
 }
+
+test_only_admins_can_read_leads if {
+  authorization.allow with input as {
+    "action": "system.lead.read",
+    "subject": {
+      "userId": "admin-1",
+      "roleAssignments": [{"role": "platform.admin", "scope": {"kind": "platform"}}],
+    },
+    "resource": {"kind": "system"},
+  }
+  not authorization.allow with input as {
+    "action": "system.lead.read",
+    "subject": {
+      "userId": "user-2",
+      "roleAssignments": [{"role": "platform.user", "scope": {"kind": "platform"}}],
+    },
+    "resource": {"kind": "system"},
+  }
+  not authorization.allow with input as {
+    "action": "system.lead.read",
+    "subject": {
+      "userId": "user-3",
+      "roleAssignments": [{"role": "school.principal", "scope": {"kind": "school", "schoolId": "school-1"}}],
+    },
+    "resource": {"kind": "system"},
+  }
+}

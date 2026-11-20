@@ -1,6 +1,6 @@
 import { createContext, use, useRef } from "react";
 import { env } from "@campuspilot/env/web";
-import { ArrowUpRight, GraduationCap, UsersRound, X, type LucideIcon } from "lucide-react";
+import { ArrowRight, ArrowUpRight, ChevronRight, GraduationCap, UsersRound, X, type LucideIcon } from "lucide-react";
 import { Link } from "react-router";
 
 /** Opens the shared login dialog; provided by `LoginDialogProvider` inside `SiteShell`. */
@@ -107,8 +107,8 @@ function LoginDialog({ dialogRef }: { dialogRef: React.RefObject<HTMLDialogEleme
         </div>
         <p className="cp-login-foot">
           New to CampusPilot?{" "}
-          <Link to="/book-demo" onClick={close}>
-            Book a demo
+          <Link to="/contact" onClick={close}>
+            Contact us
           </Link>
         </p>
       </div>
@@ -153,5 +153,31 @@ export function LoginButton({ children, className, onOpen }: LoginButtonProps) {
     >
       {children}
     </button>
+  );
+}
+
+const LOGIN_CTA_SIZE = { sm: "cp-btn-sm", md: "", lg: "cp-btn-lg" } as const;
+
+/**
+ * "Log in" as a call-to-action button, styled like `ButtonLink` (primary
+ * orange with an arrow, or light with a chevron). The site's main call to
+ * action now that schools can sign up themselves; it opens the same
+ * staff/student chooser as every other "Log in".
+ */
+export function LoginCta({
+  size = "md",
+  tone = "primary",
+  onOpen,
+}: {
+  size?: keyof typeof LOGIN_CTA_SIZE;
+  tone?: "primary" | "light";
+  onOpen?: () => void;
+}) {
+  const Icon = tone === "primary" ? ArrowRight : ChevronRight;
+  const className = `cp-btn ${tone === "primary" ? "cp-btn-primary" : "cp-btn-light"} ${LOGIN_CTA_SIZE[size]}`.trim();
+  return (
+    <LoginButton className={className} onOpen={onOpen}>
+      Log in <Icon aria-hidden="true" />
+    </LoginButton>
   );
 }

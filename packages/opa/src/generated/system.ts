@@ -16,6 +16,7 @@ export const SYSTEM_ACTIONS = {
   READ_DATA_MIGRATIONS: 'system.data_migration.read',
   READ_DEMO_SCHOOL: 'system.school.demo.read',
   READ_DEMO_SCHOOL_CREDENTIALS: 'system.school.demo.credentials.read',
+  READ_LEADS: 'system.lead.read',
   READ_PLATFORM_ASSISTANT_USAGE: 'system.assistant.usage.read',
   READ_PLATFORM_STATS: 'system.platform.stats.read',
   READ_SCHOOL: 'system.school.read',

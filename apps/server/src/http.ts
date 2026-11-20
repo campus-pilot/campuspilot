@@ -26,6 +26,8 @@ import {
   handleProfileImageUpload,
 } from '@campuspilot/api/routers/auth/auth.http';
 import { handleSchoolLogoUpload } from '@campuspilot/api/routers/system-admin/school/school.http';
+import { DEMO_REQUEST_PATH, LEAD_CHALLENGE_PATH } from '@campuspilot/api/leads/demo-request';
+import { handleDemoRequestSubmit, handleLeadChallenge } from '@campuspilot/api/leads/lead.http';
 import { handleSchoolLogoBlob } from '@campuspilot/api/routers/school/logo/logo.blob';
 import {
   handleQuestionPaperPageRead,
@@ -58,6 +60,7 @@ import {
 } from '@campuspilot/auth/mcp-credential';
 import { auth } from '@campuspilot/auth/server';
 import { db } from '@campuspilot/db';
+import { getRedisClient } from '@campuspilot/redis/client';
 import { env } from '@campuspilot/env/server';
 import type { Logger } from '@campuspilot/logger';
 import { measure } from '@campuspilot/logger/perf';
@@ -140,6 +143,24 @@ app.get('/webhooks/whatsapp', (context) =>
   ),
 );
 app.post('/webhooks/whatsapp', (context) => handleWhatsAppWebhook(context.req.raw));
+
+/**
+ * The website's demo request form, public and without a session. Each
+ * client IP may fetch 10 challenges and submit 5 requests per 10 minutes;
+ * every submission also carries a solved proof-of-work (see
+ * `@campuspilot/api/leads/lead.http`).
+ */
+const leadChallengeRateLimit = createRateLimit({ id: 'lead-challenge', limit: 10, windowMs: 10 * 60_000 });
+const leadSubmitRateLimit = createRateLimit({ id: 'lead-submit', limit: 5, windowMs: 10 * 60_000 });
+app.get(LEAD_CHALLENGE_PATH, leadChallengeRateLimit, () => handleLeadChallenge());
+app.post(DEMO_REQUEST_PATH, leadSubmitRateLimit, async (context) => {
+  try {
+    return await handleDemoRequestSubmit(context.req.raw, { db, redis: getRedisClient() });
+  } catch (error) {
+    context.var.logger.error({ err: error }, 'lead.submit.error');
+    return context.json({ code: 'INTERNAL_SERVER_ERROR', message: 'The request could not be saved. Try again.' }, 500);
+  }
+});
 
 /**
  * The Cadet Portal's own Better Auth instance (`cpc_` cookies, cadet tables,

@@ -3,6 +3,7 @@ import { Link } from "react-router";
 
 import { solutionDirectory } from "@/site/content/catalog";
 import { DotsNetwork, peopleNodes, type PeopleNode } from "@/site/signature";
+import { LoginCta } from "@/site/shell/login-dialog";
 import { ButtonLink, ButtonRow } from "@/site/ui/button";
 import { FinalCta } from "@/site/ui/final-cta";
 import { PageHero } from "@/site/ui/page-hero";
@@ -21,7 +22,7 @@ function SolutionsHero() {
       description="Principals, office staff, teachers, accountants and the exam cell work from the same connected records. Each of them sees the part that belongs to their job, and so does the AI assistant they ask."
       actions={
         <ButtonRow>
-          <ButtonLink href="/book-demo">Book a demo</ButtonLink>
+          <LoginCta />
           <ButtonLink href="#by-team" tone="light">Find your role</ButtonLink>
         </ButtonRow>
       }

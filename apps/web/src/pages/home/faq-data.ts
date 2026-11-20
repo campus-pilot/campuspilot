@@ -40,6 +40,6 @@ export const homeFaqs: readonly FaqEntry[] = [
   {
     question: "How do we get started?",
     answer:
-      "Book a demo. We’ll walk through CampusPilot with your own school in mind — your sessions, classes, fee structures and exams — and answer your questions about getting set up.",
+      "Contact us. We’ll walk through CampusPilot with your own school in mind — your sessions, classes, fee structures and exams — and answer your questions about getting set up.",
   },
 ];

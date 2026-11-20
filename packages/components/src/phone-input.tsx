@@ -19,8 +19,12 @@ export type PhoneInputValue = { country: PhoneCountryCode; number: string };
 
 const regionNames = typeof Intl.DisplayNames === 'function' ? new Intl.DisplayNames(['en'], { type: 'region' }) : null;
 
-/** Every country libphonenumber knows, by display name, with its calling code. */
-const COUNTRY_OPTIONS = getCountries()
+/**
+ * Every country libphonenumber knows, by display name, with its calling code.
+ * Exported for phone inputs that render their own controls (the marketing
+ * site, which does not load these Tailwind components).
+ */
+export const PHONE_COUNTRY_OPTIONS = getCountries()
   .map((country) => ({ country, name: regionNames?.of(country) ?? country, callingCode: getCountryCallingCode(country) }))
   .sort((a, b) => a.name.localeCompare(b.name));
 
@@ -88,7 +92,7 @@ export function PhoneInput({ id, value, disabled, invalid, onChange, onBlur }: {
           <SelectValue>{`${value.country} +${getCountryCallingCode(value.country)}`}</SelectValue>
         </SelectTrigger>
         <SelectContent>
-          {COUNTRY_OPTIONS.map((option) => (
+          {PHONE_COUNTRY_OPTIONS.map((option) => (
             <SelectItem key={option.country} value={option.country}>{`${option.name} (+${option.callingCode})`}</SelectItem>
           ))}
         </SelectContent>

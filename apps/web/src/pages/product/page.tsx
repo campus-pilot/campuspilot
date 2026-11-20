@@ -1,6 +1,7 @@
 import { Waypoints } from "lucide-react";
 
 import { ConsoleStage, EventStreamSection } from "@/site/signature";
+import { LoginCta } from "@/site/shell/login-dialog";
 import { ButtonLink, ButtonRow } from "@/site/ui/button";
 import { FinalCta } from "@/site/ui/final-cta";
 import { PageHero } from "@/site/ui/page-hero";
@@ -22,7 +23,7 @@ function ProductHero() {
       description="CampusPilot connects admissions, classes, fees, examinations, documents and family access in one system. Each thing is entered once and moves on with its context, to the people allowed to see it."
       actions={
         <ButtonRow>
-          <ButtonLink href="/book-demo">Book a demo</ButtonLink>
+          <LoginCta />
           <ButtonLink href="#capabilities" tone="light">See every capability</ButtonLink>
         </ButtonRow>
       }

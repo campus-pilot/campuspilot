@@ -1,5 +1,6 @@
 import { ShieldCheck } from "lucide-react";
 
+import { LoginCta } from "@/site/shell/login-dialog";
 import { ButtonLink, ButtonRow } from "@/site/ui/button";
 import { FinalCta } from "@/site/ui/final-cta";
 import { PageHero } from "@/site/ui/page-hero";
@@ -22,7 +23,7 @@ function SecurityHero() {
       description="CampusPilot is designed around boundaries. Each school is kept apart, access follows the job, teachers work within their assigned classes, and families see only their own child."
       actions={
         <ButtonRow>
-          <ButtonLink href="/book-demo">Book a demo</ButtonLink>
+          <LoginCta />
           <ButtonLink href="#boundaries" tone="light">Explore the boundaries</ButtonLink>
         </ButtonRow>
       }

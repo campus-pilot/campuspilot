@@ -173,6 +173,15 @@ Before changing exam timetable drafting, publishing or withdrawal, the
 `exam.timetable_published*` notifications, or the Cadet Portal timetable
 screens, read [Examination timetable publishing](docs/exam-timetable-publishing.md).
 
+## Website leads
+
+Before changing the website's demo request form, the public `/public/leads/*`
+routes and their proof-of-work, the `lead` table, the `LeadControl` /
+`leadAlert` Restate services or the admin Demo requests page, read
+[Website leads](docs/leads.md). A submission must only depend on the lead
+insert; every side effect (the WhatsApp alert) is scheduled after commit and
+may fail without failing the request.
+
 ## School feature flags and subscription tiers
 
 Before adding a per-school feature or a tier, gating a procedure, page or
