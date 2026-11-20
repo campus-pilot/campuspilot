@@ -1,5 +1,5 @@
 /*
- * `/ai-ready`: shared question chip, today vs. roadmap lanes, "how a question
+ * `/ai-ready`: shared question chip, ways-to-ask lanes, "how a question
  * is answered" path and the trust band. Prefix: `pg-ai-`.
  *
  * Motion follows the site rule: base styles are the finished state; entrance
@@ -39,53 +39,7 @@
   font-weight: 600;
 }
 
-/* ---------------------------------------------------- today vs. roadmap */
-
-.pg-ai-rail {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  max-width: 1040px;
-  margin: 0 auto 20px;
-  padding: 0 24px;
-  color: var(--cp-muted);
-  font: 500 11.5px/1 var(--cp-mono);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.pg-ai-rail-mark {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.pg-ai-rail-mark::before {
-  content: "";
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--cp-ink);
-}
-
-.pg-ai-rail-mark[data-lane="next"] {
-  flex-direction: row-reverse;
-  color: var(--cp-accent);
-}
-
-.pg-ai-rail-mark[data-lane="next"]::before {
-  border: 1.5px dashed var(--cp-accent);
-  background: var(--cp-surface);
-}
-
-/* Solid for today, dashed for the roadmap half. */
-.pg-ai-rail-line {
-  flex: 1;
-  height: 1.5px;
-  background:
-    linear-gradient(90deg, var(--cp-ink) 0 50%, transparent 50%),
-    repeating-linear-gradient(90deg, var(--cp-accent) 0 6px, transparent 6px 11px);
-}
+/* ------------------------------------------------------- ways to ask */
 
 .pg-ai-lanes {
   display: grid;
@@ -106,10 +60,39 @@
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.03);
 }
 
-.pg-ai-lane[data-lane="next"] {
-  border: 1.5px dashed var(--cp-line-strong);
-  background: rgb(255 255 255 / 0.5);
-  box-shadow: none;
+/* The app's voice bar, drawn small at the top of the in-app lane. */
+.pg-ai-voice-bar {
+  display: flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 10px;
+  margin: 0;
+  padding: 4px 16px 4px 6px;
+  border-radius: 999px;
+  background: var(--cp-ink);
+  color: #fff;
+  font-size: 13px;
+  box-shadow: 0 0 0 4px rgb(248 181 99 / 0.25);
+}
+
+.pg-ai-voice-mark {
+  --cp-mark-hat: #fff;
+  width: 36px;
+  height: 36px;
+}
+
+.pg-ai-voice-wave {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 16px;
+}
+
+.pg-ai-voice-wave i {
+  width: 3px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--cp-accent-warm);
 }
 
 .pg-ai-lane-head {
@@ -141,8 +124,8 @@
   height: 26px;
   padding: 0 10px;
   border-radius: 999px;
-  background: var(--cp-ink);
-  color: #fff;
+  background: var(--cp-accent-soft);
+  color: var(--cp-accent);
   font-size: 12px;
   font-weight: 600;
 }
@@ -152,13 +135,7 @@
   height: 13px;
 }
 
-.pg-ai-lane[data-lane="next"] .pg-ai-lane-status {
-  background: var(--cp-accent-soft);
-  color: var(--cp-accent);
-}
-
-.pg-ai-today-list,
-.pg-ai-next-list {
+.pg-ai-way-list {
   display: flex;
   flex-direction: column;
   margin: 0;
@@ -166,83 +143,46 @@
   list-style: none;
 }
 
-.pg-ai-today-list li {
+.pg-ai-way-list li {
   display: flex;
   gap: 12px;
   padding: 14px 0;
   border-top: 1px solid var(--cp-line);
 }
 
-.pg-ai-today-list svg {
+.pg-ai-way-list svg {
   width: 18px;
   height: 18px;
   margin-top: 2px;
   color: var(--cp-primary);
 }
 
-.pg-ai-today-list p,
-.pg-ai-next-card p {
+.pg-ai-way-list p {
   margin: 0;
   color: var(--cp-muted);
   font-size: 14.5px;
   line-height: 1.55;
 }
 
-.pg-ai-today-list b {
+.pg-ai-way-list b {
   color: var(--cp-ink);
   font-weight: 600;
 }
 
-.pg-ai-next-list {
-  gap: 10px;
-}
-
-.pg-ai-next-card {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 14px 16px;
-  border: 1px solid var(--cp-line);
-  border-radius: 14px;
-  background: var(--cp-surface);
-}
-
-.pg-ai-next-card b {
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
-.pg-ai-next-review {
-  display: inline-flex;
-  align-items: center;
-  align-self: flex-start;
-  gap: 6px;
-  margin-top: 4px;
-  padding: 3px 9px;
-  border: 1px dashed var(--cp-line-strong);
-  border-radius: 999px;
-  color: var(--cp-ink-2);
-  font: 500 11.5px/1.4 var(--cp-mono);
-}
-
-.pg-ai-next-review svg {
-  width: 13px;
-  height: 13px;
-  color: var(--cp-accent);
-}
-
-.pg-ai-next-foot {
+.pg-ai-ways-foot {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
-  margin: auto 0 0;
+  max-width: 1040px;
+  margin: 24px auto 0;
   color: var(--cp-ink);
   font-size: 14.5px;
   font-weight: 550;
+  text-align: center;
 }
 
-.pg-ai-next-foot svg {
+.pg-ai-ways-foot svg {
   width: 18px;
   height: 18px;
   color: var(--cp-accent);
@@ -567,9 +507,6 @@
     padding: 32px 24px;
   }
 
-  .pg-ai-rail {
-    display: none;
-  }
 }
 
 /* Phones: a vertical rail, dots on the left, cards on the right. */
@@ -623,7 +560,7 @@
 /* ------------------------------------------------------------- motion */
 
 @media (prefers-reduced-motion: no-preference) {
-  [data-armed]:not([data-inview]) :is(.pg-ai-lane, .pg-ai-today-list li, .pg-ai-next-card, .pg-ai-step, .pg-ai-checks li, .pg-ai-outcomes li) {
+  [data-armed]:not([data-inview]) :is(.pg-ai-lane, .pg-ai-way-list li, .pg-ai-step, .pg-ai-checks li, .pg-ai-outcomes li) {
     opacity: 0;
   }
 
@@ -635,23 +572,22 @@
     animation: cp-reveal 0.7s var(--cp-ease) both;
   }
 
-  [data-inview] .pg-ai-lane[data-lane="next"] {
+  [data-inview] .pg-ai-lane + .pg-ai-lane {
     animation-delay: 0.15s;
   }
 
-  [data-inview] .pg-ai-today-list li {
+  [data-inview] .pg-ai-way-list li {
     animation: pg-ai-slide 0.5s var(--cp-ease) both;
     animation-delay: calc(0.35s + var(--i) * 0.12s);
   }
 
-  [data-inview] .pg-ai-next-card {
-    animation: pg-ai-slide 0.5s var(--cp-ease) both;
-    animation-delay: calc(0.5s + var(--i) * 0.14s);
+  .pg-ai-voice-wave i {
+    animation: pg-ai-wave 1s ease-in-out infinite;
   }
 
-  .pg-ai-next-review svg {
-    animation: pg-ai-hourglass 3.2s var(--cp-ease) infinite;
-  }
+  .pg-ai-voice-wave i:nth-child(2) { animation-delay: 0.15s; }
+  .pg-ai-voice-wave i:nth-child(3) { animation-delay: 0.3s; }
+  .pg-ai-voice-wave i:nth-child(4) { animation-delay: 0.45s; }
 
   [data-inview].pg-ai-path::before {
     animation: pg-ai-draw-x 1.6s var(--cp-ease) 0.2s both;
@@ -720,14 +656,13 @@
   }
 }
 
-@keyframes pg-ai-hourglass {
+@keyframes pg-ai-wave {
   0%,
-  70% {
-    rotate: 0deg;
+  100% {
+    height: 5px;
   }
 
-  85%,
-  100% {
-    rotate: 180deg;
+  50% {
+    height: 15px;
   }
 }

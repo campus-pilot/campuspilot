@@ -6,12 +6,11 @@ import { AiSection } from "./ai-section";
 import { homeFaqs } from "./faq-data";
 import { Hero } from "./hero";
 import { StepsSection } from "./steps";
-import { TeamsBand } from "./teams-band";
 import { WorkflowsSection } from "./workflows";
 
 /**
- * The handwritten notebook recaps both core messages after the AI section.
- * Its roadmap page is hidden: the home page names the roadmap once, in `AiSection`.
+ * The handwritten notebook recaps both core messages after how it works.
+ * Its roadmap page is hidden: everything on the home page ships today.
  */
 function DoneOnceNotebook() {
   return (
@@ -24,19 +23,18 @@ function DoneOnceNotebook() {
 }
 
 /**
- * Home: hero → workflows (tabs) → how it works (steps) → AI with permissions
- * intact → notebook → teams → FAQ → final CTA. Section ids: `workflows`,
- * `how-it-works`, `ai`, `done-once`, `teams`, `faq`.
+ * Home: hero → workflows (tabs) → AI-ready (voice, chat, your own assistant)
+ * → how it works (steps) → notebook → FAQ → final CTA. Section ids:
+ * `workflows`, `ai`, `how-it-works`, `done-once`, `faq`.
  */
 export function HomePage() {
   return (
     <>
       <Hero />
       <WorkflowsSection />
-      <StepsSection />
       <AiSection />
+      <StepsSection />
       <DoneOnceNotebook />
-      <TeamsBand />
       <FaqSection entries={homeFaqs} />
       <FinalCta />
     </>

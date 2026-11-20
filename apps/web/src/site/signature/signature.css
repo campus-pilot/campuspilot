@@ -14,6 +14,57 @@
  * inside `prefers-reduced-motion: no-preference`.
  */
 
+/* ======================================================================
+ * Assistant mark (`cp-mark`): the management app's assistant avatar
+ * ====================================================================== */
+
+.cp-mark {
+  /* `--cp-mark-hat` follows the surface: ink on light cards, white on dark bars. */
+  --cp-mark-hat: var(--cp-ink);
+  display: block;
+  flex: none;
+  overflow: visible;
+}
+
+.cp-mark-head {
+  fill: var(--cp-accent);
+}
+
+.cp-mark-eyes {
+  fill: #fff;
+  transform-origin: 48px 59px;
+  animation: cp-mark-blink 4.4s ease-in-out infinite;
+}
+
+.cp-mark-hat {
+  fill: var(--cp-mark-hat);
+  stroke: var(--cp-mark-hat);
+}
+
+.cp-mark-tassel {
+  fill: none;
+  stroke: var(--cp-mark-hat);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.cp-mark-body {
+  transform-origin: 48px 60px;
+}
+
+.cp-mark[data-speaking] .cp-mark-body {
+  animation: cp-mark-speak 0.9s ease-in-out infinite alternate;
+}
+
+@keyframes cp-mark-blink {
+  0%, 44%, 52%, 100% { transform: scaleY(1); }
+  48% { transform: scaleY(0.12); }
+}
+
+@keyframes cp-mark-speak {
+  to { transform: scale(1.06); }
+}
+
 @property --cp-es-angle {
   syntax: "<angle>";
   initial-value: 0deg;
@@ -361,6 +412,12 @@
 .cp-wt-avatar svg {
   width: 13px;
   height: 13px;
+}
+
+.cp-wt-mark {
+  width: 28px;
+  height: 28px;
+  margin-top: -4px;
 }
 
 .cp-wt-avatar-light {
@@ -916,9 +973,9 @@
   flex-direction: column;
   gap: 8px;
   padding: 12px 14px;
-  border: 1px dashed var(--cp-line-strong);
+  border: 1px solid color-mix(in oklch, var(--cp-accent) 45%, transparent);
   border-radius: 14px;
-  background: rgb(255 255 255 / 0.6);
+  background: var(--cp-surface);
 }
 
 .cp-wt-agent-head {
