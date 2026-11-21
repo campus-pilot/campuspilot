@@ -18,7 +18,6 @@ import {
   BadgeCheck,
   BellRing,
   BookOpen,
-  Bot,
   CalendarDays,
   Camera,
   Check,
@@ -27,10 +26,10 @@ import {
   Layers3,
   Lock,
   MessageCircle,
+  Mic,
   Smartphone,
   Printer,
   ShieldCheck,
-  Sparkles,
   Stamp,
   UserRound,
   Wallet,
@@ -40,6 +39,7 @@ import type { ComponentType } from "react";
 
 import type { FeatureSlug } from "@/site/content/catalog";
 
+import { AssistantMark } from "./assistant-mark";
 import { artA11y, stagger } from "./shared";
 
 export type ArtProps = {
@@ -306,7 +306,7 @@ function AssistantChat() {
   return (
     <div className="cp-wt-card cp-wt-chat cp-wt-rise" style={stagger(1)}>
       <p className="cp-wt-chat-who">
-        <span className="cp-wt-avatar"><Bot /></span>
+        <AssistantMark className="cp-wt-mark" />
         Assistant for <b>Ms. Anjali Rao</b> · Class teacher, 8 A
       </p>
       <p className="cp-wt-bubble cp-wt-bubble-q" style={stagger(0)}>Whose Science marks are still pending?</p>
@@ -322,18 +322,25 @@ function AssistantChat() {
   );
 }
 
-/** A teacher's assistant answering inside her access and declining outside it, plus the roadmap card. */
+/** A spoken request that would change a record, waiting on screen for the person's approval. */
+function SpokenApproval() {
+  return (
+    <div className="cp-wt-agent cp-wt-rise" style={stagger(2)}>
+      <p className="cp-wt-agent-head"><Mic /> Asked by voice <em>Needs your approval</em></p>
+      <p className="cp-wt-agent-task">
+        <b>Record ₹4,500 cash from Aarav Sharma, 8 A</b>
+        <small>Term 2 fees · nothing changes until you approve</small>
+      </p>
+    </div>
+  );
+}
+
+/** A teacher's assistant answering inside her access and declining outside it, plus a spoken change awaiting approval. */
 export function AiArt({ label }: ArtProps) {
   return (
     <ArtFrame name="ai" label={label}>
       <AssistantChat />
-      <div className="cp-wt-agent cp-wt-rise" style={stagger(2)}>
-        <p className="cp-wt-agent-head"><Sparkles /> Prepared for review <em>Roadmap</em></p>
-        <p className="cp-wt-agent-task">
-          <b>Fee-reminder list · Class 8</b>
-          <small>11 families · draft, waiting for Accounts to approve</small>
-        </p>
-      </div>
+      <SpokenApproval />
     </ArtFrame>
   );
 }

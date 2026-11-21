@@ -2,193 +2,316 @@
    refined under a page class. Base styles are the finished state; motion is
    layered on under `prefers-reduced-motion: no-preference`. */
 
-/* ------------------------------------------------ AI: today → coming rail */
+/* -------------------------------------- AI: the voice stage over the app */
 
-.pg-home-ai-rail {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 28px;
-  max-width: 860px;
-  margin: 56px auto 0;
+.pg-home-voice-stage {
+  position: relative;
+  max-width: 920px;
+  height: 470px;
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid var(--cp-line);
+  border-radius: 20px;
+  background: var(--cp-surface);
+  box-shadow: 0 30px 80px -40px rgb(17 17 16 / 0.35);
 }
 
-.pg-home-ai-rail ol {
+/* The warm glow the management app draws around the window while voice is on. */
+.pg-home-voice-stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow:
+    inset 0 0 0 2px rgb(248 181 99 / 0.7),
+    inset 0 0 60px rgb(248 181 99 / 0.35);
+  pointer-events: none;
+}
+
+.pg-home-voice-app {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  width: 100%;
+  grid-template-columns: 180px minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  height: 100%;
+}
+
+.pg-home-voice-chrome {
+  display: flex;
+  grid-column: 1 / -1;
+  gap: 6px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--cp-line);
+}
+
+.pg-home-voice-chrome i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--cp-line-strong);
+}
+
+/* Sidebar and page rows as soft bars, drawn with gradients to keep the markup flat. */
+.pg-home-voice-side {
+  border-right: 1px solid var(--cp-line);
+  background:
+    linear-gradient(var(--cp-accent-soft) 0 0) 16px 18px / calc(100% - 32px) 10px,
+    repeating-linear-gradient(var(--cp-soft) 0 10px, transparent 10px 30px) 16px 48px / calc(100% - 32px) 150px;
+  background-repeat: no-repeat;
+}
+
+.pg-home-voice-rows {
+  opacity: 0.6;
+  background:
+    linear-gradient(var(--cp-soft) 0 0) 22px 22px / 40% 22px,
+    repeating-linear-gradient(var(--cp-soft) 0 34px, transparent 34px 46px) 22px 62px / calc(100% - 44px) 270px;
+  background-repeat: no-repeat;
+}
+
+.pg-home-voice-answer {
+  position: absolute;
+  bottom: 100px;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(560px, calc(100% - 32px));
+  padding: 16px;
+  translate: -50% 0;
+  border: 1px solid var(--cp-line);
+  border-radius: 16px;
+  background: var(--cp-surface);
+  box-shadow: 0 20px 50px -24px rgb(17 17 16 / 0.35);
+}
+
+.pg-home-voice-said {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
   margin: 0;
+  color: var(--cp-muted);
+  font-size: 14px;
+}
+
+.pg-home-voice-said svg {
+  width: 14px;
+  height: 14px;
+  color: var(--cp-accent);
+}
+
+.pg-home-voice-said b {
+  color: var(--cp-ink);
+  font-weight: 500;
+}
+
+.pg-home-voice-answer table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.pg-home-voice-answer th {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--cp-line);
+  color: var(--cp-subtle);
+  font-weight: 500;
+  text-align: left;
+}
+
+.pg-home-voice-answer td {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--cp-line);
+}
+
+.pg-home-voice-answer :is(th, td):last-child {
+  font-family: var(--cp-mono);
+  text-align: right;
+}
+
+.pg-home-voice-answer tr:last-child td {
+  border-bottom: 0;
+}
+
+.pg-home-voice-dock {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: min(560px, calc(100% - 32px));
+  padding: 6px 10px 6px 8px;
+  translate: -50% 0;
+  border-radius: 999px;
+  background: var(--cp-ink);
+  color: #fff;
+}
+
+.pg-home-voice-mark {
+  --cp-mark-hat: #fff;
+  width: 46px;
+  height: 46px;
+}
+
+.pg-home-voice-dock p {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 14px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pg-home-voice-dock small {
+  display: block;
+  color: var(--cp-subtle);
+  font-size: 11px;
+}
+
+.pg-home-voice-wave {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+}
+
+.pg-home-voice-wave i {
+  width: 3px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--cp-accent-warm);
+}
+
+.pg-home-voice-end {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #2a2a28;
+  font-size: 13px;
+}
+
+/* ----------------------------------------- AI: ways to ask, promises */
+
+.pg-home-ways {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  max-width: 1040px;
+  margin: 48px auto 0;
   padding: 0;
   list-style: none;
 }
 
-.pg-home-ai-stage {
-  position: relative;
+.pg-home-ways li {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 8px;
-  padding: 30px 40px 0 0;
-}
-
-/* The rail segment running from this stage's marker towards the next one. */
-.pg-home-ai-stage::before {
-  content: "";
-  position: absolute;
-  top: 6px;
-  right: 16px;
-  left: 24px;
-  border-top: 1px solid var(--cp-line-strong);
-}
-
-.pg-home-ai-stage[data-stage="coming"]::before {
-  border-top-style: dashed;
-  mask-image: linear-gradient(90deg, #000 40%, transparent);
-}
-
-.pg-home-ai-marker {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 13px;
-  height: 13px;
-  border-radius: 50%;
-  background: var(--cp-primary);
-}
-
-.pg-home-ai-stage[data-stage="coming"] .pg-home-ai-marker {
-  border: 1.5px dashed var(--cp-subtle);
+  gap: 6px;
+  padding: 22px;
+  border: 1px solid var(--cp-line);
+  border-radius: 16px;
   background: var(--cp-surface);
 }
 
-.pg-home-ai-tag {
-  color: var(--cp-accent);
-  font: 500 11.5px/1 var(--cp-mono);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.pg-home-ai-stage[data-stage="coming"] .pg-home-ai-tag {
-  padding: 4px 9px;
-  border-radius: 99px;
+.pg-home-way-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin-bottom: 8px;
+  border-radius: 10px;
   background: var(--cp-accent-soft);
+  color: var(--cp-accent);
 }
 
-.pg-home-ai-stage b {
-  color: var(--cp-ink);
-  font-size: 16px;
+.pg-home-way-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.pg-home-ways b {
+  font-size: 17px;
   font-weight: 600;
   letter-spacing: -0.01em;
 }
 
-.pg-home-ai-stage p {
-  max-width: 360px;
+.pg-home-ways p {
   margin: 0;
   color: var(--cp-muted);
-  font-size: 14.5px;
-  line-height: 1.6;
+  font-size: 15px;
+  line-height: 1.55;
   text-wrap: pretty;
 }
 
-/* ------------------------------------------------------- teams band */
-
-.pg-home-teams {
-  display: grid;
-  grid-template-columns: minmax(0, 300px) minmax(0, 1fr);
-  align-items: start;
-  gap: 64px;
-}
-
-.pg-home-teams-head {
+.pg-home-promises {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 18px;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px 28px;
+  margin: 28px 0 0;
+  padding: 0;
+  color: var(--cp-ink-2);
+  font-size: 14px;
+  list-style: none;
 }
 
-.pg-home-teams-head h2 {
-  margin: 0;
-  font-size: clamp(28px, 3.2vw, 40px);
-  font-weight: 600;
-  letter-spacing: -0.04em;
-  line-height: 1.08;
-  text-wrap: balance;
-}
-
-.pg-home-teams-links {
+.pg-home-promises li {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 14px;
-  margin-top: 6px;
-}
-
-.pg-home-teams-sentence {
-  margin: 0;
-  color: var(--cp-muted);
-  font-size: clamp(22px, 2.5vw, 33px);
-  font-weight: 500;
-  letter-spacing: -0.025em;
-  line-height: 1.68;
-  text-wrap: pretty;
-}
-
-.pg-home-chip-wrap {
-  white-space: nowrap;
-}
-
-.pg-home-chip {
-  display: inline-flex;
   align-items: center;
-  gap: 0.32em;
-  padding: 0.02em 0.5em 0.06em;
-  border: 1px solid var(--cp-line);
-  border-radius: 999px;
-  background: var(--cp-surface);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
-  color: var(--cp-ink);
-  text-decoration: none;
-  white-space: nowrap;
-  transition:
-    border-color 0.2s ease,
-    transform 0.3s var(--cp-ease);
+  gap: 8px;
 }
 
-.pg-home-chip svg {
-  flex: none;
-  width: 0.68em;
-  height: 0.68em;
-  color: var(--cp-subtle);
-  transition: color 0.2s ease;
+.pg-home-promises svg {
+  width: 15px;
+  height: 15px;
+  color: var(--cp-accent);
 }
 
-.pg-home-chip:hover {
-  border-color: var(--cp-line-strong);
-  transform: translateY(-2px);
-}
-
-.pg-home-chip:hover svg {
-  color: var(--cp-primary);
-}
-
-.cp-page .pg-home-chip:focus-visible {
-  border-radius: 999px;
+.pg-home-ai-link {
+  display: flex;
+  width: fit-content;
+  margin: 28px auto 0;
 }
 
 /* ------------------------------------------------------------ motion */
 
 @media (prefers-reduced-motion: no-preference) {
-  .pg-home-ai-stage[data-stage="today"] .pg-home-ai-marker {
-    animation: cp-ping 2.4s ease-out infinite;
+  .pg-home-voice-stage::after {
+    animation: pg-home-glow 3s ease-in-out infinite;
   }
 
+  .pg-home-voice-wave i {
+    animation: pg-home-wave 1s ease-in-out infinite;
+  }
+
+  .pg-home-voice-wave i:nth-child(2) { animation-delay: 0.15s; }
+  .pg-home-voice-wave i:nth-child(3) { animation-delay: 0.3s; }
+  .pg-home-voice-wave i:nth-child(4) { animation-delay: 0.45s; }
+  .pg-home-voice-wave i:nth-child(5) { animation-delay: 0.6s; }
+
   @supports (animation-timeline: view()) {
-    .pg-home-ai-stage,
-    .pg-home-chip {
+    .pg-home-ways li {
       animation: pg-home-rise linear both;
       animation-timeline: view();
       animation-range: entry 0% cover 28%;
     }
+  }
+}
+
+@keyframes pg-home-glow {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@keyframes pg-home-wave {
+  0%,
+  100% {
+    height: 6px;
+  }
+
+  50% {
+    height: 20px;
   }
 }
 
@@ -201,55 +324,35 @@
 
 /* ------------------------------------------------------------ phones */
 
-@media (max-width: 960px) {
-  .pg-home-teams {
+@media (max-width: 760px) {
+  .pg-home-voice-stage {
+    height: 440px;
+  }
+
+  .pg-home-voice-app {
     grid-template-columns: minmax(0, 1fr);
-    gap: 32px;
   }
 
-  .pg-home-teams-links {
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: 12px 24px;
-  }
-}
-
-@media (max-width: 640px) {
-  .pg-home-ai-rail {
-    align-items: flex-start;
-    max-width: 100%;
-    margin-top: 40px;
-  }
-
-  .pg-home-ai-rail ol {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 28px;
-  }
-
-  .pg-home-ai-stage {
-    padding: 0 0 0 30px;
-  }
-
-  /* The rail turns vertical: from "today" down to "coming". */
-  .pg-home-ai-stage::before {
-    top: 22px;
-    right: auto;
-    bottom: -25px;
-    left: 6px;
-    border-top: 0;
-    border-left: 1px solid var(--cp-line-strong);
-  }
-
-  .pg-home-ai-stage[data-stage="coming"]::before {
+  .pg-home-voice-side,
+  .pg-home-voice-wave {
     display: none;
   }
 
-  .pg-home-ai-marker {
-    top: 1px;
+  .pg-home-voice-answer {
+    bottom: 88px;
   }
 
-  .pg-home-teams-sentence {
-    font-size: 21px;
-    line-height: 1.75;
+  .pg-home-voice-dock {
+    bottom: 16px;
+  }
+
+  .pg-home-ways {
+    grid-template-columns: minmax(0, 1fr);
+    margin-top: 32px;
+  }
+
+  .pg-home-promises {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
