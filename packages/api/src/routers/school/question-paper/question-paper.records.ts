@@ -12,6 +12,7 @@ import type { z } from 'zod';
 
 import { rpcError } from '../../../errors';
 import type { PaperKey, pageDtoSchema, versionSummarySchema } from './question-paper.dto';
+import { isStandalonePaper, type ResolvedPaper, type StandalonePaperScope } from './question-paper.scope';
 
 /** Row types, named once. */
 export type PaperRow = typeof examQuestionPaperTable.$inferSelect;
@@ -29,6 +30,18 @@ export const paperKeyWhere = (key: PaperKey) =>
     eq(examQuestionPaperTable.subjectSlug, key.subjectSlug),
     eq(examQuestionPaperTable.modeSlug, key.modeSlug),
   );
+
+/**
+ * One of the five key columns of an exam paper, which are nullable only
+ * because a standalone paper has none: `exam_question_paper_kind_key_check`
+ * keeps all five set on every exam paper, so a null here is a broken row,
+ * never a value to carry on with. Call it only for rows a query already
+ * limited to exam papers.
+ */
+export function examKeyPart(value: string | null): string {
+  if (value === null) throw new Error('An exam question paper is missing a key column.');
+  return value;
+}
 
 /** The paper of a key, or undefined when nothing was uploaded or saved yet. */
 export async function findPaper(db: DatabaseExecutor, key: PaperKey): Promise<PaperRow | undefined> {
@@ -65,6 +78,34 @@ export async function lockPaper(tx: DatabaseTransaction, key: PaperKey): Promise
   const [paper] = await tx.select().from(examQuestionPaperTable).where(paperKeyWhere(key)).for('update');
   if (!paper) throw rpcError.notFound('Question paper');
   return paper;
+}
+
+/** The standalone paper of a resolved scope, by id, school and kind. */
+const standalonePaperWhere = (scope: StandalonePaperScope) =>
+  and(eq(examQuestionPaperTable.id, scope.paperId), eq(examQuestionPaperTable.schoolId, scope.schoolId), eq(examQuestionPaperTable.kind, 'standalone'));
+
+/** The row of any resolved paper ({@link findPaper} for an exam paper), or undefined when an exam paper has none yet. */
+export async function findPaperOf(db: DatabaseExecutor, scope: ResolvedPaper): Promise<PaperRow | undefined> {
+  if (!isStandalonePaper(scope)) return findPaper(db, scope.key);
+  const [paper] = await db.select().from(examQuestionPaperTable).where(standalonePaperWhere(scope)).limit(1);
+  return paper;
+}
+
+/** Locks any resolved paper's existing row ({@link lockPaper}), or NOT_FOUND. */
+export async function lockPaperOf(tx: DatabaseTransaction, scope: ResolvedPaper): Promise<PaperRow> {
+  if (!isStandalonePaper(scope)) return lockPaper(tx, scope.key);
+  const [paper] = await tx.select().from(examQuestionPaperTable).where(standalonePaperWhere(scope)).for('update');
+  if (!paper) throw rpcError.notFound('Question paper');
+  return paper;
+}
+
+/**
+ * {@link lockOrCreatePaper} for any resolved paper. A standalone paper is
+ * created explicitly (`createStandalonePaper`) before anything is added to
+ * it, so for one this only locks it.
+ */
+export async function lockOrCreatePaperOf(tx: DatabaseTransaction, scope: ResolvedPaper, userId: string): Promise<PaperRow> {
+  return isStandalonePaper(scope) ? lockPaperOf(tx, scope) : lockOrCreatePaper(tx, scope.key, userId);
 }
 
 export const pagesOf = (db: DatabaseExecutor, paperId: string) =>

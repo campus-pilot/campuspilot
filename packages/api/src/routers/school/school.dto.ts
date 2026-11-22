@@ -1,3 +1,4 @@
+import { SCHOOL_KINDS } from '@campuspilot/db/school-kind';
 import { schoolPlanSourceSchema } from "@campuspilot/db/feature-flags/catalogue";
 import { z } from "zod";
 
@@ -7,6 +8,12 @@ export const mySchoolDtoSchema = z.object({
   name: z.string(),
   location: z.string(),
   logoS3Key: z.string().nullable(),
+  /**
+   * A real school or a person's personal space (docs/personal-space.md). Its
+   * own fact: management opens a personal space in its own papers-only
+   * interface and never infers it from the name or the missing sessions.
+   */
+  kind: z.enum(SCHOOL_KINDS),
   /** Demo schools show a permanent sample-data banner in management. */
   isDemo: z.boolean(),
   /**

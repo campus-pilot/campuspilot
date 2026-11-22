@@ -132,14 +132,14 @@ export const learnInputSchema = z.object({ schoolId: id });
 /** The most find-and-replace edits one `editQuestionPaper` call takes; more changes than this are a rewrite. */
 export const QUESTION_PAPER_MAX_EDITS = 40;
 
-const paperHtmlInput = z
+export const paperHtmlInput = z
   .string()
   .min(1)
   .max(QUESTION_PAPER_LIMITS.parseChars)
   .describe('The question paper as an HTML fragment (no <html>, <head> or <body>) exactly as described by learn_question_paper_generation.');
 
 /** The chat a draft card is shown from, so its attachments preview as figures. Set by the app's screens only; the in-app assistant's own chat is known without it. */
-const draftChatInput = z.string().min(1).max(64).optional().describe('Leave out. Used by the app only.');
+export const draftChatInput = z.string().min(1).max(64).optional().describe('Leave out. Used by the app only.');
 
 export const validateDraftInputSchema = paperKeySchema.extend({ html: paperHtmlInput, conversationId: draftChatInput });
 
@@ -304,7 +304,7 @@ export const pageDtoSchema = z.object({
   derivativeRevision: z.number().int(),
 });
 
-const jobSchema = z.object({
+export const jobSchema = z.object({
   id: z.string(),
   status: z.enum(['queued', 'running', 'succeeded', 'failed']),
   createdAt: z.date(),
@@ -314,7 +314,7 @@ const jobSchema = z.object({
  * teacher's instructions it was started with, so the screen can show what was
  * asked. Not part of `getQuestionPaper`, which agents read.
  */
-const detailJobSchema = jobSchema.extend({
+export const detailJobSchema = jobSchema.extend({
   /** The teacher's instructions, exactly as stored; null when the job was started without any. */
   instructions: z.string().nullable(),
 });

@@ -66,6 +66,15 @@ export type AssistantConversationFacts = {
 };
 
 /**
+ * What the model is told in a personal space (docs/personal-space.md), in
+ * the facts block so the stable instructions stay byte-identical for the
+ * prompt cache. It replaces the instructions' exam question paper line for
+ * this conversation.
+ */
+export const PERSONAL_SPACE_FACT =
+  "This is the user's personal space, not a school: it holds only their own standalone question papers, which belong to no session, examination or class. You have only the standalone question paper tools (school_learn_standalone_question_paper, then getStandalonePaper, validateStandalonePaperDraft, saveStandalonePaperVersion, editStandalonePaper and the others) and showing views; the question paper line of your instructions does not apply here, so never call school_learn_question_paper_generation or ask for an exam, class, subject or mode. A standalone paper carries its whole heading itself, and every save sends its details (school, class, subject and exam names as the paper prints them). For anything else (students, fees, examinations of a school) say in one sentence that it is not available in a personal space.";
+
+/**
  * The per-conversation facts block, after the stable instructions.
  *
  * `unavailableWork` is the parts of CampusPilot the school does not have and
@@ -75,9 +84,14 @@ export type AssistantConversationFacts = {
  * request, like the tool list it explains, and a run that began before a
  * feature was switched (or before this was added) needs nothing stored.
  */
-export function buildFactsText(facts: AssistantConversationFacts, unavailableWork: readonly string[] = []): string {
+export function buildFactsText(
+  facts: AssistantConversationFacts,
+  unavailableWork: readonly string[] = [],
+  options: { schoolKind?: string } = {},
+): string {
   return [
-    `School: ${facts.schoolName ?? 'unknown name'} (schoolId: ${facts.schoolId}). Use this schoolId for every tool; this conversation cannot act in another school. Tools show only this school even when the user belongs to others, so never say the user has no other schools; to work in another school they switch schools in the app and ask there.`,
+    `School: ${facts.schoolName ?? 'unknown name'} (schoolId: ${facts.schoolId}). Every tool acts in this school, which the assistant fills in for you: never pass a schoolId. This conversation cannot act in another school. Tools show only this school even when the user belongs to others, so never say the user has no other schools; to work in another school they switch schools in the app and ask there.`,
+    ...(options.schoolKind === 'personal' ? [PERSONAL_SPACE_FACT] : []),
     ...(unavailableWork.length > 0
       ? [
           `This school does not use these parts of CampusPilot, so you have no tools for them: ${unavailableWork.join('; ')}. When asked for something that belongs to one of them, say in one sentence that this school does not use that part of CampusPilot, then offer what you can do instead. Do not search for tools for it.`,
@@ -95,7 +109,11 @@ export function buildFactsText(facts: AssistantConversationFacts, unavailableWor
  */
 export type AssistantPrompt = { instructions: string; facts: string };
 
-export function buildAssistantPrompt(facts: AssistantConversationFacts, unavailableWork: readonly string[] = []): AssistantPrompt {
-  return { instructions: ASSISTANT_INSTRUCTIONS, facts: buildFactsText(facts, unavailableWork) };
+export function buildAssistantPrompt(
+  facts: AssistantConversationFacts,
+  unavailableWork: readonly string[] = [],
+  options: { schoolKind?: string } = {},
+): AssistantPrompt {
+  return { instructions: ASSISTANT_INSTRUCTIONS, facts: buildFactsText(facts, unavailableWork, options) };
 }
 

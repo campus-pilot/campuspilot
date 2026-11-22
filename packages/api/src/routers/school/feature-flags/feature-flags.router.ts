@@ -22,8 +22,9 @@ export const schoolFeatureFlagsRouter = {
       tags: ['School', 'Feature flags'],
     })
     // App chrome with no agent value: tools of a disabled feature already
-    // answer with the feature-disabled error.
-    .meta({ mcp: { exposure: 'hidden', access: 'read', destructive: false, module: 'schools' } })
+    // answer with the feature-disabled error. A personal space reads it too:
+    // its papers are gated on the assistant feature (docs/personal-space.md).
+    .meta({ mcp: { exposure: 'hidden', access: 'read', destructive: false, module: 'schools' }, schoolKinds: ['school', 'personal'] })
     .input(schoolFeatureFlagsInputSchema)
     .use(requireSchoolMember())
     .output(schoolFeatureFlagsDtoSchema)

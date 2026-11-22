@@ -2,7 +2,7 @@ import { GetObjectCommand } from '@aws-sdk/client-s3';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { env } from '@campuspilot/env/server';
 import { getS3Client } from '@campuspilot/s3/client';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
 import sharp from 'sharp';
 import { z } from 'zod';
@@ -71,7 +71,8 @@ export async function handleSchoolLogoBlob(
     const [school] = await context.db
       .select({ logoS3Key: schoolTable.logoS3Key })
       .from(schoolTable)
-      .where(eq(schoolTable.id, schoolId))
+      // A personal space (docs/personal-space.md) is not found here: its name is a person's, not a public school detail.
+      .where(and(eq(schoolTable.id, schoolId), eq(schoolTable.kind, 'school')))
       .limit(1);
     if (!school) throw rpcError.notFound('School');
     if (!school.logoS3Key) throw rpcError.notFound('School logo');

@@ -23,7 +23,7 @@ import {
 } from '../../../billing/billing.service';
 import type { DatabaseExecutor } from '@campuspilot/db';
 import { rpcError, toRpcError } from '../../../errors';
-import { protectedProcedure } from '../../../index';
+import { platformAdminProcedure } from '../../../index';
 import { requireSystemPermission } from '../../../permissions/system';
 import { schoolIdInputSchema } from '../school/school.dto';
 import {
@@ -66,7 +66,7 @@ const hidden = (access: 'read' | 'write', destructive = false) =>
  * school has and pays is a human platform decision, made in the admin app.
  */
 export const schoolBillingRouter = {
-  getSchoolBilling: protectedProcedure
+  getSchoolBilling: platformAdminProcedure
     .route({
       summary: "Get a school's billing",
       description:
@@ -87,7 +87,7 @@ export const schoolBillingRouter = {
       }
     }),
 
-  startSchoolTrial: protectedProcedure
+  startSchoolTrial: platformAdminProcedure
     .route({
       summary: 'Start a trial for a school',
       description:
@@ -110,7 +110,7 @@ export const schoolBillingRouter = {
       }
     }),
 
-  updateSchoolTrial: protectedProcedure
+  updateSchoolTrial: platformAdminProcedure
     .route({
       summary: "Change a school's trial",
       description:
@@ -144,7 +144,7 @@ export const schoolBillingRouter = {
       }
     }),
 
-  endSchoolBillingPeriod: protectedProcedure
+  endSchoolBillingPeriod: platformAdminProcedure
     .route({
       summary: "End a school's billing period now",
       description:
@@ -189,7 +189,7 @@ export const schoolBillingRouter = {
       }
     }),
 
-  addSchoolBillingPeriods: protectedProcedure
+  addSchoolBillingPeriods: platformAdminProcedure
     .route({
       summary: 'Add paid or complimentary periods to a school',
       description:
@@ -223,7 +223,7 @@ export const schoolBillingRouter = {
       }
     }),
 
-  voidSchoolInvoice: protectedProcedure
+  voidSchoolInvoice: platformAdminProcedure
     .route({
       summary: "Void a school's invoice",
       description:
@@ -246,7 +246,7 @@ export const schoolBillingRouter = {
       }
     }),
 
-  listSubscriptionPrices: protectedProcedure
+  listSubscriptionPrices: platformAdminProcedure
     .route({
       summary: 'List subscription prices',
       description: 'Every price of a 28-day period per tier, the active ones first, with earlier prices kept as history. Requires system-administrator permission.',
@@ -263,7 +263,7 @@ export const schoolBillingRouter = {
       }
     }),
 
-  setSubscriptionPrice: protectedProcedure
+  setSubscriptionPrice: platformAdminProcedure
     .route({
       summary: 'Set the price of a tier',
       description:

@@ -11,7 +11,7 @@ import {
   withUsageRange,
 } from '../../../assistant/usage';
 import { rpcError, toRpcError } from '../../../errors';
-import { protectedProcedure } from '../../../index';
+import { platformAdminProcedure } from '../../../index';
 import { requireSystemPermission } from '../../../permissions/system';
 
 /**
@@ -23,7 +23,7 @@ import { requireSystemPermission } from '../../../permissions/system';
  * (`updateSchoolFeatureFlag`), not these procedures.
  */
 export const assistantUsageRouter = {
-  getSchoolAssistantUsage: protectedProcedure
+  getSchoolAssistantUsage: platformAdminProcedure
     .route({
       summary: 'Get a school\'s assistant usage',
       description:
@@ -44,7 +44,7 @@ export const assistantUsageRouter = {
       }
     }),
 
-  getPlatformAssistantUsage: protectedProcedure
+  getPlatformAssistantUsage: platformAdminProcedure
     .route({
       summary: 'Get platform assistant usage',
       description:

@@ -6,11 +6,10 @@ import { and, eq, inArray, isNotNull, or } from 'drizzle-orm';
 import { rpcError } from '../../../errors';
 import { normalizeFigureImage } from '../../../files/image-derivative';
 import { replaceFigureIds } from './question-paper.body';
-import { isSharedWithPaper } from './question-paper.conversations';
-import type { PaperKey } from './question-paper.dto';
-import { findPaper } from './question-paper.records';
+import { isSharedWithPaper, type PaperConversationRef } from './question-paper.conversations';
+import { findPaperOf } from './question-paper.records';
 import { sanitizeQuestionPaperBody } from './question-paper.sanitize';
-import type { PaperScope } from './question-paper.scope';
+import { paperSchoolIdOf, type ResolvedPaper } from './question-paper.scope';
 import { addQuestionPaperFigure } from './question-paper.service';
 import { getObjectBytes } from './question-paper.storage';
 
@@ -60,9 +59,9 @@ export type ChatFigures = { readonly userId: string; readonly conversationId: st
  * conversation that is not shared with this paper adds nothing beyond the
  * user's own attachments.
  */
-export async function chatFiguresOf(db: DatabaseExecutor, input: { userId: string; conversationId: string | null | undefined; key: PaperKey }): Promise<ChatFigures> {
+export async function chatFiguresOf(db: DatabaseExecutor, input: { userId: string; conversationId: string | null | undefined; paper: PaperConversationRef }): Promise<ChatFigures> {
   const conversationId =
-    input.conversationId && (await isSharedWithPaper(db, { conversationId: input.conversationId, key: input.key })) ? input.conversationId : null;
+    input.conversationId && (await isSharedWithPaper(db, { conversationId: input.conversationId, paper: input.paper })) ? input.conversationId : null;
   return { userId: input.userId, conversationId };
 }
 
@@ -148,18 +147,18 @@ export async function loadAttachmentFigureAssets(
  */
 export async function convertAttachmentFigures(
   db: Database,
-  input: { scope: PaperScope; userId: string; chat: ChatFigures; html: string },
+  input: { scope: ResolvedPaper; userId: string; chat: ChatFigures; html: string },
 ): Promise<string> {
   const ids = attachmentFigureIds(input.html);
   if (ids.length === 0) return input.html;
-  const usable = await usableAttachments(db, { schoolId: input.scope.key.schoolId, chat: input.chat, ids });
+  const usable = await usableAttachments(db, { schoolId: paperSchoolIdOf(input.scope), chat: input.chat, ids });
   const figureIdOf = new Map<string, string>();
   for (const id of ids) {
     const row = usable.get(id);
     if (!row) throw rpcError.badRequest('A figure uses an image that was not attached in this chat.');
     // Validation refuses this first; a save never copies a PDF into the paper's figures.
     if (row.kind !== 'image') throw rpcError.badRequest(documentFigureProblem(row.originalName));
-    const paper = await findPaper(db, input.scope.key);
+    const paper = await findPaperOf(db, input.scope);
     const [existing] = paper
       ? await db
           .select({ id: examQuestionPaperFigureTable.id })

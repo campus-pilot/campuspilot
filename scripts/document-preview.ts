@@ -56,6 +56,7 @@ const previewEnvironment = {
   RESTATE_INGRESS_URL: "http://localhost:8080",
   NEXT_PUBLIC_SERVER_URL: `http://localhost:${apiPort}`,
   NEXT_PUBLIC_MCP_URL: `http://localhost:${apiPort}/mcp`,
+  NEXT_PUBLIC_WEBSITE_URL: "https://campuspilot.in",
 };
 const child = spawn(
   execPath,

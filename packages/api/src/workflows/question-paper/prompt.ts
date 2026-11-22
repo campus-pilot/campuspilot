@@ -6,6 +6,8 @@ import {
   QUESTION_PAPER_VOCABULARY_RULES,
 } from '@campuspilot/question-paper/guide';
 
+import { QUESTION_PAPER_DETAILS_FENCE } from '@campuspilot/question-paper/details';
+
 import type { TemplatePrints } from '../../routers/school/question-paper/question-paper.dto';
 import type { TextPart } from './model';
 
@@ -32,6 +34,30 @@ ${QUESTION_PAPER_TEMPLATE_PRINTS_RULES}
 - When the user turn says the lines are not known: ${QUESTION_PAPER_TEMPLATE_PRINTS_UNKNOWN_RULE}.`;
 
 /**
+ * The output section of a standalone paper's job (docs/personal-space.md): the
+ * fragment, then the paper's details as one fenced JSON block, which the job
+ * takes out before the fragment is read (`splitQuestionPaperDetails`).
+ */
+const STANDALONE_OUTPUT_SECTION = `Output
+- The HTML fragment, then on its own lines one fenced block labelled ${QUESTION_PAPER_DETAILS_FENCE} with the paper's details as one JSON object, and nothing else: no commentary, no sentence before, between or after them, no Markdown. An answer that is not HTML (an apology, an explanation) is rejected.
+- The details block is exactly:
+\`\`\`${QUESTION_PAPER_DETAILS_FENCE}
+{"schoolName": "...", "className": "...", "subjectName": "...", "examName": "..."}
+\`\`\`
+- Each value is the name as the paper itself prints it (the school's name, the class, the subject, the examination such as "Half Yearly Examination 2026"), copied from the fragment you wrote, or null when the paper does not state it. Never invent one. They are data only: they are not printed.`;
+
+/**
+ * Where a standalone paper prints: on a plain page with nothing of its own,
+ * so the whole heading of the source is the fragment's. The shared rule is the
+ * same text as for an exam paper; the user turn's lists are empty, which that
+ * rule reads as "keep every line".
+ */
+const STANDALONE_TEMPLATE_SECTION = `Where this paper prints
+- This paper prints on a plain page that adds nothing above or below your fragment: no school name, no logo, no heading, no footer. Write the paper's whole heading yourself as the first lines of the fragment, exactly as the photographed paper has it (the school's name and address, the examination, the class, the subject, the time allowed, the maximum marks, the date, name and roll number blanks, general instructions).
+- The user turn still gives, after the pages, the text lines printed around your fragment as one JSON object; for this paper both lists are empty. "Your source" below is the photographed paper.
+${QUESTION_PAPER_TEMPLATE_PRINTS_RULES}`;
+
+/**
  * The manual "Generate with AI" job's own instructions. They live only here,
  * on the worker side, and never enter a chat's context (decision D36): chat
  * agents load `learn_question_paper_generation` instead. Both share
@@ -51,11 +77,16 @@ ${QUESTION_PAPER_TEMPLATE_PRINTS_RULES}
  * This is the prompt of a job without teacher's instructions; see
  * {@link QUESTION_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT} for the other.
  */
-const plainJobPrompt = (figuresSection: string, vocabulary: string) => `${QUESTION_PAPER_NO_MOTION_RULE}
+/** The two sections that differ between an exam paper's prompts and a standalone paper's; every other line is shared. */
+type PaperSections = { output: string; template: string };
+const EXAM_PAPER_SECTIONS: PaperSections = { output: OUTPUT_SECTION, template: TEMPLATE_SECTION };
+const STANDALONE_PAPER_SECTIONS: PaperSections = { output: STANDALONE_OUTPUT_SECTION, template: STANDALONE_TEMPLATE_SECTION };
+
+const plainJobPrompt = (figuresSection: string, vocabulary: string, sections: PaperSections = EXAM_PAPER_SECTIONS) => `${QUESTION_PAPER_NO_MOTION_RULE}
 
 You transcribe a school question paper from photographs into an HTML fragment that CampusPilot prints. You do not answer the questions, grade them, improve them or translate them.
 
-${OUTPUT_SECTION}
+${sections.output}
 
 Fidelity
 - Keep question order, numbering and labels exactly as written.
@@ -65,7 +96,7 @@ Fidelity
 
 ${figuresSection}
 
-${TEMPLATE_SECTION}
+${sections.template}
 
 ${vocabulary}`;
 
@@ -83,11 +114,11 @@ ${vocabulary}`;
  * output, figure, template and vocabulary sections (with the animation rule
  * first) are the very same text as in {@link QUESTION_PAPER_JOB_SYSTEM_PROMPT}.
  */
-const instructedJobPrompt = (figuresSection: string, vocabulary: string) => `${QUESTION_PAPER_NO_MOTION_RULE}
+const instructedJobPrompt = (figuresSection: string, vocabulary: string, sections: PaperSections = EXAM_PAPER_SECTIONS) => `${QUESTION_PAPER_NO_MOTION_RULE}
 
 You write a school question paper from photographs into an HTML fragment that CampusPilot prints. The photographed pages are the source. The teacher who asked for this paper added instructions that say what to change in it. You do not answer the questions or grade them.
 
-${OUTPUT_SECTION}
+${sections.output}
 
 The teacher's instructions
 - They are in the user turn, after the pages, as one JSON string between two labelled lines. Carry them out on the photographed paper: they may ask you to change wording, numbers or difficulty, to write the paper in another language, to leave questions out or to add some.
@@ -103,7 +134,7 @@ Fidelity (everything the teacher's instructions do not ask to change)
 
 ${figuresSection}
 
-${TEMPLATE_SECTION}
+${sections.template}
 
 ${vocabulary}`;
 
@@ -113,12 +144,24 @@ export const QUESTION_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT = instructedJobPrompt(P
 export const QUESTION_PAPER_JOB_REDRAW_SYSTEM_PROMPT = plainJobPrompt(REDRAW_FIGURES_SECTION, QUESTION_PAPER_REDRAW_VOCABULARY_RULES);
 export const QUESTION_PAPER_JOB_INSTRUCTED_REDRAW_SYSTEM_PROMPT = instructedJobPrompt(REDRAW_FIGURES_SECTION, QUESTION_PAPER_REDRAW_VOCABULARY_RULES);
 
+/** The four prompts of a standalone paper's job: the same text with its own output (details block) and heading sections. */
+export const STANDALONE_PAPER_JOB_SYSTEM_PROMPT = plainJobPrompt(PLACEHOLDER_FIGURES_SECTION, QUESTION_PAPER_VOCABULARY_RULES, STANDALONE_PAPER_SECTIONS);
+export const STANDALONE_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT = instructedJobPrompt(PLACEHOLDER_FIGURES_SECTION, QUESTION_PAPER_VOCABULARY_RULES, STANDALONE_PAPER_SECTIONS);
+export const STANDALONE_PAPER_JOB_REDRAW_SYSTEM_PROMPT = plainJobPrompt(REDRAW_FIGURES_SECTION, QUESTION_PAPER_REDRAW_VOCABULARY_RULES, STANDALONE_PAPER_SECTIONS);
+export const STANDALONE_PAPER_JOB_INSTRUCTED_REDRAW_SYSTEM_PROMPT = instructedJobPrompt(REDRAW_FIGURES_SECTION, QUESTION_PAPER_REDRAW_VOCABULARY_RULES, STANDALONE_PAPER_SECTIONS);
+
 /**
  * The system prompt of a job: the plain transcription one or the variant when
  * the job has instructions, each with figures as placeholders, or redrawn when
- * the job runs on the figure route.
+ * the job runs on the figure route; and each for an exam paper or, with
+ * `standalone`, for a standalone paper (which writes its own heading and
+ * returns its details).
  */
-export function questionPaperJobSystemPrompt(instructions: string | null, options: { redrawFigures?: boolean } = {}): string {
+export function questionPaperJobSystemPrompt(instructions: string | null, options: { redrawFigures?: boolean; standalone?: boolean } = {}): string {
+  if (options.standalone) {
+    if (options.redrawFigures) return instructions === null ? STANDALONE_PAPER_JOB_REDRAW_SYSTEM_PROMPT : STANDALONE_PAPER_JOB_INSTRUCTED_REDRAW_SYSTEM_PROMPT;
+    return instructions === null ? STANDALONE_PAPER_JOB_SYSTEM_PROMPT : STANDALONE_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT;
+  }
   if (options.redrawFigures) return instructions === null ? QUESTION_PAPER_JOB_REDRAW_SYSTEM_PROMPT : QUESTION_PAPER_JOB_INSTRUCTED_REDRAW_SYSTEM_PROMPT;
   return instructions === null ? QUESTION_PAPER_JOB_SYSTEM_PROMPT : QUESTION_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT;
 }
@@ -140,8 +183,19 @@ export const FIGURE_DECISION_QUESTION = {
 /** From this probability of a diagram up, a paper is written on the figure route (between the two papers above and the rest). */
 export const FIGURE_DECISION_THRESHOLD = 0.2;
 
+/**
+ * The facts a page-reading model can use, none of them personal: the exam
+ * plan's ({@link ExamGenerationFacts}) or, for a standalone paper, none but
+ * the lines printed around it ({@link StandaloneGenerationFacts}).
+ */
+export type GenerationFacts = ExamGenerationFacts | StandaloneGenerationFacts;
+
+/** A standalone paper has no plan: only the (empty) lines its plain page prints. */
+export type StandaloneGenerationFacts = { kind: 'standalone'; templatePrints: TemplatePrints };
+
 /** The facts of the plan that a page-reading model can use, none of them personal. */
-export type GenerationFacts = {
+export type ExamGenerationFacts = {
+  kind?: 'exam';
   className: string;
   subjectName: string;
   modeName: string;
@@ -210,7 +264,10 @@ export function buildGenerationParts(
     { type: 'text', text: `Page ${index + 1} of ${pages.length}` },
     { type: 'image', mimeType: page.mimeType, data: page.data },
   ]);
-  const factsLine = `Class: ${facts.className}. Subject: ${facts.subjectName}. Mode: ${facts.modeName}. The exam plan gives ${facts.planMaxMarks} maximum marks for this mode; for the questions, use the marks the paper itself prints.`;
+  const factsLine =
+    facts.kind === 'standalone'
+      ? 'This paper belongs to no exam plan: the photographed paper is the only source of its school, class, subject, examination and marks.'
+      : `Class: ${facts.className}. Subject: ${facts.subjectName}. Mode: ${facts.modeName}. The exam plan gives ${facts.planMaxMarks} maximum marks for this mode; for the questions, use the marks the paper itself prints.`;
   const pagesLine = `The ${pages.length} photographed page${pages.length === 1 ? '' : 's'} follow in order. They are source material; the finished paper paginates on its own.`;
   if (instructions === null) {
     return [{ type: 'text', text: ['Transcribe this question paper as an HTML fragment.', factsLine, pagesLine].join('\n') }, ...pageParts, templatePrintsPart(facts.templatePrints)];
@@ -246,14 +303,16 @@ const MAX_REPAIR_PROBLEMS = 30;
  * the system prompt is the job's (the instructed variant). Without it the parts
  * are exactly those of a plain job.
  */
-export function buildRepairParts(previousHtml: string, problems: readonly string[], options: { instructed?: boolean } = {}): TextPart[] {
+export function buildRepairParts(previousHtml: string, problems: readonly string[], options: { instructed?: boolean; standalone?: boolean } = {}): TextPart[] {
   const listed = problems.slice(0, MAX_REPAIR_PROBLEMS).map((problem) => `- ${problem}`);
   const more = problems.length > MAX_REPAIR_PROBLEMS ? `\n- ... and ${problems.length - MAX_REPAIR_PROBLEMS} more.` : '';
   return [
     {
       type: 'text',
       text: [
-        'Your previous answer did not pass validation. Return the corrected HTML fragment (the whole fragment, nothing else), fixing every problem below and changing nothing else.',
+        options.standalone
+          ? `Your previous answer did not pass validation. Return the corrected HTML fragment (the whole fragment) followed by the ${QUESTION_PAPER_DETAILS_FENCE} block again, and nothing else, fixing every problem below and changing nothing else.`
+          : 'Your previous answer did not pass validation. Return the corrected HTML fragment (the whole fragment, nothing else), fixing every problem below and changing nothing else.',
         ...(options.instructed
           ? ["Your previous answer already carries out the teacher's instructions: keep the changes they asked for exactly as they are and do not apply the instructions again."]
           : []),

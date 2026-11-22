@@ -50,7 +50,7 @@ function schoolRequest(
       roleAssignments: [
         {
           role,
-          scope: { kind: 'school', schoolId: assignmentSchoolId },
+          scope: { kind: 'school', schoolId: assignmentSchoolId, schoolKind: 'school' },
           meta: role === 'school.teacher' ? { classIds: [] } : null,
         } as RoleAssignment,
       ],

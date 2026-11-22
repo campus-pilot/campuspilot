@@ -17,7 +17,7 @@ import type { z } from 'zod';
 import { isAttachmentFigureId } from './question-paper.attachments';
 import { fragmentFigureIds, replaceFigureIds } from './question-paper.body';
 import type { PaperKey, listCopySourcesOutputSchema } from './question-paper.dto';
-import { findPaper } from './question-paper.records';
+import { examKeyPart, findPaper } from './question-paper.records';
 import type { PaperScope } from './question-paper.scope';
 import { storeQuestionPaperFigure, type PreparedFigure } from './question-paper.service';
 import { getObjectBytes } from './question-paper.storage';
@@ -146,14 +146,18 @@ export async function listQuestionPaperCopySources(
   ]);
   const modes = schoolClass?.config?.subjects?.[key.subjectSlug]?.examModes;
   return {
+    // Only exam papers have a class and a session (the inner joins and the class filter); their key is whole.
     sources: rows.map((row) => {
       const exams = sessionConfigSchema.parse(row.sessionConfig ?? {}).examConfig;
+      const sessionId = examKeyPart(row.sessionId);
+      const examSlug = examKeyPart(row.examSlug);
+      const modeSlug = examKeyPart(row.modeSlug);
       return {
-        key: { schoolId: key.schoolId, sessionId: row.sessionId, examSlug: row.examSlug, classId: key.classId, subjectSlug: key.subjectSlug, modeSlug: row.modeSlug },
+        key: { schoolId: key.schoolId, sessionId, examSlug, classId: key.classId, subjectSlug: key.subjectSlug, modeSlug },
         sessionLabel: sessionLabelOf(row.sessionStartYear, row.sessionEndYear),
         sessionActive: row.sessionActive,
-        examName: Object.hasOwn(exams, row.examSlug) ? exams[row.examSlug]!.name : row.examSlug,
-        modeName: (modes && Object.hasOwn(modes, row.modeSlug) ? modes[row.modeSlug]?.name : undefined) ?? row.modeSlug,
+        examName: Object.hasOwn(exams, examSlug) ? exams[examSlug]!.name : examSlug,
+        modeName: (modes && Object.hasOwn(modes, modeSlug) ? modes[modeSlug]?.name : undefined) ?? modeSlug,
         latestVersionNo: row.latestVersionNo,
         savedAt: row.savedAt,
         planMaxMarks: row.planMaxMarks,

@@ -10,7 +10,7 @@ import {
   readSchoolFeatureFlags,
   setSchoolFeature,
 } from '../../../feature-flags/feature-flags.service';
-import { protectedProcedure } from '../../../index';
+import { platformAdminProcedure } from '../../../index';
 import { requireSystemPermission } from '../../../permissions/system';
 import {
   adminSchoolFeatureFlagsDtoSchema,
@@ -36,7 +36,7 @@ async function readAdminSchoolFeatureFlags(db: DatabaseExecutor, schoolId: strin
  * (`school.getFeatureFlags`).
  */
 export const featureFlagsRouter = {
-  getSchoolFeatureFlags: protectedProcedure
+  getSchoolFeatureFlags: platformAdminProcedure
     .route({
       summary: 'Get a school\'s feature flags',
       description:
@@ -55,7 +55,7 @@ export const featureFlagsRouter = {
       }
     }),
 
-  getAssistantPlatformStatus: protectedProcedure
+  getAssistantPlatformStatus: platformAdminProcedure
     .route({
       summary: 'Get the platform\'s assistant setup',
       description:
@@ -69,7 +69,7 @@ export const featureFlagsRouter = {
     .output(z.object({ voiceConfigured: z.boolean() }))
     .handler(() => ({ voiceConfigured: isAssistantVoiceConfigured(assistantEnv) })),
 
-  updateSchoolFeatureFlag: protectedProcedure
+  updateSchoolFeatureFlag: platformAdminProcedure
     .route({
       summary: 'Update a school\'s feature flag',
       description:
@@ -111,7 +111,7 @@ export const featureFlagsRouter = {
       }
     }),
 
-  updateSchoolTier: protectedProcedure
+  updateSchoolTier: platformAdminProcedure
     .route({
       summary: 'Change a school\'s subscription tier',
       description:

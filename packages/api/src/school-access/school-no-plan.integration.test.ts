@@ -266,7 +266,7 @@ describe('what the school\'s own apps are told about its plan', () => {
 
 describe('the no-plan error', () => {
   it('is FORBIDDEN with a stable reason, readable on both sides of the wire, and not confused with other errors', () => {
-    const error = schoolNoPlanError();
+    const error = schoolNoPlanError('school');
     expect(error.code).toBe('FORBIDDEN');
     expect(error.data).toEqual({ reason: SCHOOL_NO_PLAN_REASON });
     expect(error.message).toBe(SCHOOL_NO_PLAN_MESSAGE);

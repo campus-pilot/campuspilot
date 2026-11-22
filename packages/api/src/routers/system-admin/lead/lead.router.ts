@@ -3,7 +3,7 @@ import { SYSTEM_ACTIONS } from '@campuspilot/opa/policies/system';
 import { and, count, desc, eq, ilike, or, sql } from 'drizzle-orm';
 
 import { toRpcError } from '../../../errors';
-import { protectedProcedure } from '../../../index';
+import { platformAdminProcedure } from '../../../index';
 import { createNextPageCursor, createPaginatedResult, resolvePaginationInput } from '../../../paginations';
 import { requireSystemPermission } from '../../../permissions/system';
 import { listLeadsInputSchema, listLeadsOutputSchema } from './lead.dto';
@@ -21,7 +21,7 @@ function likePattern(term: string) {
 
 /** Platform-admin view of marketing leads (the admin app's Demo requests page). */
 export const leadRouter = {
-  listLeads: protectedProcedure
+  listLeads: platformAdminProcedure
     .route({
       summary: 'List leads',
       description: 'List the leads from the website forms, newest first, with their answers and WhatsApp alert status. Requires system-administrator permission.',

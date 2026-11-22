@@ -11,6 +11,7 @@ import {
   type VoiceServerMessage,
   type VoiceSessionKind,
 } from '@campuspilot/assistant-contract/voice';
+import { readSchoolKind } from '@campuspilot/api/school-access/school-kind.service';
 import { env } from '@campuspilot/env/server';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 
@@ -114,7 +115,7 @@ export function attachAssistantVoice(server: Server, options: AssistantVoiceOpti
     // Someone who may not even see the assistant here learns nothing about voice.
     if (!canSee(access)) return { status: VOICE_UPGRADE_REFUSALS.forbidden };
     const settings = voiceSettings();
-    const refusal = voiceRefusal(session, access, settings);
+    const refusal = voiceRefusal(session, access, settings, await readSchoolKind(db, schoolId));
     if (refusal || !settings) return { status: refusal?.reason === 'unavailable' ? VOICE_UPGRADE_REFUSALS.noVoice : VOICE_UPGRADE_REFUSALS.forbidden };
     return { session, schoolId, kind: kind.data, settings, headers };
   }
@@ -136,7 +137,7 @@ export function attachAssistantVoice(server: Server, options: AssistantVoiceOpti
   async function refusalNow(session: AssistantSession, headers: Headers, schoolId: string): Promise<VoiceSessionRefusal | null> {
     const current = await resolveAssistantSession(headers);
     if (current?.user.id !== session.user.id) return { reason: 'access', message: 'You are signed out.' };
-    return voiceRefusal(current, await loadAssistantAccess(current, schoolId), voiceSettings());
+    return voiceRefusal(current, await loadAssistantAccess(current, schoolId), voiceSettings(), await readSchoolKind(db, schoolId));
   }
 
   /** Follows a run the browser named, once it is confirmed to be this user's own in a conversation they may read. */

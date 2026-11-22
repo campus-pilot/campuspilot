@@ -1,6 +1,6 @@
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { env } from '@campuspilot/env/server';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 
 import type { Context } from '../../../context';
@@ -53,7 +53,8 @@ export async function handleCadetManifestBlob(
     const [school] = await context.db
       .select({ name: schoolTable.name, logoS3Key: schoolTable.logoS3Key })
       .from(schoolTable)
-      .where(eq(schoolTable.id, schoolId))
+      // A personal space (docs/personal-space.md) is not found here: its name is a person's, not a public school detail.
+      .where(and(eq(schoolTable.id, schoolId), eq(schoolTable.kind, 'school')))
       .limit(1);
     if (!school) throw rpcError.notFound('School');
     if (!(await isSchoolFeatureEnabled(context.db, schoolId, 'cadet'))) {

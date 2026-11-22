@@ -1,4 +1,5 @@
 import type { DatabaseTransaction } from '@campuspilot/db';
+import { examKeyPart } from '../question-paper/question-paper.records';
 import {
   examAssessmentSettingsTable,
   examLifecycleTable,
@@ -127,11 +128,13 @@ const EXAM_DATA_SOURCES: ExamDataSource[] = [
   {
     examSlug: examQuestionPaperTable.examSlug,
     sessionId: examQuestionPaperTable.sessionId,
+    // The where clause names a session and slugs, so only exam papers match (a standalone paper has neither).
     query: (tx, where) =>
       tx
         .selectDistinct({ examSlug: examQuestionPaperTable.examSlug })
         .from(examQuestionPaperTable)
-        .where(where),
+        .where(where)
+        .then((rows) => rows.map((row) => ({ examSlug: examKeyPart(row.examSlug) }))),
   },
 ];
 

@@ -355,7 +355,7 @@ describe('the assistant in a suspended school', () => {
 
 describe('the suspended-school error', () => {
   it('is FORBIDDEN with a stable reason, readable on both sides of the wire, and not confused with other errors', () => {
-    const error = schoolSuspendedError();
+    const error = schoolSuspendedError('school');
     expect(error.code).toBe('FORBIDDEN');
     expect(error.status).toBe(403);
     expect(error.data).toEqual({ reason: SCHOOL_SUSPENDED_REASON });

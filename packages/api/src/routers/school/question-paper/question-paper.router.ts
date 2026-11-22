@@ -49,6 +49,7 @@ import {
   getVersion,
   renderStoredVersionHtml,
   saveQuestionPaperVersion,
+  type SavedVersion,
 } from './question-paper.version.service';
 
 const route = (summary: string, description: string) => ({ summary, description, tags: ['School', 'Question papers'] });
@@ -100,6 +101,17 @@ const readSourceClass = o.middleware<Record<never, never>, { source: { schoolId:
     return next();
   },
 );
+
+/**
+ * A save's result as the exam paper tools answer it. An exam paper's version
+ * always snapshots the plan's maximum marks; only a standalone paper's has
+ * none, so a null here is a broken save, never a value to send.
+ */
+function examSaveResult(saved: SavedVersion) {
+  const { replayed: _replayed, planMaxMarks, ...result } = saved;
+  if (planMaxMarks === null) throw new Error('An exam question paper version was saved without the plan maximum marks.');
+  return { ...result, planMaxMarks };
+}
 
 const userId = (context: { session: { user: { id: string } } | null }) => {
   const id = context.session?.user.id;
@@ -177,7 +189,7 @@ export const schoolQuestionPaperRouter = {
         const chat = context.principal.authMethod === 'assistant' ? context.principal.assistantRun : null;
         if (!chat) throw rpcError.badRequest('A draft can only be read by the in-app assistant. You already have the html you wrote; use getQuestionPaper for a saved paper.');
         const scope = await resolvePaperScope(context.db, input);
-        const raw = await findChatDraftContent(context.db, { conversationId: chat.conversationId, key: scope.key, userId: user, draftId: input.draftId });
+        const raw = await findChatDraftContent(context.db, { conversationId: chat.conversationId, paper: { kind: 'exam', key: scope.key }, userId: user, draftId: input.draftId });
         const draft = cleanedChatDraft(raw);
         const [paper, templatePrints] = await Promise.all([getQuestionPaperFacts(context.db, scope), readTemplatePrints(context.db, scope)]);
         return { paper, templatePrints, draftId: draft.draftId, html: draft.html, characters: draft.html.length };
@@ -229,7 +241,7 @@ export const schoolQuestionPaperRouter = {
         const chatConversationId = principal.authMethod === 'assistant' ? principal.assistantRun.conversationId : input.conversationId;
         const chat =
           principal.authMethod === 'assistant' || principal.authMethod === 'session'
-            ? await chatFiguresOf(context.db, { userId: userId(context), conversationId: chatConversationId, key: scope.key })
+            ? await chatFiguresOf(context.db, { userId: userId(context), conversationId: chatConversationId, paper: { kind: 'exam', key: scope.key } })
             : undefined;
         const checked = await checkQuestionPaperDraft(context.db, scope, input.html, { chat });
         if (!checked.ok) {
@@ -266,7 +278,7 @@ export const schoolQuestionPaperRouter = {
         }
         if (input.draftId !== undefined) {
           if (!chat) throw rpcError.badRequest('A draftId can only be used from the in-app assistant. Send the full html instead.');
-          html = await findChatDraftContent(context.db, { conversationId: chat.conversationId, key: scope.key, userId: user, draftId: input.draftId });
+          html = await findChatDraftContent(context.db, { conversationId: chat.conversationId, paper: { kind: 'exam', key: scope.key }, userId: user, draftId: input.draftId });
         }
         const saved = await saveQuestionPaperVersion(context.db, {
           scope,
@@ -276,8 +288,7 @@ export const schoolQuestionPaperRouter = {
           source: { kind: 'agent', conversationId: chat?.conversationId ?? null },
           signal,
         });
-        const { replayed: _replayed, ...result } = saved;
-        return result;
+        return examSaveResult(saved);
       } catch (error) {
         throw toRpcError(error);
       }
@@ -306,8 +317,7 @@ export const schoolQuestionPaperRouter = {
           source: { kind: 'agent', conversationId: chat?.conversationId ?? null },
           signal,
         });
-        const { replayed: _replayed, ...result } = saved;
-        return result;
+        return examSaveResult(saved);
       } catch (error) {
         throw toRpcError(error);
       }
@@ -348,8 +358,7 @@ export const schoolQuestionPaperRouter = {
           source,
           signal,
         });
-        const { replayed: _replayed, ...result } = saved;
-        return result;
+        return examSaveResult(saved);
       } catch (error) {
         throw toRpcError(error);
       }
@@ -533,7 +542,7 @@ export const schoolQuestionPaperRouter = {
       try {
         const scope = await resolvePaperScope(context.db, input);
         // A person previewing a draft sees as figures their own attachments and those of the paper's chat it is from.
-        const chat = await chatFiguresOf(context.db, { userId: userId(context), conversationId: input.conversationId, key: scope.key });
+        const chat = await chatFiguresOf(context.db, { userId: userId(context), conversationId: input.conversationId, paper: { kind: 'exam', key: scope.key } });
         const checked = await checkQuestionPaperDraft(context.db, scope, input.html, { chat });
         if (!checked.ok) return { html: '', problems: checked.problems, warnings: [], placeholderFigures: 0, templateName: null };
         const template = await selectedQuestionPaperTemplate(context.db, input.schoolId);

@@ -241,6 +241,23 @@ allowance counts every school a person ever created (deleted or handed over
 ones included), and the owner can never be removed or lose the principal role
 through school procedures.
 
+## Personal space
+
+Before changing who gets a personal space (`school.kind = 'personal'`, the
+Google sign-up hook, `personalSpace.*`), the school kind gate (`schoolKinds`
+in procedure metadata, `requireAuth`, `assertSchoolKindServedByCaller`),
+standalone question papers (`exam_question_paper.kind = 'standalone'`, their
+details, procedures, plain shell and job branch), the personal space screens
+in `apps/management`, or before letting another procedure serve personal
+spaces, read [Personal space](docs/personal-space.md). A procedure serves
+real schools only unless it says otherwise, reads included; the eligibility
+reads the linked Google account, never `email_verified`; a person gets one
+space for good (`user.personal_space_created_at`); details are not
+revisioned (every save overwrites them). A new way to store bytes or print a
+PDF in a personal space must go through its limits
+(`personal-space.limits.ts`, the guide's "Limits" table) inside the write's
+transaction.
+
 ## Demo schools
 
 Demo schools (`school.is_demo`) are provisioned by `DemoSchoolWorkflow`

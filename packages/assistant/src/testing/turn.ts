@@ -260,11 +260,13 @@ export function mcpTool(mcpName: string, access: 'read' | 'write', overrides: Pa
     title: `Title of ${mcpName}`,
     description: `Description of ${mcpName}.`,
     inputSchema: { type: 'object', properties: {} },
+    schoolScoped: false,
     readOnly: access === 'read',
     destructive: false,
     exposure: 'core',
     module: 'students',
     features: [],
+    schoolKinds: ['school'],
     ...overrides,
   };
 }

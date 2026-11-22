@@ -47,6 +47,15 @@ A refused creation is `FORBIDDEN` with
 `data: { reason: 'SCHOOL_CREATION_REFUSED', refusal }`; clients read it with
 `schoolCreationRefusalOf(error)`, never from the message.
 
+### Personal spaces are not counted
+
+A personal space ([Personal space](personal-space.md)) is a school the person
+owns, of kind `personal`. It writes no `school_creation` row, so it does not
+use the allowance, and owning it is not `member_of_other_school`: someone with
+a personal space can still create one school. Who gets a personal space is
+decided by its own rules (a linked Google account, no school at all), not by
+these.
+
 ## Closing the loopholes
 
 | Attempt | Why it does not work |
@@ -81,7 +90,8 @@ still counts.
 
 1. locks the person and checks they may create one;
 2. inserts the school with a unique slug from its name, no subscription
-   (`tier` null) and the person as owner;
+   (`tier` null) and the person as owner (steps 2 to 5 are
+   `provisionSelfServiceSchool`, shared with personal spaces);
 3. starts a trial of `SELF_SERVICE_TRIAL_TIER` (Plus, the smallest tier, named
    explicitly rather than derived from the tier order) for
    `SELF_SERVICE_TRIAL_PERIODS` (one) 28-day billing period, which starts the
@@ -242,6 +252,8 @@ All three procedures are hidden from MCP and the assistant.
   lock on the school, so two first sessions cannot both become active); with
   one already active it is created inactive and changing over stays an
   explicit `activateSession`.
+- Beside the panel, someone with a linked Google account and no school sees
+  **Create personal space** ([Personal space](personal-space.md)).
 - **Ask for more schools** opens the request form in a dialog.
 - The school switcher offers **Create a school** (`/school/new`, the same
   panel) to people who may create one or ask for more; staff of a school they

@@ -5,6 +5,8 @@ import { useQuery } from '@tanstack/react-query';
 import { Building2 } from 'lucide-react';
 import { AuthLoading } from '@/components/auth-loading';
 import { SchoolCreationPanel } from '@/components/school-creation/school-creation-panel';
+import { CreatePersonalSpace } from '@/components/personal-space/create-personal-space';
+import { landingSchoolOf } from '@/components/personal-space/personal-space-model';
 import { SchoolPageNavbar } from '@/components/school-page-navbar';
 import {
   clearStoredSchoolId,
@@ -39,6 +41,7 @@ function NoSchoolsEmptyState() {
           <div className="w-full max-w-md">
             <SchoolCreationPanel />
           </div>
+          <CreatePersonalSpace />
         </section>
       </main>
     </div>
@@ -65,15 +68,9 @@ export default function SchoolEntryPage() {
     );
   }
 
-  if (schoolsQuery.data.length > 0) {
-    const storedSchoolId = getStoredSchoolId();
-    const storedSchool = schoolsQuery.data.find(
-      (school) => school.id === storedSchoolId,
-    );
-    return (
-      <SchoolEntryRedirect schoolId={(storedSchool ?? schoolsQuery.data[0]!).id} />
-    );
-  }
+  // A valid stored selection, else the first school, else the personal space (docs/personal-space.md).
+  const landing = landingSchoolOf(schoolsQuery.data, getStoredSchoolId());
+  if (landing) return <SchoolEntryRedirect school={landing} />;
 
   return <NoSchoolsEmptyState />;
 }

@@ -28,8 +28,8 @@ import {
   requestErrorMessage,
   unreservedUploads,
   uploadsInFlight,
-  type QuestionPaperScope,
 } from './question-paper-model';
+import { isStandaloneTarget, paperCalls, paperDetailQueryKey, type PaperTarget } from './paper-target';
 import {
   createPlanOf,
   marksMismatchOf,
@@ -52,7 +52,8 @@ const startSchema = z.object({
 });
 
 type StartProps = {
-  scope: QuestionPaperScope;
+  /** The paper: an exam paper, or a standalone paper of a personal space (which cannot be copied from an earlier paper). */
+  scope: PaperTarget;
   detail: QuestionPaperDetail;
   canManage: boolean;
   uploads: PageUploads;
@@ -63,6 +64,11 @@ type StartProps = {
   onOpenStudio: (query?: { version?: number; chat?: string }) => void;
   /** Returns to the paper's studio, for a paper that has one (a version, a generation or a conversation); null for a paper made here first. */
   onBack: (() => void) | null;
+  /**
+   * The exam paper's class and subject, which an earlier paper is looked up by;
+   * null for a standalone paper, which is never started from an earlier paper.
+   */
+  examNames: { className: string; subjectName: string } | null;
 };
 
 /**
@@ -70,35 +76,35 @@ type StartProps = {
  * server decides. On any failure the old order returns, and on a conflict
  * (someone else changed the pages) the list is reloaded and says so.
  */
-function usePageReorder(scope: QuestionPaperScope) {
+function usePageReorder(scope: PaperTarget) {
   const queryClient = useQueryClient();
   const refresh = useRefreshQuestionPaper(scope);
-  const detailKey = orpc.school.getQuestionPaperDetail.queryKey({ input: scope });
-  return useMutation(
-    orpc.school.reorderQuestionPaperPages.mutationOptions({
-      onMutate: async (input) => {
-        await queryClient.cancelQueries({ queryKey: detailKey });
-        const before = queryClient.getQueryData(detailKey);
-        if (before) queryClient.setQueryData(detailKey, { ...before, pages: applyPageOrder(before.pages, input.pageIds) });
-        return { before };
-      },
-      onError: (error, _input, context) => {
-        if (context?.before) queryClient.setQueryData(detailKey, context.before);
-        toast.error(isConflict(error) ? 'Someone changed the pages; reloaded.' : requestErrorMessage(error, 'The new order could not be saved.'));
-      },
-      onSettled: refresh,
-    }),
-  );
+  const detailKey = paperDetailQueryKey(scope);
+  type CachedDetail = { pages: Array<{ id: string; position: number }> };
+  return useMutation({
+    mutationFn: (input: { pageIds: string[]; expectedPageRevision: number }) => paperCalls.reorderPages(scope, input),
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey: detailKey });
+      const before = queryClient.getQueryData<CachedDetail>(detailKey as readonly unknown[]);
+      // The cache holds the server's shape of either kind; only its pages are reordered here.
+      if (before) queryClient.setQueryData<CachedDetail>(detailKey as readonly unknown[], { ...before, pages: applyPageOrder(before.pages, input.pageIds) });
+      return { before };
+    },
+    onError: (error, _input, context) => {
+      if (context?.before) queryClient.setQueryData<CachedDetail>(detailKey as readonly unknown[], context.before);
+      toast.error(isConflict(error) ? 'Someone changed the pages; reloaded.' : requestErrorMessage(error, 'The new order could not be saved.'));
+    },
+    onSettled: refresh,
+  });
 }
 
-function useDeletePage(scope: QuestionPaperScope) {
+function useDeletePage(scope: PaperTarget) {
   const refresh = useRefreshQuestionPaper(scope);
-  return useMutation(
-    orpc.school.deleteQuestionPaperPage.mutationOptions({
-      onError: (error) => toast.error(isConflict(error) ? 'Someone changed the pages; reloaded.' : requestErrorMessage(error, 'The page could not be removed.')),
-      onSettled: refresh,
-    }),
-  );
+  return useMutation({
+    mutationFn: (input: { pageId: string; expectedPageRevision: number }) => paperCalls.deletePage(scope, input),
+    onError: (error) => toast.error(isConflict(error) ? 'Someone changed the pages; reloaded.' : requestErrorMessage(error, 'The page could not be removed.')),
+    onSettled: refresh,
+  });
 }
 
 /**
@@ -114,7 +120,9 @@ function useDeletePage(scope: QuestionPaperScope) {
 function usePaperStart({ scope, detail, uploads, onOpenStudio }: Pick<StartProps, 'scope' | 'detail' | 'uploads' | 'onOpenStudio'>) {
   const refresh = useRefreshQuestionPaper(scope);
   const assistant = useStartPaperConversation(scope);
-  const generate = useMutation(orpc.school.startQuestionPaperGeneration.mutationOptions());
+  const generate = useMutation({
+    mutationFn: (input: { expectedPageRevision: number; instructions?: string }) => paperCalls.startGeneration(scope, input),
+  });
   const copy = useMutation(orpc.school.copyQuestionPaperVersion.mutationOptions());
   /** Identifies the PDF upload in flight, so one that finishes after its row was removed is discarded. */
   const pdfUpload = useRef<symbol | null>(null);
@@ -122,10 +130,12 @@ function usePaperStart({ scope, detail, uploads, onOpenStudio }: Pick<StartProps
   const run = useMutation({
     mutationFn: async (plan: Exclude<CreatePlan, { kind: 'blocked' }>) => {
       if (plan.kind === 'generate') {
-        await generate.mutateAsync({ ...scope, expectedPageRevision: detail.paper.pageRevision, ...(plan.instructions ? { instructions: plan.instructions } : {}) });
+        await generate.mutateAsync({ expectedPageRevision: detail.paper.pageRevision, ...(plan.instructions ? { instructions: plan.instructions } : {}) });
         return {};
       }
       if (plan.kind === 'assistant') return { chat: await assistant.start(plan.message, plan.attachments) };
+      // An earlier paper is offered for exam papers only (a standalone paper has no class and subject to copy from).
+      if (isStandaloneTarget(scope)) throw new Error('A standalone paper cannot be copied from an earlier paper.');
       const { versionNo } = await copy.mutateAsync({
         ...scope,
         expectedVersionNo: detail.paper.latestVersionNo,
@@ -318,7 +328,7 @@ function EarlierSourceRow({ earlier, planMaxMarks, onRemove }: { earlier: Earlie
 }
 
 /** What the buttons beside the photos do: take files from the phone's camera, open the camera dialog, open the earlier-paper picker. */
-type SourceActions = { onFiles: (files: File[]) => void; onCamera: () => void; onEarlier: () => void };
+type SourceActions = { onFiles: (files: File[]) => void; onCamera: () => void; onEarlier: (() => void) | null };
 
 /** The paper's photos as a row of pages: add, look at one, reorder, remove. Removing asks first; the server holds the photos. */
 function PhotoSources({
@@ -357,7 +367,7 @@ function PhotoSources({
         const ways: PaperSourceWay[] = [
           { key: 'webcam', icon: Camera, label: 'Take a photo', disabled: cameraClosed, pointer: 'fine', onClick: onCamera },
           { key: 'camera', icon: Camera, label: 'Take a photo', disabled: cameraClosed, pointer: 'coarse', onClick: () => capture.current?.click() },
-          ...(photoCount === 0 ? [{ key: 'earlier', icon: Copy, label: 'Copy an earlier paper', disabled: closed, onClick: onEarlier }] : []),
+          ...(photoCount === 0 && onEarlier ? [{ key: 'earlier', icon: Copy, label: 'Copy an earlier paper', disabled: closed, onClick: onEarlier }] : []),
         ];
         return (
           <>
@@ -384,7 +394,7 @@ function PhotoSources({
               ways={ways}
               onAdd={onPick}
               onOpen={setViewing}
-              onReorder={(pageIds) => reorder.mutate({ ...scope, pageIds, expectedPageRevision: paper.pageRevision })}
+              onReorder={(pageIds) => reorder.mutate({ pageIds, expectedPageRevision: paper.pageRevision })}
               onDelete={setDeleting}
               onDismissUpload={uploads.dismiss}
             />
@@ -395,7 +405,7 @@ function PhotoSources({
               pageId={deleting === null ? viewing : null}
               onPageChange={setViewing}
               onRemove={closed || changingPages ? undefined : setDeleting}
-              turning={closed ? undefined : pageTurningOf(rotate, scope, paper.pageRevision, changingPages)}
+              turning={closed ? undefined : pageTurningOf(rotate, paper.pageRevision, changingPages)}
             />
             <ConfirmationDialog
               open={deletingPage !== undefined}
@@ -409,7 +419,7 @@ function PhotoSources({
               onConfirm={() => {
                 if (!deletingPage) return;
                 deletePage.mutate(
-                  { ...scope, pageId: deletingPage.id, expectedPageRevision: paper.pageRevision },
+                  { pageId: deletingPage.id, expectedPageRevision: paper.pageRevision },
                   {
                     // A removed page cannot stay open in the viewer; a refused removal returns to it.
                     onSuccess: () => setViewing(null),
@@ -457,7 +467,9 @@ function StartSources({
             />
           );
         }
-        if (alternative?.kind === 'earlier') return <EarlierSourceRow earlier={alternative.earlier} planMaxMarks={detail.paper.planMaxMarks} onRemove={start.removeAlternative} />;
+        if (alternative?.kind === 'earlier' && detail.paper.planMaxMarks !== null) {
+          return <EarlierSourceRow earlier={alternative.earlier} planMaxMarks={detail.paper.planMaxMarks} onRemove={start.removeAlternative} />;
+        }
         return <PhotoSources scope={scope} detail={detail} uploads={uploads} closed={closed} onPick={onPick} onFiles={start.addFiles} onCamera={onCamera} onEarlier={onEarlier} />;
       }}
     </start.form.Subscribe>
@@ -474,7 +486,8 @@ function StartNote({
 }: {
   start: PaperStart;
   hasPhotos: boolean;
-  planMaxMarks: number;
+  /** The exam plan's maximum marks; null for a standalone paper, which has no plan (and no earlier paper to compare). */
+  planMaxMarks: number | null;
   disabled: boolean;
   onPasteFiles: (files: File[]) => void;
 }) {
@@ -488,7 +501,7 @@ function StartNote({
   return (
     <start.form.Subscribe selector={(state) => state.values.alternative}>
       {(alternative) => {
-        const marksDiffer = alternative?.kind === 'earlier' && marksMismatchOf(alternative.earlier, planMaxMarks) !== null;
+        const marksDiffer = alternative?.kind === 'earlier' && planMaxMarks !== null && marksMismatchOf(alternative.earlier, planMaxMarks) !== null;
         const words = noteWordsOf({ alternative, hasPhotos, marksDiffer });
         return (
           <start.form.Field name="note">
@@ -612,7 +625,7 @@ function UnusedPhotosNote({ start, pageCount }: { start: PaperStart; pageCount: 
  * photos, a copy): then it says that a new version is added, and Back beside
  * the button (and the arrow by the paper's name) returns to the paper.
  */
-export function QuestionPaperStart({ scope, detail, canManage, uploads, earlierOpen, onEarlierOpenChange, onOpenStudio, onBack }: StartProps) {
+export function QuestionPaperStart({ scope, detail, canManage, uploads, earlierOpen, onEarlierOpenChange, onOpenStudio, onBack, examNames }: StartProps) {
   const { paper } = detail;
   const start = usePaperStart({ scope, detail, uploads, onOpenStudio });
   const picker = useRef<HTMLInputElement>(null);
@@ -681,7 +694,7 @@ export function QuestionPaperStart({ scope, detail, canManage, uploads, earlierO
             closed={closed}
             onPick={() => picker.current?.click()}
             onCamera={() => setCameraOpen(true)}
-            onEarlier={() => onEarlierOpenChange(true)}
+            onEarlier={examNames ? () => onEarlierOpenChange(true) : null}
           />
           <UnusedPhotosNote start={start} pageCount={paper.pageCount} />
         </div>
@@ -696,17 +709,19 @@ export function QuestionPaperStart({ scope, detail, canManage, uploads, earlierO
         </p>
       ) : null}
       <CameraDialog open={cameraOpen} onOpenChange={setCameraOpen} onCapture={(file) => start.addFiles([file])} />
-      <EarlierPaperDialog
-        scope={scope}
-        className={paper.className}
-        subjectName={paper.subjectName}
-        open={earlierOpen && !closed}
-        onOpenChange={onEarlierOpenChange}
-        onChoose={(earlier) => {
-          start.chooseEarlier(earlier);
-          onEarlierOpenChange(false);
-        }}
-      />
+      {examNames && !isStandaloneTarget(scope) ? (
+        <EarlierPaperDialog
+          scope={scope}
+          className={examNames.className}
+          subjectName={examNames.subjectName}
+          open={earlierOpen && !closed}
+          onOpenChange={onEarlierOpenChange}
+          onChoose={(earlier) => {
+            start.chooseEarlier(earlier);
+            onEarlierOpenChange(false);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

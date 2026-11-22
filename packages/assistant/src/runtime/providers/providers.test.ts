@@ -17,7 +17,7 @@ import {
 const tool = (name: string, exposure: 'core' | 'advanced', readOnly: boolean): AssistantTool => ({
   source: 'mcp',
   modelName: name, mcpName: name.replace('_', '.'), title: 'Title', description: 'Description.',
-  inputSchema: { type: 'object', properties: {} }, readOnly, destructive: false, exposure, module: 'students', features: [],
+  inputSchema: { type: 'object', properties: {} }, schoolScoped: false, readOnly, destructive: false, exposure, module: 'students', features: [], schoolKinds: ['school'],
 });
 const facts = { schoolId: 's', schoolName: 'Maple', userName: 'U', userEmail: 'u@x', today: '2026-11-05', now: '2026-11-05T09:30:00+05:30' };
 const results = [
@@ -57,9 +57,11 @@ describe('anthropic adapter (must match the Claude-only build)', () => {
     // explained, may carry the text visible on the user's screen, and counts
     // as data entered by people. Then: questions about the screen are answered
     // from its visible text, with no tool call. Then: the block holds the
-    // whole page's text, with the part on screen marked.
+    // whole page's text, with the part on screen marked. Then: the facts block
+    // says the assistant fills in the conversation's schoolId, so the model
+    // never passes one (docs/personal-space.md).
     const system = JSON.stringify(buildAnthropicSystem(buildAssistantPrompt(facts)));
-    expect(createHash('sha256').update(system).digest('hex').slice(0, 16)).toMatchInlineSnapshot(`"7258a1f0d8fdb642"`);
+    expect(createHash('sha256').update(system).digest('hex').slice(0, 16)).toMatchInlineSnapshot(`"1bef68a94cbc1fbe"`);
   });
 
   it('defers advanced tools behind tool search and labels writes', () => {

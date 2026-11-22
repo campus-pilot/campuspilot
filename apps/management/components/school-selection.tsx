@@ -12,6 +12,7 @@ import { onboardingHref, onboardingPermissions } from './school-onboarding/onboa
 import { RequirePermissions } from './require-permissions';
 import { CreateSessionButton } from './session/create-session-button';
 import { storeSchoolSessionId } from './session-selection';
+import { landingSchoolOf, schoolEntryHrefOf } from './personal-space/personal-space-model';
 
 const ACTIVE_SCHOOL_KEY = 'campuspilot.management.activeSchoolId';
 
@@ -28,7 +29,7 @@ export function clearStoredSchoolId() {
   window.localStorage.removeItem(ACTIVE_SCHOOL_KEY);
 }
 
-function RouteAfterCommit({
+export function RouteAfterCommit({
   href,
   schoolId,
   sessionId,
@@ -111,10 +112,11 @@ export function SchoolAccessBoundary({
 
   const hasAccess = schoolsQuery.data.some((school) => school.id === schoolId);
   if (!hasAccess) {
-    const fallbackSchool = schoolsQuery.data[0];
+    // The same order as the entry page: a school before the personal space (docs/personal-space.md).
+    const fallbackSchool = landingSchoolOf(schoolsQuery.data, undefined);
     return fallbackSchool ? (
       <RouteAfterCommit
-        href={schoolHref(fallbackSchool.id)}
+        href={schoolEntryHrefOf(fallbackSchool)}
         schoolId={fallbackSchool.id}
       />
     ) : (
@@ -129,8 +131,9 @@ export function SchoolAccessBoundary({
   );
 }
 
-export function SchoolEntryRedirect({ schoolId }: { schoolId: string }) {
-  return <RouteAfterCommit href={schoolHref(schoolId)} schoolId={schoolId} />;
+/** Opens one of the user's schools: a school on its entry, a personal space on its papers. */
+export function SchoolEntryRedirect({ school }: { school: { id: string; kind: 'school' | 'personal' } }) {
+  return <RouteAfterCommit href={schoolEntryHrefOf(school)} schoolId={school.id} />;
 }
 
 /**

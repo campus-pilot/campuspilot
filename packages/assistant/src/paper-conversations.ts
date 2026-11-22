@@ -19,11 +19,11 @@ import { hasRunIn, paperKeyWhere, toConversationDto, type PaperKeyParts } from '
  */
 export async function listPaperConversations(
   db: AssistantExecutor,
-  input: { schoolId: string; paper: PaperKeyParts; page: number; pageSize: number },
+  input: { schoolId: string; paper: PaperKeyParts | { standalonePaperId: string }; page: number; pageSize: number },
 ): Promise<{ items: AssistantPaperConversationDto[]; totalItems: number }> {
   const where = and(
     eq(assistantConversationTable.schoolId, input.schoolId),
-    paperKeyWhere(input.paper),
+    'standalonePaperId' in input.paper ? eq(assistantConversationTable.standalonePaperId, input.paper.standalonePaperId) : paperKeyWhere(input.paper),
     isNull(assistantConversationTable.deletedAt),
   );
   const [rows, [total]] = await Promise.all([

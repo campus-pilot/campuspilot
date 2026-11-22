@@ -1,4 +1,5 @@
 import type { DatabaseExecutor, DatabaseTransaction } from '@campuspilot/db';
+import { examKeyPart } from '../question-paper/question-paper.records';
 import {
   examClassTable,
   examLifecycleTable,
@@ -205,7 +206,7 @@ async function removeExamClasses(tx: DatabaseTransaction, scope: ExamScope, clas
     )
     .limit(1);
   if (withPaper)
-    throw rpcError.badRequest(`${label(withPaper.classId)} has question papers in this examination. Delete them before removing the class.`);
+    throw rpcError.badRequest(`${label(examKeyPart(withPaper.classId))} has question papers in this examination. Delete them before removing the class.`);
   await dropTimetableColumns(tx, scope, classIds, label);
 
   const plans = await tx

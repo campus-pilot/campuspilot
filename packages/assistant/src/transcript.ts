@@ -47,6 +47,9 @@ export const isAttachmentMarker = (block: unknown): block is AttachmentMarker =>
  * the model then calls.
  */
 function seedText(seed: NonNullable<AssistantUserMessageBody['seed']>): string {
+  if (seed.kind === 'standalone_question_paper') {
+    return `<question_paper_context>\nstandalone paper: ${seed.paperId}.\nThe user is working on this question paper of their personal space. Read it with the getStandalonePaper tool.\n</question_paper_context>`;
+  }
   return `<question_paper_context>\nexam: ${seed.examSlug}; class: ${seed.classId}; subject: ${seed.subjectSlug}; mode: ${seed.modeSlug}; session: ${seed.sessionId}.\nThe user is working on this question paper. Read it with the getQuestionPaper tool.\n</question_paper_context>`;
 }
 

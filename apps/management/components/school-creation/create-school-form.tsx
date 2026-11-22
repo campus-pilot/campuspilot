@@ -51,7 +51,10 @@ function useCreateSchoolForm() {
         return;
       }
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: orpc.school.listMySchools.key() }),
+        // `all`: the list is read again even where no screen shows it now (this page sits outside a school), so the
+        // new school's access check finds it instead of the cached list without it, which would send the person to
+        // their personal space or the school picker instead.
+        queryClient.invalidateQueries({ queryKey: orpc.school.listMySchools.key(), refetchType: 'all' }),
         queryClient.invalidateQueries({ queryKey: orpc.schoolCreation.getStatus.key() }),
       ]);
       storeSchoolId(schoolId);

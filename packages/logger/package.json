@@ -9,7 +9,8 @@
       "default": "./src/node.ts"
     },
     "./hono": "./src/hono.ts",
-    "./perf": "./src/perf.ts"
+    "./perf": "./src/perf.ts",
+    "./error-facts": "./src/error-facts.ts"
   },
   "scripts": {
     "check-types": "tsc --noEmit",

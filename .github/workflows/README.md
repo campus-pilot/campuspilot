@@ -44,6 +44,7 @@ They are browser-public build settings embedded into frontend assets.
 | --- | --- | --- |
 | `NEXT_PUBLIC_SERVER_URL` | `campuspilot-plus-management`, `campuspilot-plus-admin`, `campuspilot-plus-cadet` | `https://api.campuspilot.in` |
 | `NEXT_PUBLIC_MCP_URL` | `campuspilot-plus-management`, `campuspilot-plus-admin` | `https://api.campuspilot.in/mcp` (must equal the server's `MCP_RESOURCE_URL`) |
+| `NEXT_PUBLIC_WEBSITE_URL` | `campuspilot-plus-management` | `https://campuspilot.in` (the public website; personal spaces link to its `/contact` page) |
 | `VITE_SERVER_URL` | `campuspilot-plus-web` | `https://api.campuspilot.in` |
 | `VITE_CONTACT_EMAIL` | `campuspilot-plus-web` | `shubhaman47@gmail.com` |
 | `VITE_CONTACT_PHONE_NUMBER` | `campuspilot-plus-web` | `+917209063639` |

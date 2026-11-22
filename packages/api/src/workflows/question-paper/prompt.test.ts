@@ -17,6 +17,8 @@ import {
   QUESTION_PAPER_JOB_REDRAW_SYSTEM_PROMPT,
   QUESTION_PAPER_JOB_SYSTEM_PROMPT,
   questionPaperJobSystemPrompt,
+  STANDALONE_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT,
+  STANDALONE_PAPER_JOB_SYSTEM_PROMPT,
   TEACHER_INSTRUCTIONS_END,
   TEACHER_INSTRUCTIONS_START,
   TEMPLATE_PRINTS_START,
@@ -208,5 +210,26 @@ describe("the teacher's instructions in the generation job prompt", () => {
     // Chat keeps placeholders for hand-drawn figures.
     expect(QUESTION_PAPER_GUIDE).toContain(QUESTION_PAPER_VOCABULARY_RULES);
     expect(QUESTION_PAPER_GUIDE).not.toContain('Never draw what the answer should be');
+  });
+});
+
+describe('the prompts of a standalone paper (docs/personal-space.md)', () => {
+  it('asks for the whole heading and the details block, with the same rules otherwise', () => {
+    const system = questionPaperJobSystemPrompt(null, { standalone: true });
+    expect(system).toBe(STANDALONE_PAPER_JOB_SYSTEM_PROMPT);
+    expect(system).toContain('```paper-details');
+    expect(system).toContain('Write the paper\'s whole heading yourself');
+    expect(system).toContain('NO ANIMATION, NO MOTION');
+    expect(questionPaperJobSystemPrompt('Make it easier', { standalone: true })).toBe(STANDALONE_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT);
+    expect(questionPaperJobSystemPrompt(null)).toBe(QUESTION_PAPER_JOB_SYSTEM_PROMPT);
+  });
+
+  it('sends no plan facts and empty template lines', () => {
+    const parts = buildGenerationParts({ kind: 'standalone', templatePrints: { above: [], below: [] } }, [{ mimeType: 'image/jpeg', data: new Uint8Array([1]) }]);
+    const first = parts[0] as { type: 'text'; text: string };
+    expect(first.text).not.toContain('Class:');
+    expect(first.text).toContain('belongs to no exam plan');
+    const last = parts.at(-1) as { type: 'text'; text: string };
+    expect(JSON.parse(last.text.split('\n')[1]!)).toEqual({ above: [], below: [] });
   });
 });

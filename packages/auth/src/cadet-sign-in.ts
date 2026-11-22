@@ -97,6 +97,8 @@ async function findCadetLogin(
     .where(
       and(
         eq(schoolTable.slug, schoolSlug),
+        // A personal space has no students and no Cadet Portal (docs/personal-space.md).
+        eq(schoolTable.kind, 'school'),
         eq(admissionTable.admissionNo, admissionNo),
       ),
     )

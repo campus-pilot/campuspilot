@@ -11,6 +11,7 @@ import { rpcError, rpcErrorResponse } from '../../../errors';
 import { parseImageUpload } from '../../../files/image-upload';
 import { assertPermission } from '../../../permissions/authorization';
 import { assertSchoolWritableByCaller } from '../../../school-access/school-access.service';
+import { assertSchoolKindServedByCaller, REAL_SCHOOLS_ONLY } from '../../../school-access/school-kind.service';
 import {
   MAX_SCHOOL_LOGO_BYTES,
   SCHOOL_LOGO_FIELD_NAME,
@@ -28,6 +29,8 @@ export async function handleSchoolLogoUpload(
 ): Promise<Response> {
   try {
     if (!schoolId) throw rpcError.badRequest('A school id is required.');
+    // A personal space has no logo of its own (docs/personal-space.md); held before the permission, as `requireAuth` does.
+    await assertSchoolKindServedByCaller(context, schoolId, REAL_SCHOOLS_ONLY);
     await assertPermission(context, {
       action: SCHOOL_ACTIONS.UPDATE_LOGO,
       resource: { kind: 'school', schoolId },

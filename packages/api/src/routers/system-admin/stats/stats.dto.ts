@@ -62,3 +62,31 @@ export const schoolStatsOutputSchema = z.object({
 });
 
 export type SchoolStatsDto = z.infer<typeof schoolStatsOutputSchema>;
+
+/**
+ * What a platform administrator sees about a personal space
+ * (docs/personal-space.md): its standalone papers and versions, what it
+ * stores against its quota, and its AI spend in the current spend window
+ * against the assistant's limit. A personal space has no staff, classes,
+ * sessions or students, so the school counts do not apply to it.
+ */
+export const personalSpaceStatsOutputSchema = z.object({
+  papers: countSchema,
+  versions: countSchema,
+  /** `personalSpaceStoredBytes`: page photos with their copies, figures and version PDFs. */
+  storedBytes: countSchema,
+  /** `PERSONAL_SPACE_STORAGE_QUOTA_BYTES`. */
+  storageQuotaBytes: countSchema,
+  aiSpend: z.object({
+    /** USD as decimal text, the sum of the window's model request costs. */
+    spentUsd: z.string(),
+    /** Whether the space's assistant settings are valid; when not, its limit is not known. */
+    settingsValid: z.boolean(),
+    /** The assistant's limit per window in USD; null when it has none (or its settings are not valid). */
+    monthlyLimitUsd: z.number().nullable(),
+    windowStart: z.date(),
+    windowEnd: z.date(),
+  }),
+});
+
+export type PersonalSpaceStatsDto = z.infer<typeof personalSpaceStatsOutputSchema>;

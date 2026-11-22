@@ -10,7 +10,7 @@ import {
   readAssistantRoleStates,
 } from '../../../assistant/roles';
 import { rpcError, toRpcError } from '../../../errors';
-import { protectedProcedure } from '../../../index';
+import { platformAdminProcedure } from '../../../index';
 import { requireSystemPermission } from '../../../permissions/system';
 
 /** The system admin router names the school `id`, like `getSchool`. */
@@ -42,7 +42,7 @@ export type SchoolAssistantRolesDto = z.infer<typeof schoolAssistantRolesDtoSche
  * every assistant setting.
  */
 export const assistantAccessRouter = {
-  getSchoolAssistantRoles: protectedProcedure
+  getSchoolAssistantRoles: platformAdminProcedure
     .route({
       summary: 'Get a school\'s assistant roles',
       description:
@@ -67,7 +67,7 @@ export const assistantAccessRouter = {
       }
     }),
 
-  updateSchoolAssistantRoles: protectedProcedure
+  updateSchoolAssistantRoles: platformAdminProcedure
     .route({
       summary: 'Update a school\'s assistant roles',
       description:

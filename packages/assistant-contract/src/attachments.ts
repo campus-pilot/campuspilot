@@ -182,7 +182,18 @@ export const questionPaperSeedSchema = z.object({
   subjectSlug: seedKeyPart,
   modeSlug: seedKeyPart,
 });
-export const assistantMessageSeedSchema = z.discriminatedUnion('kind', [questionPaperSeedSchema]);
+/**
+ * A standalone question paper of a personal space (docs/personal-space.md),
+ * by its id. Like an exam paper's seed, the send procedure resolves it against
+ * the school's own papers before anything is stored.
+ */
+export const standaloneQuestionPaperSeedSchema = z.object({
+  kind: z.literal('standalone_question_paper'),
+  paperId: seedKeyPart,
+});
+export type StandaloneQuestionPaperSeed = z.infer<typeof standaloneQuestionPaperSeedSchema>;
+
+export const assistantMessageSeedSchema = z.discriminatedUnion('kind', [questionPaperSeedSchema, standaloneQuestionPaperSeedSchema]);
 export type AssistantMessageSeed = z.infer<typeof assistantMessageSeedSchema>;
 export type QuestionPaperSeed = z.infer<typeof questionPaperSeedSchema>;
 

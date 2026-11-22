@@ -422,6 +422,36 @@ deliberate and must remain visible in future redesigns:
   feature, no footprint control (full A4). No default design is shipped; the body
   slot is placed exactly once.
 
+## Personal space decisions to preserve
+
+A personal space ([Personal space](../../../docs/personal-space.md)) is its
+own interface, not a school workspace with items hidden:
+
+- `PersonalSpaceShell`: no sidebar on any screen size; one bar with the
+  **Personal** label (a link to the papers), the school switcher and the
+  breadcrumbs (Papers › the paper, the back navigation) on the left, the trial
+  status and the user menu on the right. No command palette, notification
+  bell or voice launcher.
+- Its plan notice is inline under the bar (there is no app shell to hold an
+  `AppShellAlert`) and links the website's contact page in a new tab; it never
+  mentions billing or an administrator.
+- The papers list uses `TableSearchBar` and `TableFilterBar` over the compact
+  `DataTable`, like the admission table; its filters come from the papers'
+  own details. On a phone it keeps Subject (with class, exam and school as a
+  second line) and Status, leaving the other columns out with
+  `meta: { className: 'hidden sm:table-cell' }` on the column (a `DataTable`
+  column's `meta.className` applies to its header and cells), so the page
+  never scrolls sideways. A table that has to keep every column still scrolls
+  inside its own wrapper.
+- Switcher: no group is rendered without items (the schools group is left out
+  when the person has only a personal space).
+- A refused action in a personal space says why beside it; a read-only refusal
+  uses the space's trial wording with the contact link (`PersonalSpaceErrorText`).
+- The paper screen is the exam paper studio (`QuestionPaperStudio`,
+  `QuestionPaperStart`) with a standalone target (`paper-target.ts`); do not
+  fork it. What differs (no copy from an earlier paper, no template alert, the
+  details as the heading) is a prop of the shared screen, not a second screen.
+
 ## Corrections from the redesign
 
 | Earlier approach | Established direction |

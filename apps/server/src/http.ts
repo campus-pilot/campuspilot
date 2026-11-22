@@ -35,6 +35,11 @@ import {
   handleQuestionPaperPageStore,
   handleQuestionPaperPageUpload,
 } from '@campuspilot/api/routers/school/question-paper/question-paper.http';
+import {
+  handleStandalonePaperPageRead,
+  handleStandalonePaperPageStore,
+  handleStandalonePaperVersionPdfRead,
+} from '@campuspilot/api/routers/school/standalone-paper/standalone-paper.http';
 import { handleSchoolManifestBlob } from '@campuspilot/api/routers/school/manifest/manifest.blob';
 import { handleCadetManifestBlob } from '@campuspilot/api/routers/school/manifest/cadet-manifest.blob';
 import {
@@ -350,6 +355,46 @@ app.get(
     );
   },
 );
+
+/**
+ * Standalone question papers of a personal space (docs/personal-space.md):
+ * the same three routes as an exam paper's, keyed by the paper's id, with the
+ * same upload limit.
+ */
+const STANDALONE_PAPER_PATH = '/api/blob/schools/:schoolId/standalone-papers/:paperId';
+const standalonePaperRef = (context: { req: { param: (name: string) => string } }) => ({
+  schoolId: context.req.param('schoolId'),
+  paperId: context.req.param('paperId'),
+});
+
+app.post(`${STANDALONE_PAPER_PATH}/pages/:pageId`, questionPaperUploadRateLimit, async (context) => {
+  const ref = standalonePaperRef(context);
+  const pageId = context.req.param('pageId');
+  const apiContext = await createContext({ context });
+  return handleStandalonePaperPageStore(context.req.raw, apiContext, ref, pageId, (error) =>
+    reportUploadError(context.var.logger, 'standalone-paper.page.store.error', { ...ref, pageId }, error),
+  );
+});
+
+app.get(`${STANDALONE_PAPER_PATH}/pages/:pageId/:variant`, async (context) => {
+  const ref = standalonePaperRef(context);
+  const apiContext = await createContext({ context });
+  return handleStandalonePaperPageRead(
+    apiContext,
+    ref,
+    { pageId: context.req.param('pageId'), variant: context.req.param('variant') },
+    (error) => reportUploadError(context.var.logger, 'standalone-paper.page.read.error', ref, error),
+  );
+});
+
+app.get(`${STANDALONE_PAPER_PATH}/versions/:versionNo/pdf`, async (context) => {
+  const ref = standalonePaperRef(context);
+  const versionNo = context.req.param('versionNo');
+  const apiContext = await createContext({ context });
+  return handleStandalonePaperVersionPdfRead(apiContext, { ref, versionNo }, (error) =>
+    reportUploadError(context.var.logger, 'standalone-paper.version-pdf.read.error', { ...ref, versionNo }, error),
+  );
+});
 
 app.post('/api/blob/users/me/profile-image', async (context) => {
   const apiContext = await createContext({ context });

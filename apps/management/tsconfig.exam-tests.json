@@ -9,6 +9,8 @@
     "components/notices/**/*.tsx",
     "components/question-paper/**/*.ts",
     "components/question-paper/**/*.tsx",
+    "components/personal-space/personal-space-model.ts",
+    "components/personal-space/personal-space-model.test.ts",
     "components/school-creation/**/*.ts",
     "components/school-creation/**/*.tsx",
     "components/session/session-save-model.ts",

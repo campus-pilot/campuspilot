@@ -1,3 +1,5 @@
+import type { SchoolKind } from '@campuspilot/db/school-kind';
+
 /**
  * Explicit MCP facts every procedure declares through `.meta({ mcp })`.
  * Each fact is its own field: nothing is inferred from a procedure's name,
@@ -70,4 +72,23 @@ export type McpProcedureMeta = {
 export type ProcedureMeta = {
   /** Required on every appRouter leaf; the MCP catalog fails to build without it. */
   mcp?: McpProcedureMeta;
+  /**
+   * The kinds of school this procedure serves (docs/personal-space.md). An
+   * explicit fact, never inferred from the procedure's name or module.
+   * Without it the procedure serves real schools only (`DEFAULT_SCHOOL_KINDS`),
+   * so a new procedure is refused for a personal space until someone decides
+   * it belongs there. `requireAuth` enforces it for the input's `schoolId`,
+   * reads included; the MCP listing and the in-app assistant offer a tool only
+   * for the kinds it serves.
+   */
+  schoolKinds?: readonly SchoolKind[];
+  /**
+   * The procedure is platform administration: a platform administrator acts
+   * on a school from outside it (the admin app's `systemAdmin.*`). An explicit
+   * fact, set by `platformAdminProcedure`, never inferred from the
+   * procedure's path (a call through MCP or the assistant may carry none).
+   * Neither school gate of `requireAuth` holds it, it serves every kind of
+   * school, and it is never narrowed by kind in a listing.
+   */
+  platformAdministration?: true;
 };

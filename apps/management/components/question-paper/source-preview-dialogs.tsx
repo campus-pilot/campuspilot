@@ -15,7 +15,8 @@ import { ReadError } from '@/components/exam/exam-common';
 import { orpc } from '@/lib/orpc';
 import { questionPaperModelUrl, questionPaperOriginalUrl } from '@/lib/question-paper-pages';
 import { earlierPaperTitle } from './earlier-paper-dialog';
-import { pagePreviewFallback, pageTurnBlockedReason, turnedRotation, type PageRotation, type QuestionPaperScope } from './question-paper-model';
+import { pagePreviewFallback, pageTurnBlockedReason, turnedRotation, type PageRotation } from './question-paper-model';
+import type { PaperTarget } from './paper-target';
 import type { EarlierPaper } from './question-paper-start-model';
 import { useRefreshQuestionPaper } from './use-question-paper-detail';
 
@@ -59,7 +60,7 @@ export type PageTurning = {
  * cached redirect to the copy the turn deleted, and the fresh revision gives
  * a new URL; the image is keyed by it, so it loads again with its own alt.
  */
-function PageImage({ scope, page, turning, onLoadError }: { scope: QuestionPaperScope; page: PageView; turning: boolean; onLoadError: () => void }) {
+function PageImage({ scope, page, turning, onLoadError }: { scope: PaperTarget; page: PageView; turning: boolean; onLoadError: () => void }) {
   const ready = page.derivativeStatus === 'ready';
   return (
     <div aria-busy={turning} className="relative grid min-h-0 flex-1 place-items-center overflow-auto rounded-lg border bg-muted/40">
@@ -197,7 +198,7 @@ export function PagePreviewDialog({
   onRemove,
   turning,
 }: {
-  scope: QuestionPaperScope;
+  scope: PaperTarget;
   pages: readonly PageView[];
   /** The page shown; null closes the dialog. */
   pageId: string | null;

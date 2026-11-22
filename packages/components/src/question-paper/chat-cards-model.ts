@@ -73,7 +73,7 @@ export function parseStoredDraftResult(output: string | undefined, truncated: bo
   return wrapped.success ? wrapped.data : null;
 }
 
-const paperInputSchema = z.object({
+const examPaperInputSchema = z.object({
   schoolId: z.string(),
   sessionId: z.string(),
   examSlug: z.string(),
@@ -82,13 +82,32 @@ const paperInputSchema = z.object({
   modeSlug: z.string(),
   html: z.string(),
 });
-export type DraftCallInput = z.infer<typeof paperInputSchema>;
+/** A validate call of a standalone paper of a personal space (`validateStandalonePaperDraft`, docs/personal-space.md). */
+const standalonePaperInputSchema = z.object({
+  schoolId: z.string(),
+  paperId: z.string(),
+  html: z.string(),
+});
+/** An exam paper's validate call input. */
+export type ExamDraftCallInput = z.infer<typeof examPaperInputSchema>;
+/** A standalone paper's validate call input. */
+export type StandaloneDraftCallInput = z.infer<typeof standalonePaperInputSchema>;
+export type DraftCallInput = ExamDraftCallInput | StandaloneDraftCallInput;
+
+/** Whether a draft call (or a paper key) names a standalone paper: its own fact, the `paperId` the call was made with. */
+export const isStandaloneDraft = <T extends object>(input: T): input is Extract<T, { paperId: string }> =>
+  typeof (input as { paperId?: unknown }).paperId === 'string';
 
 /** The paper key and document a validate call was made with, or null if the stored input is not that. */
 export function parseDraftCallInput(input: unknown): DraftCallInput | null {
-  const parsed = paperInputSchema.safeParse(input);
+  const standalone = standalonePaperInputSchema.safeParse(input);
+  if (standalone.success) return standalone.data;
+  const parsed = examPaperInputSchema.safeParse(input);
   return parsed.success ? parsed.data : null;
 }
+
+/** Whether a tool call saves a whole paper by its html or draft id, of either kind. */
+const isSaveTool = (toolName: string) => toolName.endsWith('saveQuestionPaperVersion') || toolName.endsWith('saveStandalonePaperVersion');
 
 /**
  * The message the card's "Save as new version" sends (an explicit user command,
@@ -101,14 +120,17 @@ export function parseDraftCallInput(input: unknown): DraftCallInput | null {
 export const saveDraftMessage = (draftId: string, paperLabel: string) => `Save draft ${draftId} as a new version of ${paperLabel}.`;
 
 /** The paper key of a draft call as one comparable string, or null when the stored input is not a draft call. */
-function paperScopeOf(input: DraftCallInput | null): string | null {
-  return input ? JSON.stringify([input.sessionId, input.examSlug, input.classId, input.subjectSlug, input.modeSlug]) : null;
+function paperScopeOf(input: DraftPaperKey | null): string | null {
+  if (!input) return null;
+  if (isStandaloneDraft(input)) return JSON.stringify(['standalone', input.paperId]);
+  return JSON.stringify([input.sessionId, input.examSlug, input.classId, input.subjectSlug, input.modeSlug]);
 }
 
-/** The paper a `saveQuestionPaperVersion` call saved, by the same key as {@link paperScopeOf}; null when its input does not name one. */
+/** The paper a save call saved, by the same key as {@link paperScopeOf}; null when its input does not name one. */
 function savedPaperScopeOf(input: unknown): string | null {
   if (!input || typeof input !== 'object') return null;
   const key = input as Record<string, unknown>;
+  if (typeof key.paperId === 'string') return JSON.stringify(['standalone', key.paperId]);
   const parts = [key.sessionId, key.examSlug, key.classId, key.subjectSlug, key.modeSlug];
   return parts.every((part) => typeof part === 'string') ? JSON.stringify(parts) : null;
 }
@@ -172,8 +194,8 @@ export function draftOrdinalOf(rows: readonly AssistantTimelineRow[], draftId: s
   return null;
 }
 
-/** A paper's natural key, as the draft calls carry it. */
-export type DraftPaperKey = Pick<DraftCallInput, 'sessionId' | 'examSlug' | 'classId' | 'subjectSlug' | 'modeSlug'>;
+/** A paper as the draft calls name it: an exam paper's natural key, or a standalone paper's id. */
+export type DraftPaperKey = Pick<ExamDraftCallInput, 'sessionId' | 'examSlug' | 'classId' | 'subjectSlug' | 'modeSlug'> | Pick<StandaloneDraftCallInput, 'paperId'>;
 
 /** A ready draft of a paper that no version holds yet. */
 export type UnsavedDraft = {
@@ -207,7 +229,7 @@ export function unsavedDraftOf(
   paper: DraftPaperKey,
   verdicts: ReadonlyMap<string, DraftResult> = new Map(),
 ): UnsavedDraft | null {
-  const wanted = paperScopeOf({ schoolId: '', html: '', ...paper });
+  const wanted = paperScopeOf(paper);
   let ordinal = 0;
   let found: UnsavedDraft | null = null;
   const visit = (row: AssistantTimelineRow) => {
@@ -221,7 +243,7 @@ export function unsavedDraftOf(
       const calls = row.kind === 'approval' ? [row.call] : row.calls;
       // Only a save of this same paper settles its draft: the chat may have saved another paper meanwhile.
       const saved = (call: (typeof calls)[number]) =>
-        call.body.toolName.endsWith('saveQuestionPaperVersion') && call.status === 'succeeded' && savedPaperScopeOf(call.body.input) === wanted;
+        isSaveTool(call.body.toolName) && call.status === 'succeeded' && savedPaperScopeOf(call.body.input) === wanted;
       if (calls.some(saved)) found = null;
     } else if (row.kind === 'work') row.folded.forEach(visit);
   };
@@ -237,9 +259,9 @@ export function unsavedDraftOf(
  * alone, see {@link saveDraftMessage}).
  */
 export function draftSaved(rows: readonly AssistantTimelineRow[], paper: DraftPaperKey, draftId: string): boolean {
-  const wanted = paperScopeOf({ schoolId: '', html: '', ...paper });
+  const wanted = paperScopeOf(paper);
   const savedThis = (call: Extract<AssistantTimelineRow, { kind: 'approval' }>['call']) =>
-    call.body.toolName.endsWith('saveQuestionPaperVersion') &&
+    isSaveTool(call.body.toolName) &&
     call.status === 'succeeded' &&
     savedPaperScopeOf(call.body.input) === wanted &&
     (call.body.input as { draftId?: unknown } | null)?.draftId === draftId;
@@ -284,11 +306,11 @@ export function saveEventsOf(rows: readonly AssistantTimelineRow[]): DraftSaveEv
   const events: DraftSaveEvent[] = [];
   const visit = (row: AssistantTimelineRow) => {
     if (row.kind === 'user') events.push({ kind: 'message', text: row.item.body.text });
-    else if (row.kind === 'approval' && row.call.body.toolName.endsWith('saveQuestionPaperVersion')) {
+    else if (row.kind === 'approval' && isSaveTool(row.call.body.toolName)) {
       events.push({ kind: 'save-call', status: row.call.status });
     } else if (row.kind === 'activity') {
       for (const call of row.calls) {
-        if (call.body.toolName.endsWith('saveQuestionPaperVersion')) events.push({ kind: 'save-call', status: call.status });
+        if (isSaveTool(call.body.toolName)) events.push({ kind: 'save-call', status: call.status });
       }
     } else if (row.kind === 'work') row.folded.forEach(visit);
   };

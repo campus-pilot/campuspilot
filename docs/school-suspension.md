@@ -61,7 +61,9 @@ refused with its own error.
 
 Not affected: signing in and out, a person's own account (password, profile),
 and anything a platform administrator does through the `systemAdmin`
-procedures. Notifications already queued when the school is suspended still go
+procedures (decided from the procedure's explicit `platformAdministration`
+metadata, which `platformAdminProcedure` sets on every one of them, never from
+its path). Notifications already queued when the school is suspended still go
 out; nothing new is created, because creating one is a change.
 
 ### Who is held

@@ -6,7 +6,7 @@ import { SYSTEM_ACTIONS } from "@campuspilot/opa/policies/system";
 import { and, asc, count, desc, eq, ilike, isNotNull, isNull, or } from "drizzle-orm";
 
 import { toRpcError, rpcError } from "../../../errors";
-import { protectedProcedure } from "../../../index";
+import { platformAdminProcedure } from "../../../index";
 import {
   createNextPageCursor,
   createPaginatedResult,
@@ -25,6 +25,7 @@ import {
 } from "./school.dto";
 import { readSchoolDto, schoolRowToDto, selectSchoolsWithActivePeriod } from "./school.read";
 import { lockSchool, parseTrialEnd, startTrialPeriod } from "../../../billing/billing.service";
+import { readSchoolKind } from "../../../school-access/school-kind.service";
 
 /** The school as the admin DTO after a change; NOT_FOUND when it does not exist. */
 async function requireSchoolDto(db: Parameters<typeof readSchoolDto>[0], schoolId: string) {
@@ -34,7 +35,7 @@ async function requireSchoolDto(db: Parameters<typeof readSchoolDto>[0], schoolI
 }
 
 export const schoolRouter = {
-  listSchools: protectedProcedure
+  listSchools: platformAdminProcedure
     .route({
       summary: "List schools",
       description:
@@ -89,7 +90,8 @@ export const schoolRouter = {
             : input.filters.plan === "none"
               ? and(isNull(schoolTable.tier), isNull(schoolBillingPeriodTable.id))
               : eq(schoolBillingPeriodTable.kind, input.filters.plan);
-        const where = and(searchCondition, onboardingCondition, tierCondition, suspendedCondition, planCondition);
+        const kindCondition = input.filters?.kind === undefined ? undefined : eq(schoolTable.kind, input.filters.kind);
+        const where = and(searchCondition, onboardingCondition, tierCondition, suspendedCondition, planCondition, kindCondition);
         const orderByColumn = {
           name: schoolTable.name,
           location: schoolTable.location,
@@ -126,7 +128,7 @@ export const schoolRouter = {
       }
     }),
 
-  getSchool: protectedProcedure
+  getSchool: platformAdminProcedure
     .route({
       summary: "Get a school",
       description:
@@ -152,7 +154,7 @@ export const schoolRouter = {
       }
     }),
 
-  addSchool: protectedProcedure
+  addSchool: platformAdminProcedure
     .route({
       summary: "Create a school",
       description:
@@ -196,7 +198,7 @@ export const schoolRouter = {
       }
     }),
 
-  updateSchool: protectedProcedure
+  updateSchool: platformAdminProcedure
     .route({
       summary: "Update a school",
       description:
@@ -217,6 +219,10 @@ export const schoolRouter = {
     .handler(async ({ context, input }) => {
       const { id, ...changes } = input;
       try {
+        // A personal space has no location (docs/personal-space.md): it is never given one.
+        if (changes.location !== undefined && (await readSchoolKind(context.db, id)) === 'personal') {
+          throw rpcError.badRequest('A personal space has no location.');
+        }
         const [school] = await context.db
           .update(schoolTable)
           .set({ ...changes, updatedAt: new Date() })
@@ -229,7 +235,7 @@ export const schoolRouter = {
       }
     }),
 
-  suspendSchool: protectedProcedure
+  suspendSchool: platformAdminProcedure
     .route({
       summary: "Suspend a school",
       description:
@@ -279,7 +285,7 @@ export const schoolRouter = {
       }
     }),
 
-  unsuspendSchool: protectedProcedure
+  unsuspendSchool: platformAdminProcedure
     .route({
       summary: "Lift a school's suspension",
       description:
@@ -311,7 +317,7 @@ export const schoolRouter = {
       }
     }),
 
-  updateSchoolOwner: protectedProcedure
+  updateSchoolOwner: platformAdminProcedure
     .route({
       summary: "Change a school's owner",
       description:
@@ -336,6 +342,10 @@ export const schoolRouter = {
           // holds the row while it reads who owns the school, so the check and
           // the owner guards never pass on each other's stale view.
           await lockSchool(transaction, input.id);
+          // A personal space belongs to its person: its owner is never changed or cleared (docs/personal-space.md).
+          if ((await readSchoolKind(transaction, input.id)) === 'personal') {
+            throw rpcError.badRequest('The owner of a personal space cannot be changed.');
+          }
           if (input.ownerUserId !== null) {
             const [principal] = await transaction
               .select({ userId: schoolUserRoleTable.userId })
@@ -365,7 +375,7 @@ export const schoolRouter = {
       }
     }),
 
-  deleteSchool: protectedProcedure
+  deleteSchool: platformAdminProcedure
     .route({
       summary: "Delete a school",
       description:

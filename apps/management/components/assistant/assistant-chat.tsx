@@ -1,11 +1,12 @@
 'use client';
 
 import { useSchoolFeatureCheck } from '@/components/require-feature';
+import { standalonePaperLabelOf } from '@/components/question-paper/paper-target';
 import type { SchoolFeatureKey } from '@campuspilot/api/routers/school/feature-flags/feature-flags.dto';
 import {
   QUESTION_PAPER_SEED_DRAFT,
   type AssistantAttachmentRef,
-  type QuestionPaperSeed,
+  type AssistantMessageSeed,
 } from '@campuspilot/assistant-contract/attachments';
 import type { AssistantModelTier, AssistantSurface, AssistantToolCallItemDto, AssistantUserMessageItemDto, AssistantViewItemDto } from '@campuspilot/assistant-contract/dto';
 import {
@@ -142,7 +143,7 @@ export type AssistantChatProps = {
    * with a prefilled sentence and a removable chip, and nothing is sent until
    * the user sends (decision D31).
    */
-  seed?: QuestionPaperSeed | null;
+  seed?: AssistantMessageSeed | null;
   /** The user removed the seed's chip: start a plain conversation. */
   onSeedRemoved?: () => void;
   /**
@@ -196,12 +197,8 @@ const PRO_SUGGESTION_AFTER_MESSAGES = 3;
  * (a wrong link, no access) it says so and the seed is not sent
  * (`useSeedPaper`), so the chip never vouches for a paper that was not found.
  */
-function SeedChip({ paper, failed, onRemove }: { paper: { subjectName: string; modeName: string; className: string; examName: string } | undefined; failed: boolean; onRemove: () => void }) {
-  const label = failed
-    ? 'This question paper could not be opened'
-    : paper
-      ? `${paper.subjectName} (${paper.modeName}), ${paper.className}, ${paper.examName}`
-      : 'Question paper';
+function SeedChip({ paperLabel, failed, onRemove }: { paperLabel: string | undefined; failed: boolean; onRemove: () => void }) {
+  const label = failed ? 'This question paper could not be opened' : (paperLabel ?? 'Question paper');
   return <AssistantContextChip label={label} onRemove={onRemove} />;
 }
 
@@ -210,13 +207,29 @@ function SeedChip({ paper, failed, onRemove }: { paper: { subjectName: string; m
  * (not found, or the person may not see it) makes the seed unusable: the
  * conversation then starts plain, without the seed text in the model's context.
  */
-function useSeedPaper(schoolId: string, seed: QuestionPaperSeed | null) {
-  const detail = useQuery({
-    ...orpc.school.getQuestionPaperDetail.queryOptions({ input: seed ? { ...seed, schoolId } : skipToken }),
+function useSeedPaper(schoolId: string, seed: AssistantMessageSeed | null) {
+  const examSeed = seed?.kind === 'question_paper' ? seed : null;
+  const standaloneSeed = seed?.kind === 'standalone_question_paper' ? seed : null;
+  // A standalone paper (docs/personal-space.md) is read by its id; it names itself by its details.
+  const standalone = useQuery({
+    ...orpc.school.getStandalonePaperDetail.queryOptions({ input: standaloneSeed ? { schoolId, paperId: standaloneSeed.paperId } : skipToken }),
     retry: false,
   });
+  const detail = useQuery({
+    ...orpc.school.getQuestionPaperDetail.queryOptions({ input: examSeed ? { ...examSeed, schoolId } : skipToken }),
+    retry: false,
+  });
+  if (standaloneSeed) {
+    const failedStandalone = seedFailedOf({ hasSeed: true, hasData: standalone.data !== undefined, isError: standalone.isError });
+    return {
+      paperLabel: standalone.data ? standalonePaperLabelOf(standalone.data.paper.details) : undefined,
+      failed: failedStandalone,
+      usableSeed: failedStandalone ? null : seed,
+    };
+  }
   const failed = seedFailedOf({ hasSeed: seed !== null, hasData: detail.data !== undefined, isError: detail.isError });
-  return { paper: detail.data?.paper, failed, usableSeed: failed ? null : seed };
+  const paper = detail.data?.paper;
+  return { paperLabel: paper ? `${paper.subjectName} (${paper.modeName}), ${paper.className}, ${paper.examName}` : undefined, failed, usableSeed: failed ? null : seed };
 }
 
 function ReplyRow({
@@ -692,7 +705,7 @@ export function AssistantChat({
     shareWithPaper && canWrite && tier === 'standard' && !proSuggestionDismissed && modelTier.userMessages >= PRO_SUGGESTION_AFTER_MESSAGES ? (
       <AssistantProSuggestion onUsePro={() => setPickedTier('pro')} onDismiss={() => setProSuggestionDismissed(true)} />
     ) : null;
-  const seedChip = activeSeed && onSeedRemoved ? <SeedChip paper={seedPaper.paper} failed={seedPaper.failed} onRemove={removeSeed} /> : null;
+  const seedChip = activeSeed && onSeedRemoved ? <SeedChip paperLabel={seedPaper.paperLabel} failed={seedPaper.failed} onRemove={removeSeed} /> : null;
   // Null when there is nothing to show: the composer draws its request sections only then.
   const requests =
     seedChip || proSuggestion ? (

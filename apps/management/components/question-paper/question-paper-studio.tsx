@@ -17,7 +17,6 @@ import { cn } from '@campuspilot/ui/lib/utils';
 import { AssistantChat } from '@/components/assistant/assistant-chat';
 import { DraftPreviewBody } from '@/components/assistant/assistant-question-paper';
 import { useSendAssistantMessage } from '@/components/assistant/use-assistant';
-import { orpc } from '@/lib/orpc';
 import {
   assistantCollapsedOf,
   canCompareOf,
@@ -26,9 +25,9 @@ import {
   inFlightJob,
   requestErrorMessage,
   shownPaperOf,
-  type QuestionPaperScope,
   type ShownPaper,
 } from './question-paper-model';
+import { paperPreviewQueryOptions, type PaperTarget } from './paper-target';
 import { PAPER_ASSISTANT_SURFACE, paperSeedOf, usePaperDraft, type PaperDraft } from './use-paper-assistant';
 import { PaperChatHistoryDialog } from './paper-chat-history';
 import { PaperPhotoCompare } from './paper-photo-compare';
@@ -149,7 +148,7 @@ function PaperAssistant({
   draftOrdinal,
   onChat,
 }: {
-  scope: QuestionPaperScope;
+  scope: PaperTarget;
   chatId: string | null;
   /** Why this user may read the paper's conversation but not write in it; null when they may write (and start new ones). */
   readOnlyReason: string | null;
@@ -307,8 +306,8 @@ function PaperStage({ photos, children }: { photos: ReactNode; children: ReactNo
  * placeholders. The notes come from the version's HTML preview; while they
  * load, or if they cannot be read, the paper shows without them.
  */
-function SavedVersion({ scope, versionNo }: { scope: QuestionPaperScope; versionNo: number }) {
-  const notes = useQuery(orpc.school.getQuestionPaperPreview.queryOptions({ input: { ...scope, versionNo } }));
+function SavedVersion({ scope, versionNo }: { scope: PaperTarget; versionNo: number }) {
+  const notes = useQuery(paperPreviewQueryOptions(scope, versionNo));
   return (
     <>
       <PaperNotes>
@@ -363,7 +362,7 @@ function UnsavedDraft({
   onSave,
   saving,
 }: {
-  scope: QuestionPaperScope;
+  scope: PaperTarget;
   chatId: string;
   draft: PaperDraft;
   nextVersionNo: number;
@@ -432,7 +431,7 @@ function PaperToolbar({
   sources,
   compare,
 }: {
-  scope: QuestionPaperScope;
+  scope: PaperTarget;
   detail: QuestionPaperDetail;
   shown: ShownPaper;
   draft: PaperDraft | null;
@@ -470,7 +469,7 @@ function PaperToolbar({
           disabled={download.isPending}
           onClick={() =>
             download.mutate(
-              { ...scope, versionNo: version.versionNo },
+              { target: scope, versionNo: version.versionNo },
               { onError: (error) => toast.error(requestErrorMessage(error, 'The PDF could not be prepared.')) },
             )
           }
@@ -561,9 +560,12 @@ export function QuestionPaperStudio({
   onCompare,
   onOpenPhotos,
   onOpenSources,
+  paperLabel,
 }: {
-  scope: QuestionPaperScope;
+  scope: PaperTarget;
   detail: QuestionPaperDetail;
+  /** How the paper is named in the request that saves a draft (`saveDraftMessage`): the same words the chat's draft card uses. */
+  paperLabel: string;
   canManage: boolean;
   /** The paper's conversation, from the address; null when none was started yet. */
   chatId: string | null;
@@ -597,7 +599,7 @@ export function QuestionPaperStudio({
   // How the user left the assistant, and whether they opened it again during a comparison: two facts, so ending the comparison needs no restoring.
   const [assistantCollapsed, setAssistantCollapsed] = useState(false);
   const [assistantShownWhileComparing, setAssistantShownWhileComparing] = useState(false);
-  const chatDraft = usePaperDraft(scope, showAssistant ? chatId : null, detail.paper);
+  const chatDraft = usePaperDraft(scope, showAssistant ? chatId : null, paperLabel);
   const draft = chatDraft && draftIsNewest(chatDraft.writtenAt, detail.versions) ? chatDraft : null;
   const { send, isPending: saving } = useSendAssistantMessage(scope.schoolId, PAPER_ASSISTANT_SURFACE);
   const shown = shownPaperOf(versionParam, detail.versions.map((version) => version.versionNo), draft !== null);

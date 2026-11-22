@@ -2,6 +2,7 @@ import type {
   Role,
   RoleMeta,
 } from '@campuspilot/db/schema/jsonb/role';
+import type { SchoolKind } from '@campuspilot/db/school-kind';
 import { z } from 'zod';
 
 import { getOpaClient, type OpaClient } from './client';
@@ -25,7 +26,13 @@ export type PlatformRoleAssignment = {
 
 export type SchoolRoleAssignment = {
   role: `school.${Role}`;
-  scope: { kind: 'school'; schoolId: string };
+  /**
+   * Where the assignment is valid: its school, with that school's kind
+   * (`school.kind`), which the policy reads for the actions that exist only
+   * in a personal space (`personal_space_actions` in
+   * `policies/school/permissions.rego`).
+   */
+  scope: { kind: 'school'; schoolId: string; schoolKind: SchoolKind };
   meta: RoleMeta | null;
 };
 
