@@ -42,6 +42,14 @@ declare module 'vitest' {
   }
 }
 
+/** A container whose root file system is read-only (Testcontainers has no builder method for it; `hostConfig` is its documented extension point). */
+class ReadOnlyContainer extends GenericContainer {
+  constructor(image: string) {
+    super(image);
+    this.hostConfig.ReadonlyRootfs = true;
+  }
+}
+
 let postgresContainer: StartedPostgreSqlContainer | undefined;
 let redisContainer: StartedRedisContainer | undefined;
 let opaContainer: StartedTestContainer | undefined;
@@ -149,9 +157,12 @@ export default async function setup(project: TestProject) {
         .withExposedPorts(3000)
         .withWaitStrategy(Wait.forHttp('/health', 3000))
         .start(),
-      // The Word (.docx) converter: Pandoc's sandboxed HTTP server, as in docker/dev/compose.yml.
-      new GenericContainer('pandoc/core:3.6.4')
-        .withCommand(['server', '--port=3030', '--timeout=25'])
+      // The Word (.docx) converter: Pandoc's sandboxed HTTP server, run as in docker/dev/compose.yml (unprivileged,
+      // read-only, its heap capped below the container's memory).
+      new ReadOnlyContainer('pandoc/core:3.6.4')
+        .withCommand(['server', '--port=3030', '--timeout=25', '+RTS', '-M1024m', '-RTS'])
+        .withUser('65534:65534')
+        .withResourcesQuota({ memory: 1.25 })
         .withExposedPorts(3030)
         .withWaitStrategy(Wait.forHttp('/version', 3030))
         .start(),

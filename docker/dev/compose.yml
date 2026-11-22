@@ -52,8 +52,9 @@ services:
     command: ['server', '--port=3030', '--timeout=25', '+RTS', '-M1024m', '-RTS']
     user: '65534:65534'
     read_only: true
+    mem_limit: 1280m
     ports:
-      - '8783:3030'
+      - '127.0.0.1:8783:3030'
     restart: unless-stopped
 
   redis:
