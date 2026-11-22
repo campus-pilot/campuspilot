@@ -158,6 +158,18 @@ export type DemoQuestionPaper = {
   savedAt: string;
 };
 
+/**
+ * One quick paper the demo writes (a standalone paper of the school, in the
+ * demo's session), with the details its template prints and dated from `asOf`.
+ */
+export type DemoQuickPaper = {
+  key: string;
+  example: DemoSeed['questionPapers']['quickPapers'][number]['example'];
+  details: { schoolName: string; className: string; subjectName: string; examName: string; maxMarks: number };
+  /** When version 1 was saved (ISO instant, before `asOf`); the paper is created then too. */
+  savedAt: string;
+};
+
 export type DemoPlan = {
   schoolSlug: string;
   schoolName: string;
@@ -174,6 +186,7 @@ export type DemoPlan = {
   billingMonths: BillingMonth[];
   notices: DemoNotice[];
   questionPapers: DemoQuestionPaper[];
+  quickPapers: DemoQuickPaper[];
 };
 
 function personName(random: ReturnType<typeof createRandom>, gender: Gender, pool: 'child' | 'adult', surname?: string) {
@@ -406,6 +419,27 @@ function buildQuestionPapers(classes: DemoClass[], exams: DemoExam[], asOfLocal:
 }
 
 /**
+ * The demo's quick papers, each named after a placed class (the seniormost or
+ * juniormost of the chosen ones) and the demo school. A demo always has a
+ * class, so every quick paper is planned.
+ */
+function buildQuickPapers(classes: DemoClass[], schoolName: string, asOfLocal: LocalDate, timeZone: string): DemoQuickPaper[] {
+  const { localHours, quickPapers } = demoSeed.questionPapers;
+  return quickPapers.flatMap((paper) => {
+    const placed = paper.classFrom === 'seniormost' ? classes.at(-1) : classes[0];
+    if (!placed) return [];
+    return [
+      {
+        key: paper.key,
+        example: paper.example,
+        details: { schoolName, className: placed.seed.label, subjectName: paper.subjectName, examName: paper.examName, maxMarks: paper.maxMarks },
+        savedAt: localTimeInstant(addDays(asOfLocal, -paper.savedDaysAgo), localHours.saved, 0, timeZone),
+      },
+    ];
+  });
+}
+
+/**
  * The complete, deterministic demo plan for `(input, seed, asOf)`. It is pure,
  * so every workflow step can rebuild it instead of journaling it; only IDs and
  * counts travel through the Restate journal.
@@ -442,6 +476,7 @@ export function buildDemoPlan(options: {
     billingMonths: months,
     notices: buildNotices(selected, asOfLocal, timeZone),
     questionPapers: buildQuestionPapers(plannedClasses, plannedExams, asOfLocal, timeZone),
+    quickPapers: buildQuickPapers(plannedClasses, school.name, asOfLocal, timeZone),
   };
 }
 

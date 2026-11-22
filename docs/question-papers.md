@@ -105,9 +105,120 @@ The management app mirrors this: the Question paper tab, its marketplace card an
 its settings page exist only when the `assistant` feature is on and (for the tab)
 the user's role may use it. While the answer is loading the tab is absent and
 Results stays the default (`useAssistantGate`). The sidebar's **Question papers** entry
-and the command palette's **Question papers** command follow the same gates, each its own
-fact: `READ_EXAMS`, `READ_EXAM_PLANS` and the assistant (`AssistantAccess`); the sidebar
-entry is also left out while no session is selected (see "Ways into the tab").
+and the command palette's **Question papers** command open the Question papers page
+and follow its gates, each its own fact: either paper permission (`READ_EXAM_PLANS` or
+`READ_STANDALONE_PAPERS`, `mode="any"`) and the assistant (`AssistantAccess`); the
+sidebar entry is also left out while no session is selected (see "The Question papers
+page").
+
+## Quick papers in a school
+
+A real school can write a question paper that belongs to no examination: a **quick
+paper**. It is a standalone paper (`exam_question_paper.kind = 'standalone'`) of a
+school of kind `school`, the same paper a personal space holds ([Personal
+space](personal-space.md)), with the same procedures, upload routes, generation job,
+chat tools and screen. "Quick paper" is the product's word everywhere a person reads
+it; "standalone" is the code's.
+
+What differs from a personal space's paper is each its own fact of the paper, set once
+by `createStandalonePaper` from the school's kind and never changed:
+
+| Fact | Personal space | School (quick paper) |
+| --- | --- | --- |
+| `print_layout` | `plain`: the built-in shell, the AI writes the whole heading | `school_template`: the school's selected question paper template prints the heading, as for an exam paper; the AI writes the body only, leaving out every line the template prints (`templatePrints`) |
+| `session_id` | null | the session it was created in (`createStandalonePaper` takes `sessionId`, required in a school, refused in a personal space); its template prints the session's years |
+| Version template | none (`template_revision_id` null) | the template revision it printed with, pinned (CHECK on `paper_print_layout`, held equal to the paper's by a composite foreign key) |
+
+Migration `0083_school-quick-papers.sql` added `print_layout` (and the version's
+`paper_print_layout`), the fifth detail `details_max_marks` (a whole number from 1 to
+10,000, null when the paper states none), and the CHECKs: an exam paper is always
+`school_template`; a standalone paper's `session_id` is set exactly when it is
+`school_template`. Existing standalone papers (all a personal space's) became `plain`.
+
+**Printing.** A quick paper's template context (`buildQuickPaperContext`,
+`question-paper.context.ts`; `buildPaperContext` chooses per paper) has the school as
+every document, the session's years, and the paper's details for the exam name, class,
+subject and `maxMarks`; a quick paper has no exam slug, order, subject slug or mode, so
+those are empty, never invented. The marketplace designs print the mode and the footer's
+exam name only when there is one. A save prints the details it is about to store. What
+the template prints for a quick paper (`readTemplatePrints`) is rendered with its current
+details and a placeholder for each it does not state yet (`withDetailPlaceholders`:
+`[class]`, `[subject]`, `[examination]`, `[maximum marks]`), so a line a template prints
+only for a known value (`{{#if questionPaper.maxMarks}}`) still shows and the author does
+not print the marks a second time. Generating and saving need a selected template
+(PRECONDITION_FAILED otherwise, `templateConfigured` on the paper's screen, with the same
+template warning as an exam paper's).
+
+**The job and chat.** The job uses a third set of prompts (`QUICK_PAPER_JOB_*` in
+`prompt.ts`, chosen by `questionPaperJobSystemPrompt` with `standalone` and
+`schoolTemplate`): the exam paper's template section (with what the placeholders mean)
+and the standalone paper's details block, which now carries `maxMarks`. The chat guide
+(`STANDALONE_QUESTION_PAPER_GUIDE`) covers both layouts from `templatePrints`: both lists
+empty, a plain page and the whole heading; lines, the school's template. Every save sends
+all five details.
+
+**Who reaches which paper.** `school.standalone_paper.read` and `.manage` are granted to
+the principal, manager, exam coordinator and teacher (not the accountant), in both kinds
+of school. They cover the papers the person created (`created_by`). The new action
+`school.standalone_paper.oversee`, granted to the principal, manager and exam
+coordinator, covers every standalone paper of the school. The two decisions are read
+apart (`StandalonePaperReach`, `standalonePaperReachOf`): `resolveStandalonePaper`
+answers NOT_FOUND for a paper the caller does not reach, exactly as for an unknown id, so
+an id reveals nothing; the lists and filter values leave such papers out; a paper whose
+creator was deleted is reached through `oversee` only. The assistant's conversations
+shared with a standalone paper follow the same rule (`mayReachStandalonePaper` in
+`packages/assistant/src/conversation-access.ts`), and so does a chat's seed.
+`createStandalonePaper` reuses only the caller's own unused paper in the same session.
+The trusted generation job reads its paper with `findStandalonePaperScope` (no reach
+check: the start procedure checked it).
+
+**No limits of a personal space.** A school has any number of quick papers and versions,
+and no save rate or storage quota: the personal space limits (`personal-space.limits.ts`)
+are decided by the school's kind (`readSchoolKind`). A quick paper is held to what an
+exam paper is: the school's AI limit to start a generation, at most
+`QUESTION_PAPER_MAX_RUNNING_JOBS_PER_SCHOOL` generations at once (shared with exam
+papers), and the per-paper bounds (20 photos, 40 printed pages, `QUESTION_PAPER_LIMITS`).
+
+**Only with AI.** Every quick paper procedure and route has the assistant gate
+(`requireQuestionPaperAssistantAccess`): the school's `assistant` feature and the
+caller's role. A school without AI has no quick papers, no Question papers entry and no
+page.
+
+**Demo schools.** A demo seeds two quick papers (`quickPapers` in
+`seed/question-papers.json`, `seedQuickPaper`), idempotent on the details they state in
+the session; the purge needs nothing new (the same tables).
+
+## The Question papers page
+
+`/school/{schoolId}/sessions/{sessionId}/question-papers` (management, the session's
+page like Notices): the session's exam papers and quick papers in one compact table
+(`SchoolQuestionPaperList`), with `TableSearchBar` and `TableFilterBar`, server
+pagination, most recently changed first (`updated_at`). A quick paper opens at
+`.../question-papers/{paperId}` (`StandalonePaperWorkspace`, the personal space's screen
+with the address it lives at); an exam paper opens its own screen in its examination.
+**Create question paper** creates a quick paper in the session.
+
+- **Procedures**: `listSchoolQuestionPapers` and `listSchoolQuestionPaperFilterOptions`
+  (`question-paper.school-list.router.ts`), real schools only, hidden from MCP. Checked in
+  order: either paper permission (`READ_EXAM_PLANS` or `READ_STANDALONE_PAPERS`;
+  FORBIDDEN with neither), the assistant gate, then each kind on its own grant: exam
+  papers of the classes the caller may read (`class.exam.question_paper.read`, one OPA
+  round for the session's classes with papers), quick papers they reach. One SQL query
+  names, filters, orders and pages both kinds: an exam paper's names from its session's
+  exam configuration and its class (label, subject and mode names), a quick paper's from
+  its details.
+- **Filters**: Type (Quick papers, Exam papers; the page opens on Quick papers), Status
+  (Generated, Not generated yet), Exam, Class and Subject (names exactly as the rows show
+  them). Without a Status, every quick paper is listed and an exam paper only once it has a
+  version: an exam's papers appear by themselves from its work, so the empty ones stay out
+  of the default view, while a quick paper was created on purpose and must not vanish while
+  its first generation runs. Exam plans that never got a paper row are never listed (they
+  start from the examination).
+- **Columns**: Paper (subject, with the mode of an exam paper), Class, Exam, Type, Created
+  by, Status (`cellStatus`) and Updated; a phone keeps Paper (with type, class and exam
+  under it) and Status.
+- **Gates in the app**: the sidebar entry, the palette command and the page wait for
+  either paper permission and the assistant, as the procedures.
 
 ## Data model
 
@@ -500,34 +611,14 @@ accordion, and three ways lead straight to one class.
 - **Coming back from a paper.** A paper's *Question paper* breadcrumb, and the redirect after
   deleting a paper, go to the tab with that paper's class open (`questionPaperReturnHref`),
   so moving from one paper of a class to the next never starts from an all-collapsed list.
-- **The sidebar entry** (`question-paper-nav.tsx` in `apps/management/components/question-paper`,
-  presentational parts in `packages/components/src/question-paper/question-paper-nav.tsx`). Under
-  Examinations in the Academics group, an `AppShellNavigationDisclosure`: pressing it folds open
-  the selected session's examinations (`useAllExams`, the session's exam order; completed ones
-  stay, marked "Completed"). An examination without a plan (`planCount` from `listExams`, the
-  fact the exam workspace shows its Question paper tab by) is listed disabled, "No plan yet",
-  since it has no tab and no papers; one with a plan folds open to its classes (`listQuestionPapers`
-  with the tab's own input, so the tab opens on the cached list). Classes are a cmdk list with a
-  search box that matches class names only. Choosing one asks the navigation guard, closes the
-  mobile sheet and goes to the tab with `?class=` (`questionPaperClassHref`). Each list shows
-  loading, empty ("No examinations in this session", "No classes you can open") and read-error
-  states with a retry. The last row, *Add examination*, opens the session's settings page,
-  where examinations are configured today (adding them from the Examinations list is CAM-6).
-  It is shown only when that page would let the person add one, each fact checked on its
-  own: `READ_SESSION` (the page), `UPDATE_SESSION` (`updateSession`), `UPDATE_EXAM`
-  (`updateSession` refuses to change the session's exam definitions without it) and the
-  session being active (`getSession`; only the active session can be updated, an inactive
-  one opens read-only). A fold was chosen over popovers so the same steps
-  work in the desktop sidebar and the mobile sheet; the shell's sidebar collapses off-canvas,
-  never to icons. The entry is highlighted on the Question paper section
-  (`isQuestionPaperSectionPath`), and Examinations is not highlighted there.
-- **The command palette.** The search-only *Question papers* command (same gates) opens a
-  picker in the palette: an examination, then a class, with a back control and the palette's
-  search filtering each step (`question-paper-palette.tsx`, `rankByQuery`,
-  `pickerEmptyMessage`). An examination without a plan is listed disabled, "No plan yet"
-  (`examPickerDescription`), so "No classes you can open" is said only of an examination
-  with a plan whose classes the person may not open. Choosing a class lands on the tab
-  with `?class=`.
+- **The Question papers page.** The sidebar's *Question papers* entry and the command
+  palette's *Question papers* command both open the session's Question papers page (see
+  "The Question papers page" below), which lists the session's exam papers with the quick
+  papers. A row of an exam paper opens that paper's screen in its examination. The
+  sidebar entry once folded open to the examinations and their classes, and the palette
+  command opened an exam-then-class picker; both were replaced by the page (the user asked
+  for one plain entry that shows the papers). An exam's own Question paper pages are under
+  Examinations again.
 
 ## The paper's screen
 
@@ -1283,7 +1374,7 @@ changed by writing it again and validating it.
 | What the template prints around a paper | `question-paper.template-prints.ts` (reading), `QUESTION_PAPER_TEMPLATE_PRINTS_RULES` in `packages/question-paper/src/guide.ts` (the rule), `prompt.ts` (the job's part) |
 | Model call (providers, plain text) | `packages/assistant/src/question-paper-model.ts`, `providers/*` (`generateText`) |
 | Chat contract, cards | `packages/assistant-contract`, `packages/components/src/question-paper/chat-cards.tsx` |
-| Management UI | `apps/management/components/question-paper` (`question-paper-page.tsx` the tab with its accordion and mode filter, `mode-filter-store.ts` the stored filter, `question-paper-list-model.ts` its rules, `question-paper-nav.tsx` the sidebar entry, `question-paper-palette.tsx` the palette picker, `question-paper-workspace.tsx` decides the view, `question-paper-start.tsx` the first screen with its rules in `question-paper-start-model.ts`, `earlier-paper-dialog.tsx` the earlier-paper picker, `source-preview-dialogs.tsx` the page viewer and the earlier paper's preview, `question-paper-studio.tsx` the paper beside its assistant, `use-paper-assistant.ts` the paper's conversation), `packages/components/src/question-paper`, routes under `exam/[examSlug]/question-paper` |
+| Management UI | `apps/management/components/question-paper` (`question-paper-page.tsx` the tab with its accordion and mode filter, `mode-filter-store.ts` the stored filter, `question-paper-list-model.ts` its rules, `school-question-paper-list.tsx` the school's Question papers page with its rules in `school-question-papers-model.ts`, `standalone-paper-workspace.tsx` a quick paper's (and a personal space paper's) screen, `question-paper-workspace.tsx` decides the view, `question-paper-start.tsx` the first screen with its rules in `question-paper-start-model.ts`, `earlier-paper-dialog.tsx` the earlier-paper picker, `source-preview-dialogs.tsx` the page viewer and the earlier paper's preview, `question-paper-studio.tsx` the paper beside its assistant, `use-paper-assistant.ts` the paper's conversation), `packages/components/src/question-paper`, routes under `exam/[examSlug]/question-paper` |
 | Demo seed | `packages/api/src/workflows/demo-school` (`seed/question-papers.json`, `seedQuestionPaper`) |
 
 ## Demo schools
@@ -1366,11 +1457,13 @@ modes to work with without further seed data.
   revision, permission, HEIC, a running generation), the generation workflow with a scripted model, the sweep, the demo seed and the
   demo purge. The pages integration test replaces the workflow engine's sender with a failing
   fake, so it passes with or without a Restate running next to the database.
-- The tab, the sidebar entry and the palette picker: `pnpm --filter @campuspilot/components
-  test` (`question-paper-model.test.ts` for the mode options, filter, summary and `class`
-  parsing; `question-paper-nav.test.tsx` for the sidebar lists and the accordion;
-  `app-shell.test.tsx` for the disclosure entry) and `pnpm --filter management test`
-  (`question-paper-list-model.test.ts`: the address, the stored filter, the picker).
+- The tab: `pnpm --filter @campuspilot/components test` (`question-paper-model.test.ts` for
+  the mode options, filter, summary and `class` parsing; `question-paper-class-accordion.test.tsx`
+  for the accordion) and `pnpm --filter management test` (`question-paper-list-model.test.ts`:
+  the address and the stored filter).
+- Quick papers and the Question papers page: `quick-paper.integration.test.ts`,
+  `question-paper.school-list.integration.test.ts`, the OPA suite
+  (`standalone_paper_test.rego`) and the quick prompts in `prompt.test.ts`.
 - Providers and chat: `pnpm --filter @campuspilot/assistant exec vitest run --project unit`
   and `--project integration` (text requests, attachments, the model's context).
 - `apps/server`: `src/mcp-catalog.test.ts`, `src/mcp.test.ts` (tool counts, approval,

@@ -153,7 +153,7 @@ describe('standalone question paper Word downloads', () => {
       paperId,
       expectedVersionNo: 0,
       html: ENGLISH_SCIENCE,
-      details: { schoolName: 'Sunrise Public School', className: 'Class 8', subjectName: 'Science', examName: 'Half Yearly Examination' },
+      details: { schoolName: 'Sunrise Public School', className: 'Class 8', subjectName: 'Science', examName: 'Half Yearly Examination', maxMarks: null },
     });
     const pdf = await client.school.getStandalonePaperDownload({ schoolId, paperId, versionNo: 1 });
     expect(pdf.fileName).toBe('Science_Class 8_Half Yearly Examination_v1.pdf');

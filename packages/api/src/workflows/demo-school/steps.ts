@@ -39,9 +39,10 @@ import { handleAdmissionPhotoUpload } from '../../routers/school/admission/admis
 import { DOCUMENT_MARKETPLACE } from '../../routers/school/document/document.catalog';
 import type { DocumentType } from '../../routers/school/document/document.dto';
 import { saveTemplate } from '../../routers/school/document/document.router';
-import { findPaper, pagesOf } from '../../routers/school/question-paper/question-paper.records';
+import { findPaper, findPaperOf, pagesOf } from '../../routers/school/question-paper/question-paper.records';
 import { selectedQuestionPaperTemplate } from '../../routers/school/question-paper/question-paper.render';
-import { resolvePaperScope } from '../../routers/school/question-paper/question-paper.scope';
+import { findStandalonePaperScope, resolvePaperScope } from '../../routers/school/question-paper/question-paper.scope';
+import { createStandalonePaper } from '../../routers/school/standalone-paper/standalone-paper.service';
 import { addQuestionPaperPage, releaseQuestionPaperPage } from '../../routers/school/question-paper/question-paper.service';
 import { processPageDerivatives } from '../image-derivatives/process';
 import { saveQuestionPaperVersion } from '../../routers/school/question-paper/question-paper.version.service';
@@ -60,6 +61,7 @@ import {
   type DemoExam,
   type DemoNotice,
   type DemoQuestionPaper,
+  type DemoQuickPaper,
   type DemoPlan,
   type DemoStaffMember,
   type DemoStudent,
@@ -963,6 +965,63 @@ export async function seedQuestionPaper(
   }
   await backdateDemoQuestionPaper({ schoolId: ctx.schoolId, paperId: row.id }, paper);
   return { paperId: row.id, pages: paper.pages.length, versionNo: row.latestVersionNo };
+}
+
+/**
+ * Writes one planned quick paper (docs/question-papers.md "Quick papers in a
+ * school"): a standalone paper of the demo's session, created by the seed's
+ * user (as every seeded paper), with version 1 (a built-in example) and the planned details,
+ * printed with the school's template. Like {@link seedQuestionPaper} it calls
+ * the service functions (the demo keeps the assistant off) and calls no model.
+ *
+ * Idempotent on its natural key, the details it states (subject and exam) in
+ * the session, by the same creator: a paper that already states them is not
+ * written again. A crash after the paper was created but before its version
+ * left an unused paper, which `createStandalonePaper` hands back on the
+ * replay instead of creating another. The upload is fenced like every demo
+ * object, and the dates are set from the plan afterwards.
+ */
+export async function seedQuickPaper(ctx: SeedContext, input: { sessionId: string; paper: DemoQuickPaper }): Promise<{ paperId: string; versionNo: number }> {
+  const { paper } = input;
+  const userId = ctx.context.session!.user.id;
+  const [stated] = await db
+    .select({ id: examQuestionPaperTable.id })
+    .from(examQuestionPaperTable)
+    .where(
+      and(
+        eq(examQuestionPaperTable.schoolId, ctx.schoolId),
+        eq(examQuestionPaperTable.sessionId, input.sessionId),
+        eq(examQuestionPaperTable.kind, 'standalone'),
+        eq(examQuestionPaperTable.createdBy, userId),
+        eq(examQuestionPaperTable.detailsSubjectName, paper.details.subjectName),
+        eq(examQuestionPaperTable.detailsExamName, paper.details.examName),
+      ),
+    )
+    .limit(1);
+  const paperId = stated?.id ?? (await createStandalonePaper(db, { schoolId: ctx.schoolId, userId, sessionId: input.sessionId })).paperId;
+  const scope = await findStandalonePaperScope(db, { schoolId: ctx.schoolId, paperId });
+  let row = (await findPaperOf(db, scope))!;
+  if (row.latestVersionNo < 1) {
+    const html: string = QUESTION_PAPER_EXAMPLES[paper.example satisfies keyof typeof QUESTION_PAPER_EXAMPLES];
+    const saved = await saveQuestionPaperVersion(db, {
+      scope,
+      userId,
+      expectedVersionNo: 0,
+      html,
+      source: { kind: 'agent', conversationId: null },
+      details: paper.details,
+    });
+    const [version] = await db
+      .select({ pdfArtifactId: examQuestionPaperVersionTable.pdfArtifactId })
+      .from(examQuestionPaperVersionTable)
+      .where(and(eq(examQuestionPaperVersionTable.paperId, saved.paperId), eq(examQuestionPaperVersionTable.versionNo, saved.versionNo)))
+      .limit(1);
+    const [artifact] = version?.pdfArtifactId ? await db.select({ s3Key: artifactTable.s3Key }).from(artifactTable).where(eq(artifactTable.id, version.pdfArtifactId)).limit(1) : [];
+    await assertUploadsKept(ctx.jobId, ctx.schoolId, [artifact?.s3Key ?? '']);
+    row = (await findPaperOf(db, scope))!;
+  }
+  await backdateDemoQuestionPaper({ schoolId: ctx.schoolId, paperId }, { uploadedAt: paper.savedAt, savedAt: paper.savedAt });
+  return { paperId, versionNo: row.latestVersionNo };
 }
 
 /**

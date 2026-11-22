@@ -5,7 +5,9 @@ import {
   EMPTY_QUESTION_PAPER_DETAILS,
   normalizeQuestionPaperDetail,
   normalizeQuestionPaperDetails,
+  normalizeQuestionPaperMaxMarks,
   QUESTION_PAPER_DETAIL_MAX_CHARS,
+  QUESTION_PAPER_DETAIL_MAX_MARKS,
   splitQuestionPaperDetails,
 } from './details';
 
@@ -25,6 +27,19 @@ describe('normalizeQuestionPaperDetail', () => {
   });
 });
 
+describe('normalizeQuestionPaperMaxMarks', () => {
+  it('keeps a whole number in bounds, given as a number or as text that is only that number', () => {
+    expect(normalizeQuestionPaperMaxMarks(80)).toBe(80);
+    expect(normalizeQuestionPaperMaxMarks(' 80 ')).toBe(80);
+    expect(normalizeQuestionPaperMaxMarks(QUESTION_PAPER_DETAIL_MAX_MARKS)).toBe(QUESTION_PAPER_DETAIL_MAX_MARKS);
+  });
+  it('treats anything else as not stated, never refusing', () => {
+    for (const value of [0, -5, 2.5, QUESTION_PAPER_DETAIL_MAX_MARKS + 1, '80 marks', '2.5', '', null, undefined, Number.NaN, '1e3']) {
+      expect(normalizeQuestionPaperMaxMarks(value)).toBeNull();
+    }
+  });
+});
+
 describe('normalizeQuestionPaperDetails', () => {
   it('ignores unknown keys and non-objects', () => {
     expect(normalizeQuestionPaperDetails({ schoolName: 'St. Mary', extra: 'x' })).toEqual({ ...EMPTY_QUESTION_PAPER_DETAILS, schoolName: 'St. Mary' });
@@ -37,7 +52,7 @@ describe('splitQuestionPaperDetails', () => {
   it('reads the details block and removes it from the answer', () => {
     const answer = `${html}\n\n\`\`\`paper-details\n{"schoolName":"Sunrise School","className":"Class 3","subjectName":"Maths","examName":"Half yearly"}\n\`\`\``;
     const split = splitQuestionPaperDetails(answer);
-    expect(split.details).toEqual({ schoolName: 'Sunrise School', className: 'Class 3', subjectName: 'Maths', examName: 'Half yearly' });
+    expect(split.details).toEqual({ schoolName: 'Sunrise School', className: 'Class 3', subjectName: 'Maths', examName: 'Half yearly', maxMarks: null });
     expect(extractQuestionPaperFragment(split.text)).toBe(html);
   });
   it('keeps a fenced html block as the fragment', () => {

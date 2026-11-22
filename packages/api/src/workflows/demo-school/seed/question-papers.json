@@ -29,5 +29,25 @@
         { "fileName": "mathematics-paper-page-2.png", "lines": 18, "figureBox": false }
       ]
     }
+  ],
+  "quickPapers": [
+    {
+      "key": "quick-science-unit-test",
+      "example": "english-science",
+      "subjectName": "Science",
+      "examName": "Unit Test 1",
+      "maxMarks": 20,
+      "classFrom": "seniormost",
+      "savedDaysAgo": 3
+    },
+    {
+      "key": "quick-mathematics-weekly-test",
+      "example": "hindi-maths",
+      "subjectName": "Mathematics",
+      "examName": "Weekly Test",
+      "maxMarks": 25,
+      "classFrom": "juniormost",
+      "savedDaysAgo": 1
+    }
   ]
 }

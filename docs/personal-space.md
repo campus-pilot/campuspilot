@@ -6,8 +6,10 @@ writes the whole printed paper, heading included. It is a school of kind
 `personal`, so billing, the trial, the AI limit, storage, OPA and the
 read-only gate all work exactly as for a school. It holds only **standalone
 question papers**: papers with no session, examination, class, subject or
-mode, and no school template. Real schools are not changed: they have no
-standalone papers.
+mode, and no school template. A real school has standalone papers too, its
+**quick papers**, which print with the school's template and belong to a
+session: see [Question papers, "Quick papers in a school"](question-papers.md#quick-papers-in-a-school),
+which also records who reaches which paper (`oversee`) for both kinds.
 
 This guide is the canonical reference. Read it before changing who gets a
 personal space, the school kind gate, standalone papers (their procedures,
@@ -26,9 +28,10 @@ and `0080_personal-space-limits.sql`):
 | One per person | partial unique index `school_personal_owner_unique` on `owner_user_id` where `kind = 'personal'` | At most one live personal space per owner (a backstop; `personal_space_created_at` is the rule). |
 | Not a demo | CHECK `school_personal_not_demo_check` | A demo school is never a personal space. |
 | Paper kind | `exam_question_paper.kind` (`exam` \| `standalone`, default `exam`) | An exam paper keyed by its plan, or a standalone paper. Never changed. |
-| Exam key | `session_id`, `exam_slug`, `class_id`, `subject_slug`, `mode_slug` (nullable) | All set for an exam paper, all null for a standalone one (CHECK `exam_question_paper_kind_key_check`). The unique key is unchanged: NULLs never collide. Code that reads an exam paper's key from a row uses `examKeyPart` (a null there is a broken row). |
-| Paper details | `details_school_name`, `details_class_name`, `details_subject_name`, `details_exam_name` (nullable text, at most 160 characters each) | What a standalone paper prints about its school, class, subject and examination. Always null for an exam paper (same CHECK). **Not revisioned**: every saved version overwrites all four in the save's own transaction with the details that save supplied. |
-| Version template | `exam_question_paper_version.template_revision_id` (nullable) and `paper_kind` | Null exactly for a version of a standalone paper (CHECK `exam_question_paper_version_template_check`); `paper_kind` is held equal to the paper's kind by the composite foreign key `(paper_id, paper_kind)` to `exam_question_paper (id, kind)`. |
+| Exam key | `session_id`, `exam_slug`, `class_id`, `subject_slug`, `mode_slug` (nullable) | All set for an exam paper; the last four null for a standalone one, whose `session_id` is set exactly when it prints with the school's template (a school's quick paper) and null in a personal space (CHECK `exam_question_paper_kind_key_check`). The unique key is unchanged: NULLs never collide. Code that reads an exam paper's key from a row uses `examKeyPart` (a null there is a broken row). |
+| Print layout | `exam_question_paper.print_layout` (`school_template` \| `plain`) | `plain` for every paper of a personal space (the built-in shell), `school_template` for an exam paper and a school's quick paper. Set by `createStandalonePaper` from the school's kind and never changed (migration 0083). |
+| Paper details | `details_school_name`, `details_class_name`, `details_subject_name`, `details_exam_name` (nullable text, at most 160 characters each), `details_max_marks` (nullable whole number, 1 to 10,000) | What a standalone paper states about its school, class, subject, examination and maximum marks. Always null for an exam paper (same CHECK). **Not revisioned**: every saved version overwrites all five in the save's own transaction with the details that save supplied. |
+| Version template | `exam_question_paper_version.template_revision_id` (nullable), `paper_kind` and `paper_print_layout` | Null exactly for a version of a `plain` paper (CHECK `exam_question_paper_version_template_check`); `paper_kind` and `paper_print_layout` are held equal to the paper's by the composite foreign keys `(paper_id, paper_kind)` and `(paper_id, paper_print_layout)`. |
 | Thumbnail size | `exam_question_paper_page.thumb_byte_size` (nullable) | The stored thumbnail's bytes, written with `thumb_s3_key` by the worker and by a page turn, so the storage quota adds stored sizes instead of estimating (CHECK `exam_question_paper_page_thumb_size_check`). Null for thumbnails made before the column (exam papers only). |
 | Shared conversation | `assistant_conversation.standalone_paper_id` | The standalone paper a conversation started on its screen is shared with. A plain value without a foreign key (like the exam paper key); never set together with the exam paper key (CHECK). Deleting the paper clears it. |
 
@@ -111,7 +114,9 @@ ownerless personal space, so deleting a user is never blocked by it.
 
 A personal space is free and becomes read-only when its trial ends, and
 read-only means nothing can be deleted either, so its size and its printing
-are bounded by named limits (`packages/api/src/personal-space/personal-space.limits.ts`,
+are bounded by named limits. Every one of them is decided by the school's kind
+(`readSchoolKind`): a real school's quick papers have none of them, like its
+exam papers (see [Question papers](question-papers.md#quick-papers-in-a-school)) (`packages/api/src/personal-space/personal-space.limits.ts`,
 checked by `personal-space.storage.ts`). Each refusal has its own
 `data.reason` (`PERSONAL_SPACE_LIMIT_REASONS`, `personalSpaceLimitOf`) and a
 message the person reads next to the action (`PERSONAL_SPACE_LIMIT_MESSAGES`).
@@ -200,15 +205,15 @@ school of a kind the procedure does not serve is refused, **reads included**.
   learns nothing. Unlike the read-only gate, non-members are held too: a
   platform administrator's grants must not write real-school data into a
   personal space.
-- Standalone paper permissions exist only in a personal space. OPA grants
-  `school.standalone_paper.read` and `.manage` (to the principal) only for an
-  assignment whose school is of kind `personal`
-  (`personal_space_actions` in `packages/opa/src/policies/school/permissions.rego`):
-  `checkPermissions` reads each role row's school kind in the same query and
-  passes it as `scope.schoolKind`; an assignment without it is not granted
-  them. The assistant's conversation access (`mayReachConversation`,
-  `assertMayManageStandalonePaper` in `packages/assistant/src/conversation-access.ts`)
-  also checks the school's kind itself before the permission.
+- Standalone paper permissions exist in both kinds of school since quick
+  papers: OPA grants `school.standalone_paper.read` and `.manage` to the
+  principal (the role a personal space's owner holds), manager, exam
+  coordinator and teacher, and `.oversee` to the principal, manager and exam
+  coordinator, whatever the school's kind. `checkPermissions` still reads each
+  role row's school kind and passes it as `scope.schoolKind`; no policy reads
+  it today. The assistant's conversation access (`mayReachConversation`,
+  `mayReachStandalonePaper` in `packages/assistant/src/conversation-access.ts`)
+  checks the permission and that the user reaches the paper.
 - Platform administration is not held (the admin app renews a personal
   space's trial with the ordinary Billing card). It is an explicit fact of the
   procedure, `meta.platformAdministration` (`platformAdminProcedure` in
@@ -229,13 +234,15 @@ read-only facts only for a write.
 
 Upload routes outside oRPC hold the same rule with the kinds they serve:
 admissions, the school logo and exam question paper pages are
-`REAL_SCHOOLS_ONLY`; the standalone paper routes are `PERSONAL_SPACES_ONLY`;
+`REAL_SCHOOLS_ONLY`; the standalone paper routes are `EVERY_SCHOOL_KIND`
+(a personal space's papers and a school's quick papers);
 assistant attachments serve both (the assistant service is not kind-gated; its
 tools are).
 
 What serves personal spaces today (`school-kind.integration.test.ts` lists it
-and fails on any other declaration): `school.getFeatureFlags` (both kinds) and
-every standalone paper procedure (`personal` only). `school.listMySchools`,
+and fails on any other declaration): `school.getFeatureFlags` and every
+standalone paper procedure, all of them serving both kinds (a real school's
+standalone papers are its quick papers). `school.listMySchools`,
 `authorization.checkPermissions`, `personalSpace.*` and `schoolCreation.*`
 take no `schoolId`, so the gate does not apply to them.
 
@@ -283,12 +290,13 @@ clients and the assistant call them directly
 - HTTP: `POST/GET /api/blob/schools/:schoolId/standalone-papers/:paperId/pages/:pageId[/:variant]`
   and `GET .../versions/:versionNo/pdf` (`standalone-paper.http.ts`).
 
-Permission order: the school kind (`requireAuth`), the school permission
-`school.standalone_paper.read` or `.manage` (granted to the principal, the
-role a personal space's owner holds; `packages/opa`), then the assistant gate
-(`requireQuestionPaperAssistantAccess`; starting a generation also needs the
-school under its AI limit). There is no session, lifecycle or template
-requirement. There is no copy from an earlier paper (that is a feature of a
+Permission order: the school kind (`requireAuth`, both kinds), the school
+permission `school.standalone_paper.read` or `.manage` (`packages/opa`), then
+the assistant gate (`requireQuestionPaperAssistantAccess`; starting a
+generation also needs the school under its AI limit), then the paper, which
+the caller must reach: their own, or any with `school.standalone_paper.oversee`
+(`resolveStandalonePaper`, NOT_FOUND otherwise). There is no lifecycle
+requirement; a school's quick paper needs the school's template to print. There is no copy from an earlier paper (that is a feature of a
 class and subject).
 
 ### Rendering
@@ -386,7 +394,8 @@ saves always state all four.
   BAD_REQUEST and asks to delete some. An unused paper is deleted from its
   menu; nothing hides or prunes papers. The filter values are read behind the same gates as the list and
   read again after every change to a paper and every delete.
-- The paper page (`StandalonePaperWorkspace`) is the exam paper studio:
+- The paper page (`StandalonePaperWorkspace`, `components/question-paper`,
+  shared with a school's quick papers, which pass their own address) is the exam paper studio:
   photos, generate, chat, versions, preview and download, fed by the
   standalone procedures through `components/question-paper/paper-target.ts`,
   the one place that maps a paper of either kind to its procedures, upload
