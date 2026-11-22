@@ -278,7 +278,7 @@ describe('class subjects added from an examination', () => {
     it('plans only the chosen subjects at generation', async () => {
       await examOnly(term, class6, 'gk');
       expect(await generate(term, [class6, class7], { [class6]: ['gk'] })).toEqual({ createdCount: 2 });
-      expect(await planKeys(term)).toEqual([`${class6}:gk:draft`, `${class7}:maths:draft`]);
+      expect(await planKeys(term)).toEqual([`${class6}:gk:draft`, `${class7}:maths:draft`].sort());
     });
 
     it('refuses a choice naming a subject of another exam, none at all, or a class that does not join', async () => {
@@ -300,7 +300,7 @@ describe('class subjects added from an examination', () => {
         subjects: { [class7]: ['gk'] },
       });
       expect(result.createdPlanCount).toBe(1);
-      expect(await planKeys(term)).toEqual([`${class6}:maths:draft`, `${class7}:gk:draft`]);
+      expect(await planKeys(term)).toEqual([`${class6}:maths:draft`, `${class7}:gk:draft`].sort());
     });
   });
 
@@ -443,7 +443,7 @@ describe('class subjects added from an examination', () => {
       // Left out of `subjects`, a class keeps its plans.
       const preview2 = await principal.school.getExamPlanPreview(term);
       await principal.school.updateExamClasses({ ...term, configurationVersion: preview2.configurationVersion, classIds: [class6, class7] });
-      expect(await planKeys(term)).toEqual([`${class6}:art:draft`, `${class7}:maths:draft`]);
+      expect(await planKeys(term)).toEqual([`${class6}:art:draft`, `${class7}:maths:draft`].sort());
     });
 
     it('opens a plan added after the start for result entry', async () => {
@@ -554,7 +554,7 @@ describe('class subjects added from an examination', () => {
       await expect(change(term, [class6, class7], undefined, { canCreate: false, canDelete: true })).rejects.toMatchObject({ code: 'FORBIDDEN' });
       await expect(change(term, [class6], { [class6]: ['maths', 'art'] }, { canCreate: false, canDelete: true })).rejects.toMatchObject({ code: 'FORBIDDEN' });
       await change(term, [class6, class7], { [class6]: ['maths', 'art'] }, { canCreate: true, canDelete: false });
-      expect(await planKeys(term)).toEqual([`${class6}:art:draft`, `${class6}:maths:draft`, `${class7}:maths:draft`]);
+      expect(await planKeys(term)).toEqual([`${class6}:art:draft`, `${class6}:maths:draft`, `${class7}:maths:draft`].sort());
       await expect(change(term, [class6, class7], { [class6]: ['art'] }, { canCreate: true, canDelete: false })).rejects.toMatchObject({ code: 'FORBIDDEN' });
       await expect(change(term, [class6], undefined, { canCreate: true, canDelete: false })).rejects.toMatchObject({ code: 'FORBIDDEN' });
       // Removing a class and a subject with the grant works, under the usual guards.
