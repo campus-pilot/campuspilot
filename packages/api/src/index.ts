@@ -5,6 +5,7 @@ import { rpcError } from "./errors";
 import type { ProcedureMeta } from "./mcp-metadata";
 import { assistantToolDecision } from "./assistant/tool-policy";
 import { assertSchoolWritableByCaller } from "./school-access/school-access.service";
+import { assertSchoolKindServedByCaller, servedSchoolKinds } from "./school-access/school-kind.service";
 import {
   MCP_READ_SCOPE,
   MCP_WRITE_SCOPE,
@@ -104,12 +105,38 @@ async function assertSchoolWritableForWrite(
   await assertSchoolWritableByCaller(context, schoolId.trim());
 }
 
+/**
+ * The school kind gate (docs/personal-space.md): a procedure serves the kinds
+ * of school its `schoolKinds` names (real schools only when it names none),
+ * and a call whose input's `schoolId` names a school of another kind is
+ * refused, reads included (`school-kind.service.ts`). Here, beside the
+ * read-only gate and for the same reason: a new procedure is covered without
+ * anyone remembering, whichever way it is reached. The school is read from the
+ * input exactly as the read-only gate reads it. Platform administration is not
+ * held.
+ */
+async function assertSchoolKindServed(
+  context: Context,
+  meta: ProcedureMeta,
+  path: readonly string[],
+  input: unknown,
+) {
+  if (path[0] === "systemAdmin") return;
+  const schoolId =
+    typeof input === "object" && input !== null
+      ? (input as Record<string, unknown>).schoolId
+      : undefined;
+  if (typeof schoolId !== "string") return;
+  await assertSchoolKindServedByCaller(context, schoolId.trim(), servedSchoolKinds(meta.schoolKinds));
+}
+
 const requireAuth = o.middleware(async ({ context, next, procedure, path }, input) => {
   if (!context.session?.user) {
     throw rpcError.unauthorized();
   }
   assertOAuthScope(context, procedure["~orpc"].meta);
   assertAssistantToolPolicy(context, procedure["~orpc"].meta, input);
+  await assertSchoolKindServed(context, procedure["~orpc"].meta, path, input);
   await assertSchoolWritableForWrite(context, procedure["~orpc"].meta, path, input);
   return next({
     context: {

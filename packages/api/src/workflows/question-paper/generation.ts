@@ -4,6 +4,7 @@ import { db as defaultDb, type Database } from '@campuspilot/db';
 import { examQuestionPaperJobTable, examQuestionPaperPageTable, examQuestionPaperTable, examQuestionPaperVersionTable } from '@campuspilot/db/schema/exam-question-paper';
 import { env } from '@campuspilot/env/assistant';
 import { withTimingScope } from '@campuspilot/logger/perf';
+import { splitQuestionPaperDetails, type QuestionPaperDetails } from '@campuspilot/question-paper/details';
 import { extractQuestionPaperFragment, hasPaperContent, questionPaperFragmentShapeProblem } from '@campuspilot/question-paper/fragment';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 
@@ -13,7 +14,17 @@ import { readSchoolWriteFacts, resolveSchoolWriteRefusal } from '../../school-ac
 import type { PaperKey, TemplatePrints } from '../../routers/school/question-paper/question-paper.dto';
 import { hasSelectedQuestionPaperTemplate } from '../../routers/school/question-paper/question-paper.render';
 import { readTemplatePrints } from '../../routers/school/question-paper/question-paper.template-prints';
-import { assertPaperWritable, isPaperLockedError, isPlanModeRemovedError, resolvePaperScope, type PaperScope } from '../../routers/school/question-paper/question-paper.scope';
+import {
+  assertPaperWritable,
+  isPaperLockedError,
+  isPlanModeRemovedError,
+  isStandalonePaper,
+  resolvePaperScope,
+  resolveStandalonePaper,
+  type ResolvedPaper,
+} from '../../routers/school/question-paper/question-paper.scope';
+import { examKeyPart } from '../../routers/school/question-paper/question-paper.records';
+import { STANDALONE_QUESTION_PAPER_PRINTS } from '../../routers/school/question-paper/question-paper.standalone-shell';
 import { pageNotReadyMessage, unreadablePageMessage } from '../../routers/school/question-paper/question-paper.service';
 import { getObjectBytes } from '../../routers/school/question-paper/question-paper.storage';
 import { renameReservedClasses } from '../../routers/school/question-paper/question-paper.sanitize';
@@ -113,7 +124,23 @@ export function defaultGenerationDeps(): GenerationDeps {
  * a replay sends exactly the text the first run read. A journal written before
  * the field existed has no `instructions`; read it through {@link instructionsOf}.
  */
-type BegunJob = { key: PaperKey; paperId: string; schoolId: string; requestedBy: string; pageIds: string[]; instructions?: string | null };
+type BegunJob = {
+  /** The exam paper's key; null for a standalone paper, which has none. */
+  key: PaperKey | null;
+  /**
+   * The paper's kind (docs/personal-space.md). A journal written before
+   * standalone papers existed has none: that job is an exam paper's.
+   */
+  paperKind?: 'exam' | 'standalone';
+  paperId: string;
+  schoolId: string;
+  requestedBy: string;
+  pageIds: string[];
+  instructions?: string | null;
+};
+
+/** Whether a begun job writes a standalone paper (absent kind: an exam paper, journaled before the kind existed). */
+const isStandaloneJob = (begun: BegunJob): boolean => begun.paperKind === 'standalone';
 
 /** The job's instructions, null for none (also for a begin step journaled before they existed: such a job had none). */
 const instructionsOf = (begun: BegunJob): string | null => begun.instructions ?? null;
@@ -127,7 +154,7 @@ type PlannedPage = { id: string; position: number; name: string; key: string; mi
  * A journal written before the field existed has none; read it through
  * {@link templatePrintsOfPlan}.
  */
-type Plan = { scope: PaperScope; pages: PlannedPage[]; templatePrints?: TemplatePrints | null };
+type Plan = { scope: ResolvedPaper; pages: PlannedPage[]; templatePrints?: TemplatePrints | null };
 
 /** The plan's template lines, null for not known (also for an inputs step journaled before they existed). */
 const templatePrintsOfPlan = (plan: Plan): TemplatePrints | null => plan.templatePrints ?? null;
@@ -144,7 +171,12 @@ type ModelAnswer = Pick<TextResult, 'text' | 'usage' | 'answeredModel' | 'refusa
 
 /** The outcome of checking an answer: the fragment to save, or the problems to repair. */
 type Validation =
-  | { ok: true; html: string }
+  /**
+   * `details`: what a standalone paper's answer said about the paper
+   * (`paper-details` block), with `detailsFound` false when it had none; both
+   * absent for an exam paper.
+   */
+  | { ok: true; html: string; details?: QuestionPaperDetails; detailsFound?: boolean }
   /** `rejected`: the answer is a refusal or chatter, not a paper to repair (the job fails as `model_rejected`). */
   | { ok: false; html: string; problems: string[]; rejected?: true };
 
@@ -248,6 +280,8 @@ export async function runQuestionPaperGeneration(
     if (first.unfinished) throw new QuestionPaperJobFailure('output_too_long', undefined, 'The answer stopped on the output limit.');
 
     let validation = await run('validate:1', () => validateAnswer(deps, plan, first.text));
+    // The details of the first answer, for a repaired answer that leaves its details block out.
+    const firstDetails = validation.ok ? undefined : detailsOfAnswer(plan, first.text);
     if (!validation.ok && validation.rejected) {
       throw new QuestionPaperJobFailure('model_rejected', undefined, `The model answered without an HTML fragment: ${validation.html.slice(0, 200)}`);
     }
@@ -263,7 +297,7 @@ export async function runQuestionPaperGeneration(
         begun,
         plan,
         n: 2,
-        parts: buildRepairParts(validation.html, validation.problems, { instructed: instructionsOf(begun) !== null }),
+        parts: buildRepairParts(validation.html, validation.problems, { instructed: instructionsOf(begun) !== null, standalone: isStandalonePaper(plan.scope) }),
       });
       if (repair.refusal) throw new QuestionPaperJobFailure('model_rejected', undefined, 'The model declined the repair request.');
       if (repair.unfinished) throw new QuestionPaperJobFailure('output_too_long', undefined, 'The repaired answer stopped on the output limit.');
@@ -277,7 +311,8 @@ export async function runQuestionPaperGeneration(
     }
 
     phase = 'save';
-    const saved = await run('save', () => savePaper(deps, input, begun, plan, validation.html), { maxRetryAttempts: 4 });
+    const details = isStandalonePaper(plan.scope) ? savedDetails(validation, firstDetails) : undefined;
+    const saved = await run('save', () => savePaper(deps, input, begun, plan, validation.html, details), { maxRetryAttempts: 4 });
     await run('succeed', () => markSucceeded(deps, input));
     return { status: 'succeeded', versionNo: saved.versionNo };
   } catch (error) {
@@ -287,6 +322,24 @@ export async function runQuestionPaperGeneration(
     await step('fail', () => markFailed(db, input, failure));
     return { status: 'failed', code: failure.code };
   }
+}
+
+/** What a standalone paper's answer says about the paper; undefined for an exam paper. Pure, so it needs no step of its own. */
+function detailsOfAnswer(plan: Plan, text: string): { details: QuestionPaperDetails; found: boolean } | undefined {
+  if (!isStandalonePaper(plan.scope)) return undefined;
+  const split = splitQuestionPaperDetails(text);
+  return { details: split.details, found: split.found };
+}
+
+/**
+ * The details a standalone paper's version is saved with: those of the
+ * answer that passed, or, when that was a repair that left its details block
+ * out, those of the first answer. No block at all saves no details.
+ */
+function savedDetails(validation: Validation, first: { details: QuestionPaperDetails; found: boolean } | undefined): QuestionPaperDetails | undefined {
+  if (!validation.ok) return undefined;
+  if (validation.detailsFound) return validation.details;
+  return first?.found ? first.details : validation.details;
 }
 
 /**
@@ -331,14 +384,18 @@ async function beginJob(deps: GenerationDeps, input: QuestionPaperJobInput, mode
     .returning({ id: examQuestionPaperJobTable.id });
   if (!started) return null;
   return {
-    key: {
-      schoolId: paper.schoolId,
-      sessionId: paper.sessionId,
-      examSlug: paper.examSlug,
-      classId: paper.classId,
-      subjectSlug: paper.subjectSlug,
-      modeSlug: paper.modeSlug,
-    },
+    key:
+      paper.kind === 'standalone'
+        ? null
+        : {
+            schoolId: paper.schoolId,
+            sessionId: examKeyPart(paper.sessionId),
+            examSlug: examKeyPart(paper.examSlug),
+            classId: examKeyPart(paper.classId),
+            subjectSlug: examKeyPart(paper.subjectSlug),
+            modeSlug: examKeyPart(paper.modeSlug),
+          },
+    paperKind: paper.kind,
     paperId: paper.id,
     schoolId: job.schoolId,
     requestedBy: job.requestedBy,
@@ -367,15 +424,22 @@ async function assertAccess(deps: GenerationDeps, begun: BegunJob): Promise<void
  */
 async function planInputs(deps: GenerationDeps, begun: BegunJob, model: QuestionPaperModel): Promise<Plan> {
   const { db } = deps;
-  let scope: PaperScope;
+  let scope: ResolvedPaper;
   try {
-    scope = await resolvePaperScope(db, begun.key);
-    assertPaperWritable(scope);
+    if (isStandaloneJob(begun) || begun.key === null) {
+      // A standalone paper has no plan, session or exam to lock: the paper itself must still exist in its school.
+      scope = await resolveStandalonePaper(db, { schoolId: begun.schoolId, paperId: begun.paperId });
+    } else {
+      const exam = await resolvePaperScope(db, begun.key);
+      assertPaperWritable(exam);
+      scope = exam;
+    }
   } catch (error) {
     if (error instanceof ORPCError) throw new QuestionPaperJobFailure('paper_locked', undefined, `${error.status}: ${error.message}`);
     throw error;
   }
-  if (!(await hasSelectedQuestionPaperTemplate(db, begun.schoolId))) throw new QuestionPaperJobFailure('template_missing');
+  // A standalone paper prints in the built-in plain shell: no template is needed, and it prints nothing around the body.
+  if (!isStandalonePaper(scope) && !(await hasSelectedQuestionPaperTemplate(db, begun.schoolId))) throw new QuestionPaperJobFailure('template_missing');
 
   const rows = await db
     .select()
@@ -403,7 +467,7 @@ async function planInputs(deps: GenerationDeps, begun: BegunJob, model: Question
   }
   return {
     scope,
-    templatePrints: await readTemplatePrints(db, scope),
+    templatePrints: isStandalonePaper(scope) ? STANDALONE_QUESTION_PAPER_PRINTS : await readTemplatePrints(db, scope),
     pages: stored.map((page): PlannedPage => ({
       id: page.id,
       position: page.position,
@@ -500,13 +564,15 @@ async function callModel({
   const requestParts =
     parts ??
     buildGenerationParts(
-      {
-        className: plan.scope.className,
-        subjectName: plan.scope.subjectName,
-        modeName: plan.scope.modeName,
-        planMaxMarks: plan.scope.planMaxMarks,
-        templatePrints: templatePrintsOfPlan(plan),
-      },
+      isStandalonePaper(plan.scope)
+        ? { kind: 'standalone', templatePrints: templatePrintsOfPlan(plan) ?? STANDALONE_QUESTION_PAPER_PRINTS }
+        : {
+            className: plan.scope.className,
+            subjectName: plan.scope.subjectName,
+            modeName: plan.scope.modeName,
+            planMaxMarks: plan.scope.planMaxMarks,
+            templatePrints: templatePrintsOfPlan(plan),
+          },
       await Promise.all(
         plan.pages.map(async (page) => {
           try {
@@ -527,7 +593,7 @@ async function callModel({
     let result: TextResult;
     try {
       result = await model.generate({
-        system: questionPaperJobSystemPrompt(instructions, { redrawFigures }),
+        system: questionPaperJobSystemPrompt(instructions, { redrawFigures, standalone: isStandalonePaper(plan.scope) }),
         parts: requestParts,
         maxOutputTokens: deps.maxOutputTokens,
       });
@@ -596,7 +662,10 @@ async function callModel({
  * extracted fragment, which the save cleans again.
  */
 async function validateAnswer(deps: GenerationDeps, plan: Plan, text: string): Promise<Validation> {
-  const html = renameReservedClasses(extractQuestionPaperFragment(text));
+  // A standalone paper's answer carries its details in their own fenced block, taken out before the fragment is read.
+  const standalone = isStandalonePaper(plan.scope);
+  const split = standalone ? splitQuestionPaperDetails(text) : null;
+  const html = renameReservedClasses(extractQuestionPaperFragment(split ? split.text : text));
   if (html === '') return { ok: false, html, problems: ['The answer is empty. Return the HTML fragment of the paper.'] };
   // The shape comes first: a refusal or a sentence of chatter would otherwise be cleaned to text and printed as the paper.
   const shape = questionPaperFragmentShapeProblem(html);
@@ -607,11 +676,11 @@ async function validateAnswer(deps: GenerationDeps, plan: Plan, text: string): P
   if (!hasPaperContent(checked.html)) {
     return { ok: false, html, problems: ['After cleaning, the answer holds no paper: it needs block elements (p, div, h1-h6, ul, ol, table, figure) with readable text.'] };
   }
-  return { ok: true, html };
+  return split ? { ok: true, html, details: split.details, detailsFound: split.found } : { ok: true, html };
 }
 
 /** Saves the version through the one function chat uses; idempotent per job id. */
-async function savePaper(deps: GenerationDeps, input: QuestionPaperJobInput, begun: BegunJob, plan: Plan, html: string) {
+async function savePaper(deps: GenerationDeps, input: QuestionPaperJobInput, begun: BegunJob, plan: Plan, html: string, details: QuestionPaperDetails | undefined) {
   if (!(await jobIsLive(deps.db, input))) throw new JobStopped();
   await assertSchoolStillWritable(deps.db, begun.schoolId);
   try {
@@ -623,6 +692,7 @@ async function savePaper(deps: GenerationDeps, input: QuestionPaperJobInput, beg
         expectedVersionNo: null,
         html,
         source: { kind: 'ai_job', jobId: input.jobId, pageIds: begun.pageIds },
+        ...(details ? { details } : {}),
       }),
     );
     return { versionNo: saved.versionNo };

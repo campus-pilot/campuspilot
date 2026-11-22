@@ -1,4 +1,5 @@
 import { schoolDocumentRouter } from './document/document.router';
+import { schoolStandalonePaperRouter } from "./standalone-paper/standalone-paper.router";
 import { schoolDashboardRouter } from './dashboard/dashboard.router';
 import type { DatabaseExecutor } from "@campuspilot/db";
 import { activeBillingPeriodColumns, activeBillingPeriodOf, joinActiveBillingPeriod } from "@campuspilot/db/feature-flags/store";
@@ -50,6 +51,7 @@ const mySchoolColumns = {
   name: schoolTable.name,
   location: schoolTable.location,
   logoS3Key: schoolTable.logoS3Key,
+  kind: schoolTable.kind,
   isDemo: schoolTable.isDemo,
   isSuspended: sql<boolean>`${schoolTable.suspendedAt} is not null`,
   subscribedTier: schoolTable.tier,
@@ -93,6 +95,8 @@ async function readSchoolDetails(db: DatabaseExecutor, schoolId: string) {
 }
 
 export const schoolRouter = {
+  // Personal spaces only (docs/personal-space.md); every other procedure here serves real schools only.
+  ...schoolStandalonePaperRouter,
   ...schoolDashboardRouter,
   ...schoolDocumentRouter,
   ...schoolExamRouter,

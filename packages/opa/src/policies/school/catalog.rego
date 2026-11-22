@@ -385,6 +385,22 @@ actions contains {
   "resourceKind": "school",
 } if { true }
 
+# Standalone question papers of a personal space (docs/personal-space.md):
+# papers with no session, exam, class or plan, written whole by the AI. They
+# exist only in schools of kind `personal`, which the API's school kind gate
+# decides; these actions say who may read and change them inside one.
+actions contains {
+  "id": "school.standalone_paper.read",
+  "key": "READ_STANDALONE_PAPERS",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.standalone_paper.manage",
+  "key": "MANAGE_STANDALONE_PAPERS",
+  "resourceKind": "school",
+} if { true }
+
 actions contains {
   "id": "school.student.create",
   "key": "CREATE_STUDENT",

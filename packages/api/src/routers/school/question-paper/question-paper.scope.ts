@@ -1,6 +1,7 @@
 import type { DatabaseExecutor, DatabaseTransaction } from '@campuspilot/db';
 import { classTable } from '@campuspilot/db/schema/class';
 import { examLifecycleTable, examPlanTable } from '@campuspilot/db/schema/exam';
+import { examQuestionPaperTable } from '@campuspilot/db/schema/exam-question-paper';
 import { ORPCError } from '@orpc/server';
 import { and, eq } from 'drizzle-orm';
 
@@ -15,6 +16,13 @@ import type { PaperKey } from './question-paper.dto';
  * can be deleted and regenerated (the paper has no foreign key to the plan).
  */
 export type PaperScope = {
+  /**
+   * An exam paper (see {@link ResolvedPaper}). A scope journaled by a
+   * generation job before standalone papers existed has no `kind`: code
+   * tells the two apart with {@link isStandalonePaper}, so such a scope is
+   * read as the exam paper it is.
+   */
+  kind: 'exam';
   key: PaperKey;
   sessionStartYear: number;
   sessionEndYear: number;
@@ -71,6 +79,7 @@ export async function resolvePaperScope(db: DatabaseExecutor, key: PaperKey): Pr
     .where(lifecycleWhere(key))
     .limit(1);
   return {
+    kind: 'exam',
     key,
     sessionStartYear: session.sessionStartYear,
     sessionEndYear: session.sessionEndYear,
@@ -160,4 +169,63 @@ export async function assertPaperWritableLocked(tx: DatabaseTransaction, key: Pa
   if (lifecycle?.status === 'completed') {
     throw paperLockedError('This examination has ended, so its question papers can no longer be changed.');
   }
+}
+
+/**
+ * A standalone paper of a personal space (docs/personal-space.md), resolved:
+ * the row exists, belongs to this school and is of kind `standalone`. It has
+ * no exam plan behind it, so there is nothing to lock or check beyond the
+ * paper row itself and the school's own read-only gate (`requireAuth`); its
+ * details live on the row and are read where they are shown.
+ */
+export type StandalonePaperScope = {
+  kind: 'standalone';
+  schoolId: string;
+  paperId: string;
+};
+
+/**
+ * The paper a shared question paper service works on: an exam paper by its
+ * plan's key (`resolvePaperScope`) or a standalone paper by its id
+ * (`resolveStandalonePaper`). Each kind is its own fact: never inferred from
+ * which fields happen to be set.
+ */
+export type ResolvedPaper = PaperScope | StandalonePaperScope;
+
+/** Whether a resolved paper is standalone. Anything else, including a scope journaled before `kind` existed, is an exam paper. */
+export const isStandalonePaper = (scope: ResolvedPaper): scope is StandalonePaperScope =>
+  (scope as { kind?: unknown }).kind === 'standalone';
+
+/** The school a resolved paper belongs to. */
+export const paperSchoolIdOf = (scope: ResolvedPaper): string => (isStandalonePaper(scope) ? scope.schoolId : scope.key.schoolId);
+
+/** A standalone paper of this school, or NOT_FOUND (an exam paper's id, or another school's paper, is not found here). */
+export async function resolveStandalonePaper(db: DatabaseExecutor, input: { schoolId: string; paperId: string }): Promise<StandalonePaperScope> {
+  const [paper] = await db
+    .select({ id: examQuestionPaperTable.id })
+    .from(examQuestionPaperTable)
+    .where(
+      and(
+        eq(examQuestionPaperTable.id, input.paperId),
+        eq(examQuestionPaperTable.schoolId, input.schoolId),
+        eq(examQuestionPaperTable.kind, 'standalone'),
+      ),
+    )
+    .limit(1);
+  if (!paper) throw rpcError.notFound('Question paper');
+  return { kind: 'standalone', schoolId: input.schoolId, paperId: paper.id };
+}
+
+/**
+ * The early writable check of any paper: an exam paper's ({@link assertPaperWritable});
+ * a standalone paper has no session or exam to end, so nothing beyond the
+ * school's read-only gate, which `requireAuth` already applied.
+ */
+export function assertResolvedPaperWritable(scope: ResolvedPaper): void {
+  if (!isStandalonePaper(scope)) assertPaperWritable(scope);
+}
+
+/** The locked writable check of any paper ({@link assertPaperWritableLocked} for an exam paper; nothing for a standalone one). */
+export async function assertResolvedPaperWritableLocked(tx: DatabaseTransaction, scope: ResolvedPaper): Promise<void> {
+  if (!isStandalonePaper(scope)) await assertPaperWritableLocked(tx, scope.key);
 }

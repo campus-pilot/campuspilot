@@ -21,7 +21,7 @@ import type { z } from 'zod';
 
 import { rpcError } from '../../../errors';
 import { getExamSession } from '../exam/exam.service';
-import { latestPaperConversationId, paperChatIsWorking, unsharePaperConversations } from './question-paper.conversations';
+import { conversationRefOf, latestPaperConversationId, paperChatIsWorking, unshareConversationsOf, unsharePaperConversations } from './question-paper.conversations';
 import { checkImageHeader, makeImageDerivatives, normalizeFigureImage } from '../../../files/image-derivative';
 import { requestImageDerivatives } from '../../../workflows/image-derivatives/outbox';
 import { getQuestionPaperModel } from '../../../workflows/question-paper/model';
@@ -29,7 +29,6 @@ import { handOff, dispatchQuestionPaperJob } from '../../../workflows/question-p
 import {
   QUESTION_PAPER_MAX_PAGES,
   QUESTION_PAPER_PAGE_RESERVATION_TTL_MS,
-  type PaperKey,
   type detailOutputSchema,
   type getQuestionPaperOutputSchema,
   type listQuestionPapersOutputSchema,
@@ -38,9 +37,10 @@ import {
   activeJobOf,
   assertNoActiveJob,
   findPaper,
+  findPaperOf,
   lastFinishedJobOf,
-  lockOrCreatePaper,
-  lockPaper,
+  lockOrCreatePaperOf,
+  lockPaperOf,
   pagesOf,
   providerUnavailableError,
   templateMissingError,
@@ -51,7 +51,14 @@ import {
   type PaperRow,
 } from './question-paper.records';
 import { hasSelectedQuestionPaperTemplate } from './question-paper.render';
-import { assertPaperWritable, assertPaperWritableLocked, type PaperScope } from './question-paper.scope';
+import {
+  assertResolvedPaperWritable,
+  assertResolvedPaperWritableLocked,
+  isStandalonePaper,
+  paperSchoolIdOf,
+  type PaperScope,
+  type ResolvedPaper,
+} from './question-paper.scope';
 import { deleteObjectsBestEffort, getObjectBytes, putObject, questionPaperKeys } from './question-paper.storage';
 import { readTemplatePrints } from './question-paper.template-prints';
 import { getVersion } from './question-paper.version.service';
@@ -136,7 +143,7 @@ export async function getQuestionPaperDetail(
     view.paper ? lastFinishedJobOf(db, view.paper.id) : undefined,
     view.paper ? versionsOf(db, view.paper.id).then((rows) => toVersionSummaries(db, rows, view.paper!.latestVersionNo)) : [],
     hasSelectedQuestionPaperTemplate(db, scope.key.schoolId),
-    latestPaperConversationId(db, scope.key),
+    latestPaperConversationId(db, conversationRefOf(scope)),
   ]);
   return {
     paper: view.facts,
@@ -153,8 +160,8 @@ export async function getQuestionPaperDetail(
 }
 
 /** `listQuestionPaperVersions`. */
-export async function listQuestionPaperVersions(db: DatabaseExecutor, scope: PaperScope) {
-  const paper = await findPaper(db, scope.key);
+export async function listQuestionPaperVersions(db: DatabaseExecutor, scope: ResolvedPaper) {
+  const paper = await findPaperOf(db, scope);
   if (!paper) return { versions: [] };
   return { versions: await toVersionSummaries(db, await versionsOf(db, paper.id), paper.latestVersionNo) };
 }
@@ -319,8 +326,8 @@ export function sanitizeFileName(name: string): string {
  * is never the authority: the transaction re-checks everything, and an upload
  * that passes here may still be refused there.
  */
-async function precheckPageUpload(db: Database, key: PaperKey) {
-  const paper = await findPaper(db, key);
+async function precheckPageUpload(db: Database, scope: ResolvedPaper) {
+  const paper = await findPaperOf(db, scope);
   if (!paper) return;
   const [pages, active] = await Promise.all([pagesOf(db, paper.id), activeJobOf(db, paper.id)]);
   if (pages.length >= QUESTION_PAPER_MAX_PAGES) throw rpcError.badRequest(`A paper can have at most ${QUESTION_PAPER_MAX_PAGES} pages.`);
@@ -328,8 +335,8 @@ async function precheckPageUpload(db: Database, key: PaperKey) {
 }
 
 /** The same unlocked look for a figure: a paper that already holds its figures refuses before anything is written. */
-async function precheckFigureUpload(db: Database, key: PaperKey) {
-  const paper = await findPaper(db, key);
+async function precheckFigureUpload(db: Database, scope: ResolvedPaper) {
+  const paper = await findPaperOf(db, scope);
   if (!paper) return;
   const [figures] = await db
     .select({ count: sql<number>`count(*)::int` })
@@ -368,14 +375,14 @@ async function renumberPages(tx: DatabaseTransaction, pages: ReadonlyArray<{ id:
  */
 export async function reserveQuestionPaperPages(
   db: Database,
-  input: { scope: PaperScope; userId: string; fileNames: readonly string[] },
+  input: { scope: ResolvedPaper; userId: string; fileNames: readonly string[] },
 ) {
   const { scope } = input;
-  assertPaperWritable(scope);
+  assertResolvedPaperWritable(scope);
   if (input.fileNames.length === 0) throw rpcError.badRequest('Pick at least one photo.');
   return db.transaction(async (tx) => {
-    await assertPaperWritableLocked(tx, scope.key);
-    const paper = await lockOrCreatePaper(tx, scope.key, input.userId);
+    await assertResolvedPaperWritableLocked(tx, scope);
+    const paper = await lockOrCreatePaperOf(tx, scope, input.userId);
     const existing = await pagesOf(tx, paper.id);
     if (existing.length + input.fileNames.length > QUESTION_PAPER_MAX_PAGES) {
       throw rpcError.badRequest(`A paper can have at most ${QUESTION_PAPER_MAX_PAGES} pages.`);
@@ -386,7 +393,7 @@ export async function reserveQuestionPaperPages(
       .values(
         input.fileNames.map((name, index) => ({
           paperId: paper.id,
-          schoolId: scope.key.schoolId,
+          schoolId: paperSchoolIdOf(scope),
           position: existing.length + index + 1,
           uploadStatus: 'awaiting' as const,
           originalName: sanitizeFileName(name),
@@ -405,8 +412,8 @@ export async function reserveQuestionPaperPages(
  * The cheap, unlocked look before the original is written: the page exists in
  * this paper and still awaits its bytes. The locked update re-checks both.
  */
-async function precheckPageStore(db: Database, key: PaperKey, pageId: string) {
-  const paper = await findPaper(db, key);
+async function precheckPageStore(db: Database, scope: ResolvedPaper, pageId: string) {
+  const paper = await findPaperOf(db, scope);
   const [page] = paper
     ? await db
         .select({ uploadStatus: examQuestionPaperPageTable.uploadStatus })
@@ -432,7 +439,7 @@ async function precheckPageStore(db: Database, key: PaperKey, pageId: string) {
 export async function storeQuestionPaperPage(
   db: Database,
   input: {
-    scope: PaperScope;
+    scope: ResolvedPaper;
     pageId: string;
     file: { bytes: Buffer; contentType: string; extension: string; name: string };
     /** Hands the stored page to the worker; the default is the outbox hand-over. Tests replace it. */
@@ -440,17 +447,17 @@ export async function storeQuestionPaperPage(
   },
 ) {
   const { scope, file, pageId } = input;
-  assertPaperWritable(scope);
-  await precheckPageStore(db, scope.key, pageId);
+  assertResolvedPaperWritable(scope);
+  await precheckPageStore(db, scope, pageId);
   const size = await checkImageHeader(file.bytes);
   // Each attempt writes its own object: an overlapping store for the same page (a repeated request) that loses
   // the fence below removes only what it wrote, never the original of the attempt that won.
-  const originalKey = questionPaperKeys.original(scope.key.schoolId, pageId, file.extension, randomBytes(6).toString('hex'));
+  const originalKey = questionPaperKeys.original(paperSchoolIdOf(scope), pageId, file.extension, randomBytes(6).toString('hex'));
   try {
     await putObject(originalKey, file.bytes, file.contentType);
     const page = await db.transaction(async (tx) => {
-      await assertPaperWritableLocked(tx, scope.key);
-      const paper = await lockPaper(tx, scope.key);
+      await assertResolvedPaperWritableLocked(tx, scope);
+      const paper = await lockPaperOf(tx, scope);
       await assertNoActiveJob(tx, paper.id, 'Pages cannot be added');
       const [stored] = await tx
         .update(examQuestionPaperPageTable)
@@ -492,11 +499,11 @@ export async function storeQuestionPaperPage(
  * removed with {@link deleteQuestionPaperPage} instead. Removing one that is
  * already gone is not an error.
  */
-export async function releaseQuestionPaperPage(db: Database, input: { scope: PaperScope; pageId: string }) {
-  assertPaperWritable(input.scope);
+export async function releaseQuestionPaperPage(db: Database, input: { scope: ResolvedPaper; pageId: string }) {
+  assertResolvedPaperWritable(input.scope);
   return db.transaction(async (tx) => {
-    await assertPaperWritableLocked(tx, input.scope.key);
-    const paper = await lockPaper(tx, input.scope.key);
+    await assertResolvedPaperWritableLocked(tx, input.scope);
+    const paper = await lockPaperOf(tx, input.scope);
     const pages = await pagesOf(tx, paper.id);
     const page = pages.find((candidate) => candidate.id === input.pageId);
     if (!page) return { released: false, pageRevision: paper.pageRevision };
@@ -552,15 +559,15 @@ export async function releaseExpiredPageReservations(db: Database, now: Date = n
 export async function addQuestionPaperPage(
   db: Database,
   input: {
-    scope: PaperScope;
+    scope: ResolvedPaper;
     userId: string;
     file: { bytes: Buffer; contentType: string; extension: string; name: string };
     requestDerivatives?: (pageId: string) => void;
   },
 ) {
   const { scope, file } = input;
-  assertPaperWritable(scope);
-  await precheckPageUpload(db, scope.key);
+  assertResolvedPaperWritable(scope);
+  await precheckPageUpload(db, scope);
   // Refused before a reservation exists, so an oversized photo changes nothing.
   await checkImageHeader(file.bytes);
   const reserved = await reserveQuestionPaperPages(db, { scope, userId: input.userId, fileNames: [file.name] });
@@ -583,12 +590,12 @@ function assertPageRevision(paper: PaperRow, expected: number) {
 /** Reorders the pages: `pageIds` must be exactly the paper's pages in the new order. */
 export async function reorderQuestionPaperPages(
   db: Database,
-  input: { scope: PaperScope; pageIds: string[]; expectedPageRevision: number },
+  input: { scope: ResolvedPaper; pageIds: string[]; expectedPageRevision: number },
 ) {
-  assertPaperWritable(input.scope);
+  assertResolvedPaperWritable(input.scope);
   return db.transaction(async (tx) => {
-    await assertPaperWritableLocked(tx, input.scope.key);
-    const paper = await lockPaper(tx, input.scope.key);
+    await assertResolvedPaperWritableLocked(tx, input.scope);
+    const paper = await lockPaperOf(tx, input.scope);
     assertPageRevision(paper, input.expectedPageRevision);
     await assertNoActiveJob(tx, paper.id, 'Pages cannot be reordered');
     const pages = await pagesOf(tx, paper.id);
@@ -614,12 +621,12 @@ export async function reorderQuestionPaperPages(
 /** Deletes one page, renumbers the rest and removes its three objects after the commit. */
 export async function deleteQuestionPaperPage(
   db: Database,
-  input: { scope: PaperScope; pageId: string; expectedPageRevision: number },
+  input: { scope: ResolvedPaper; pageId: string; expectedPageRevision: number },
 ) {
-  assertPaperWritable(input.scope);
+  assertResolvedPaperWritable(input.scope);
   const { pageRevision, keys } = await db.transaction(async (tx) => {
-    await assertPaperWritableLocked(tx, input.scope.key);
-    const paper = await lockPaper(tx, input.scope.key);
+    await assertResolvedPaperWritableLocked(tx, input.scope);
+    const paper = await lockPaperOf(tx, input.scope);
     assertPageRevision(paper, input.expectedPageRevision);
     await assertNoActiveJob(tx, paper.id, 'A page cannot be deleted');
     const pages = await pagesOf(tx, paper.id);
@@ -695,11 +702,11 @@ async function pageOfPaper(db: DatabaseExecutor, paperId: string, pageId: string
  */
 export async function rotateQuestionPaperPage(
   db: Database,
-  input: { scope: PaperScope; pageId: string; rotation: QuestionPaperPageRotation; expectedPageRevision: number },
+  input: { scope: ResolvedPaper; pageId: string; rotation: QuestionPaperPageRotation; expectedPageRevision: number },
 ) {
   const { scope } = input;
-  assertPaperWritable(scope);
-  const paper = await findPaper(db, scope.key);
+  assertResolvedPaperWritable(scope);
+  const paper = await findPaperOf(db, scope);
   if (!paper) throw rpcError.notFound('Question paper');
   assertPageRevision(paper, input.expectedPageRevision);
   await assertNoActiveJob(db, paper.id, 'A page cannot be turned');
@@ -711,7 +718,7 @@ export async function rotateQuestionPaperPage(
   // The server decoded this photo at upload; a decoder that no longer can is the same refusal, not a broken row.
   if (derivatives.status !== 'ready') throw unturnablePage();
   const remake = randomUUID();
-  const { schoolId } = scope.key;
+  const schoolId = paperSchoolIdOf(scope);
   const thumbKey = questionPaperKeys.thumb(schoolId, page.id, remake);
   const modelKey = questionPaperKeys.model(schoolId, page.id, remake);
   let committed: { replaced: Array<string | null>; result: { page: ReturnType<typeof toPageDto>; pageRevision: number } };
@@ -719,8 +726,8 @@ export async function rotateQuestionPaperPage(
     await putObject(thumbKey, derivatives.thumb.bytes, derivatives.thumb.contentType);
     await putObject(modelKey, derivatives.model.bytes, derivatives.model.contentType);
     committed = await db.transaction(async (tx) => {
-      await assertPaperWritableLocked(tx, scope.key);
-      const locked = await lockPaper(tx, scope.key);
+      await assertResolvedPaperWritableLocked(tx, scope);
+      const locked = await lockPaperOf(tx, scope);
       assertPageRevision(locked, input.expectedPageRevision);
       await assertNoActiveJob(tx, locked.id, 'A page cannot be turned');
       const current = await pageOfPaper(tx, locked.id, input.pageId);
@@ -798,16 +805,17 @@ async function deletePaperRows(tx: DatabaseTransaction, papers: PaperRow[]): Pro
 }
 
 /** Deletes one paper with its pages, figures, versions and PDFs (D25: originals are kept with the paper and go with it). */
-export async function deleteQuestionPaper(db: Database, input: { scope: PaperScope }) {
-  assertPaperWritable(input.scope);
+export async function deleteQuestionPaper(db: Database, input: { scope: ResolvedPaper }) {
+  assertResolvedPaperWritable(input.scope);
   const keys = await db.transaction(async (tx) => {
-    await assertPaperWritableLocked(tx, input.scope.key);
-    const paper = await lockPaper(tx, input.scope.key);
+    await assertResolvedPaperWritableLocked(tx, input.scope);
+    const paper = await lockPaperOf(tx, input.scope);
     await assertNoActiveJob(tx, paper.id, 'The paper cannot be deleted');
-    if (await paperChatIsWorking(tx, input.scope.key)) {
+    const conversations = conversationRefOf(input.scope);
+    if (await paperChatIsWorking(tx, conversations)) {
       throw new ORPCError('CONFLICT', { message: 'The assistant is still working on this paper. Stop it, or decide on its change, before deleting the paper.' });
     }
-    await unsharePaperConversations(tx, input.scope.key);
+    await unshareConversationsOf(tx, conversations);
     return deletePaperRows(tx, [paper]);
   });
   await deleteObjectsBestEffort(keys);
@@ -851,10 +859,10 @@ export async function deleteQuestionPapersOfPlan(
  */
 export async function addQuestionPaperFigure(
   db: Database,
-  input: { scope: PaperScope; userId: string; bytes: Buffer; sourceAttachmentId?: string },
+  input: { scope: ResolvedPaper; userId: string; bytes: Buffer; sourceAttachmentId?: string },
 ) {
-  assertPaperWritable(input.scope);
-  await precheckFigureUpload(db, input.scope.key);
+  assertResolvedPaperWritable(input.scope);
+  await precheckFigureUpload(db, input.scope);
   const figure = await normalizeFigureImage(input.bytes);
   return storeQuestionPaperFigure(db, {
     scope: input.scope,
@@ -878,22 +886,22 @@ export type PreparedFigure = { bytes: Buffer; contentType: string; extension: st
 export async function storeQuestionPaperFigure(
   db: Database,
   input: {
-    scope: PaperScope;
+    scope: ResolvedPaper;
     userId: string;
     figure: PreparedFigure;
     provenance: { sourceAttachmentId: string | null; sourceFigureId: string | null };
   },
 ) {
-  assertPaperWritable(input.scope);
+  assertResolvedPaperWritable(input.scope);
   const { figure } = input;
   const figureId = generateId('examQuestionPaperFigure');
-  const key = questionPaperKeys.figure(input.scope.key.schoolId, figureId, figure.extension);
+  const key = questionPaperKeys.figure(paperSchoolIdOf(input.scope), figureId, figure.extension);
   try {
     // Written before the transaction so no lock is held across storage I/O; removed again if the row is refused.
     await putObject(key, figure.bytes, figure.contentType);
     return await db.transaction(async (tx) => {
-      await assertPaperWritableLocked(tx, input.scope.key);
-      const paper = await lockOrCreatePaper(tx, input.scope.key, input.userId);
+      await assertResolvedPaperWritableLocked(tx, input.scope);
+      const paper = await lockOrCreatePaperOf(tx, input.scope, input.userId);
       const [figures] = await tx
         .select({ count: sql<number>`count(*)::int` })
         .from(examQuestionPaperFigureTable)
@@ -906,7 +914,7 @@ export async function storeQuestionPaperFigure(
         .values({
           id: figureId,
           paperId: paper.id,
-          schoolId: input.scope.key.schoolId,
+          schoolId: paperSchoolIdOf(input.scope),
           s3Key: key,
           contentType: figure.contentType,
           byteSize: figure.bytes.byteLength,
@@ -1000,7 +1008,7 @@ async function assertSchoolJobCapacity(tx: DatabaseTransaction, schoolId: string
 export async function startQuestionPaperGeneration(
   db: Database,
   input: {
-    scope: PaperScope;
+    scope: ResolvedPaper;
     userId: string;
     expectedPageRevision: number;
     /** The teacher's instructions; null or omitted for none. */
@@ -1010,13 +1018,14 @@ export async function startQuestionPaperGeneration(
   },
 ) {
   const { scope } = input;
-  assertPaperWritable(scope);
+  assertResolvedPaperWritable(scope);
   const model = getQuestionPaperModel();
   if (!model) throw providerUnavailableError();
-  if (!(await hasSelectedQuestionPaperTemplate(db, scope.key.schoolId))) throw templateMissingError();
+  // A standalone paper prints in the built-in plain shell: it needs no template.
+  if (!isStandalonePaper(scope) && !(await hasSelectedQuestionPaperTemplate(db, scope.key.schoolId))) throw templateMissingError();
   const jobId = await db.transaction(async (tx) => {
-    await assertPaperWritableLocked(tx, scope.key);
-    const paper = await lockPaper(tx, scope.key).catch((error: unknown) => {
+    await assertResolvedPaperWritableLocked(tx, scope);
+    const paper = await lockPaperOf(tx, scope).catch((error: unknown) => {
       throw error instanceof ORPCError && error.status === 404 ? rpcError.badRequest('Upload at least one page before generating.') : error;
     });
     assertPageRevision(paper, input.expectedPageRevision);
@@ -1027,12 +1036,12 @@ export async function startQuestionPaperGeneration(
     const unreadable = unreadablePageMessage(pages, model.imageMimeTypes);
     if (unreadable) throw rpcError.badRequest(unreadable);
     if (await activeJobOf(tx, paper.id)) throw rpcError.conflict('A generation is already running for this paper.');
-    await assertSchoolJobCapacity(tx, scope.key.schoolId);
+    await assertSchoolJobCapacity(tx, paperSchoolIdOf(scope));
     const [job] = await tx
       .insert(examQuestionPaperJobTable)
       .values({
         paperId: paper.id,
-        schoolId: scope.key.schoolId,
+        schoolId: paperSchoolIdOf(scope),
         requestedBy: input.userId,
         pageIds: pages.map((page) => page.id),
         pageRevision: paper.pageRevision,

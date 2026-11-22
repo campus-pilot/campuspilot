@@ -7,6 +7,7 @@ import { rpcError, rpcErrorResponse } from '../../../errors';
 import { parseImageUpload, QUESTION_PAPER_IMAGE_FAMILY } from '../../../files/image-upload';
 import { assertPermission } from '../../../permissions/authorization';
 import { assertSchoolWritableByCaller } from '../../../school-access/school-access.service';
+import { assertSchoolKindServedByCaller, REAL_SCHOOLS_ONLY } from '../../../school-access/school-kind.service';
 import { assertQuestionPaperAssistantAccess } from './question-paper.access';
 import { paperKeySchema, QUESTION_PAPER_MAX_PAGE_BYTES, versionNoInputSchema, type PaperKey } from './question-paper.dto';
 import { findPaper } from './question-paper.records';
@@ -40,6 +41,8 @@ function requireUser(context: Context): string {
  */
 async function authorizeAndReadPage(request: Request, context: Context, rawKey: unknown) {
   const key = parseKey(rawKey);
+  // Exam papers are data of real schools (docs/personal-space.md); held before the permission, as `requireAuth` does.
+  await assertSchoolKindServedByCaller(context, key.schoolId, REAL_SCHOOLS_ONLY);
   await assertPermission(context, {
     action: CLASS_ACTIONS.MANAGE_EXAM_QUESTION_PAPERS,
     resource: { kind: 'class', schoolId: key.schoolId, classId: key.classId },
@@ -142,6 +145,7 @@ export async function handleQuestionPaperPageRead(
     const key = parseKey(rawKey);
     const { variant } = input;
     if (!isPageImageVariant(variant)) throw rpcError.notFound('Question paper page');
+    await assertSchoolKindServedByCaller(context, key.schoolId, REAL_SCHOOLS_ONLY);
     await assertPermission(context, {
       action: CLASS_ACTIONS.READ_EXAM_QUESTION_PAPERS,
       resource: { kind: 'class', schoolId: key.schoolId, classId: key.classId },
@@ -201,6 +205,7 @@ export async function handleQuestionPaperVersionPdfRead(
     const key = parseKey(rawInput.key);
     const versionNo = versionNoInputSchema.shape.versionNo.safeParse(Number(rawInput.versionNo));
     if (!/^\d+$/.test(rawInput.versionNo) || !versionNo.success) throw rpcError.notFound('Question paper version');
+    await assertSchoolKindServedByCaller(context, key.schoolId, REAL_SCHOOLS_ONLY);
     await assertPermission(context, {
       action: CLASS_ACTIONS.READ_EXAM_QUESTION_PAPERS,
       resource: { kind: 'class', schoolId: key.schoolId, classId: key.classId },

@@ -191,3 +191,12 @@ grants contains {"role": role, "action": action} if {
     "school.assistant.usage.read",
   }
 }
+
+# Standalone question papers: the principal, which is the role a personal
+# space's owner holds (a personal space has no other members today).
+grants contains {"role": "school.principal", "action": action} if {
+  some action in {
+    "school.standalone_paper.read",
+    "school.standalone_paper.manage",
+  }
+}

@@ -1,3 +1,4 @@
+import { SCHOOL_KINDS, type SchoolKind } from '@campuspilot/db/school-kind';
 import { z } from 'zod';
 
 /**
@@ -63,4 +64,36 @@ export function isSchoolSuspendedError(error: unknown): boolean {
 /** Whether a caught API error is the refusal for a school without an active plan. */
 export function isSchoolNoPlanError(error: unknown): boolean {
   return schoolWriteRefusalOf(error) === SCHOOL_NO_PLAN_REASON;
+}
+
+/**
+ * `data.reason` of the FORBIDDEN that refuses a procedure for a school of a
+ * kind it does not serve (docs/personal-space.md): a procedure of real schools
+ * called for a personal space, or a personal space procedure called for a
+ * real school. Reads are refused too: the procedure has nothing to show for
+ * that kind. A stable contract, like the read-only reasons: clients tell it
+ * apart by this value, never by the message.
+ */
+export const SCHOOL_KIND_UNSUPPORTED_REASON = 'SCHOOL_KIND_UNSUPPORTED';
+
+/** `data` of the school kind FORBIDDEN error: the reason and the kind of the school the input named. */
+export const schoolKindUnsupportedDataSchema = z.object({
+  reason: z.literal(SCHOOL_KIND_UNSUPPORTED_REASON),
+  schoolKind: z.enum(SCHOOL_KINDS),
+});
+export type SchoolKindUnsupportedData = z.infer<typeof schoolKindUnsupportedDataSchema>;
+
+/** What a member is told when a procedure does not serve their school's kind. */
+export const SCHOOL_KIND_UNSUPPORTED_MESSAGES = {
+  personal: 'This is not available in a personal space. A personal space holds question papers only.',
+  school: 'This is only available in a personal space.',
+} as const satisfies Record<SchoolKind, string>;
+
+/** The kind of the school a caught API error was refused for, or null when it is any other error. */
+export function schoolKindRefusalOf(error: unknown): SchoolKind | null {
+  if (typeof error !== 'object' || error === null) return null;
+  if (!('code' in error) || error.code !== 'FORBIDDEN') return null;
+  if (!('data' in error)) return null;
+  const parsed = schoolKindUnsupportedDataSchema.safeParse(error.data);
+  return parsed.success ? parsed.data.schoolKind : null;
 }

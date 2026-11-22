@@ -71,18 +71,18 @@ const DETAILS_BLOCK_MAX_CHARS = 4_000;
  * holds the fragment and the details (`paper-details` fenced JSON). The block
  * is removed from the text whether or not it parses, so it can never be taken
  * for the paper (`extractQuestionPaperFragment` keeps the longest fenced
- * block). A missing, oversized or malformed block gives no details: the paper
- * is still saved, and lists it without them.
+ * block). A missing, oversized or malformed block gives no details (`found`
+ * false): the paper is still saved, and lists it without them.
  */
-export function splitQuestionPaperDetails(text: string): { text: string; details: QuestionPaperDetails } {
+export function splitQuestionPaperDetails(text: string): { text: string; details: QuestionPaperDetails; found: boolean } {
   const match = DETAILS_BLOCK.exec(text);
-  if (!match) return { text, details: EMPTY_QUESTION_PAPER_DETAILS };
+  if (!match) return { text, details: EMPTY_QUESTION_PAPER_DETAILS, found: false };
   const rest = `${text.slice(0, match.index)}${text.slice(match.index + match[0].length)}`;
   const body = match[1] ?? '';
-  if (body.length > DETAILS_BLOCK_MAX_CHARS) return { text: rest, details: EMPTY_QUESTION_PAPER_DETAILS };
+  if (body.length > DETAILS_BLOCK_MAX_CHARS) return { text: rest, details: EMPTY_QUESTION_PAPER_DETAILS, found: false };
   try {
-    return { text: rest, details: normalizeQuestionPaperDetails(JSON.parse(body)) };
+    return { text: rest, details: normalizeQuestionPaperDetails(JSON.parse(body)), found: true };
   } catch {
-    return { text: rest, details: EMPTY_QUESTION_PAPER_DETAILS };
+    return { text: rest, details: EMPTY_QUESTION_PAPER_DETAILS, found: false };
   }
 }

@@ -48,6 +48,6 @@ describe('splitQuestionPaperDetails', () => {
   });
   it('gives no details for a malformed or missing block', () => {
     expect(splitQuestionPaperDetails(`${html}\n\`\`\`paper-details\n{not json\n\`\`\``).details).toEqual(EMPTY_QUESTION_PAPER_DETAILS);
-    expect(splitQuestionPaperDetails(html)).toEqual({ text: html, details: EMPTY_QUESTION_PAPER_DETAILS });
+    expect(splitQuestionPaperDetails(html)).toEqual({ text: html, details: EMPTY_QUESTION_PAPER_DETAILS, found: false });
   });
 });

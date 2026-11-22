@@ -179,3 +179,58 @@ export function buildLearnPayload() {
     example: EXAMPLE_HINDI_MATH_HTML,
   };
 }
+
+/**
+ * Where a standalone paper (a personal space's, docs/personal-space.md)
+ * prints, for the chat guide: on a plain page with nothing of its own. The
+ * shared rule is the same text as for an exam paper; its lists are empty.
+ */
+export const STANDALONE_QUESTION_PAPER_CHAT_PRINT_RULES = `## Where this paper prints
+- This paper belongs to the user's personal space, not to a school's examination: it prints on a plain A4 page that adds NOTHING above or below your fragment (no school name, logo, heading or footer). Where the rules below speak of "the school's template", for this paper it prints nothing. getStandalonePaper returns templatePrints with both lists empty.
+- So write the paper's whole heading yourself, as the first lines of the fragment: the school's name and address, the examination, the class, the subject, the time allowed, the maximum marks, the date, the blanks for name and roll number and the general instructions, exactly as your source has them (or as the user asks).
+${QUESTION_PAPER_TEMPLATE_PRINTS_RULES}`;
+
+/** The paper's details: what every save of a standalone paper sends. */
+export const STANDALONE_QUESTION_PAPER_DETAILS_RULES = `## The paper's details
+- Every save (saveStandalonePaperVersion and editStandalonePaper) sends details: the school's name, the class, the subject and the examination exactly as the paper prints them in its heading, each null when the paper does not state it. They are how the user finds the paper in their list. Never invent one.
+- The details are not kept per version: each save replaces all four with what it sends. So send all four every time, read from the paper as it will be saved.
+- Whenever the user changes the school, class, subject or examination in the paper ("make it for class 7", "rename the exam to Unit Test 2"), change the heading in the html AND send the new value in details in the same save.`;
+
+/**
+ * The guide of the standalone paper tools: the same rules and vocabulary as
+ * {@link QUESTION_PAPER_GUIDE}, with the standalone tools in the workflow, the
+ * plain page instead of a school's template, and the details every save sends.
+ */
+export const STANDALONE_QUESTION_PAPER_GUIDE = `# Writing a standalone question paper
+
+${QUESTION_PAPER_NO_MOTION_RULE}
+
+## Workflow
+1. Call getStandalonePaper for the paper, also for a new paper that has no version yet: it returns the paper's details and, for an existing paper, the fragment's html. Read the attached images and PDFs. In a chat shared with the paper, its photographed pages are shown to you before the first message ("[Page 1 of 3 of this question paper as photographed ...]"): they are the source, so copy what they show rather than what the answer should be. With no attachment and no saved paper, the user is asking you to create a paper from a description: write the questions yourself (step 2), with a heading that states the school, class, subject and examination they gave.
+2. Write the WHOLE paper as an HTML fragment, heading included (see "Where this paper prints"), following the rules below and the example returned with this guide.
+3. Call validateStandalonePaperDraft with the html until it reports valid. Fix every problem it lists. "stripped" lists what the sanitiser removed from your html: fix your html so nothing is stripped, or tell the user.
+4. In the in-app chat, save a valid draft straight away (step 5): do not ask the user whether to save. They see the draft as a preview card and then the saved version, and the previous version stays. Other clients save only when the user asks.
+5. To save, call saveStandalonePaperVersion with the draftId from the validate result (in-app chat) or the full html (other clients), expectedVersionNo from getStandalonePaper, and the paper's details (see "The paper's details"). Saving always creates a new version. Then tell the user in one or two sentences what the version contains or what changed.
+
+When you are transcribing photographs, an attached PDF or an existing paper, never invent questions, options or marks; if something is unreadable write "[illegible]" and tell the user. When the user asked you to create a paper, writing original questions is the task: cover every topic and question type they named, give each question or section the marks that add up to the full marks they stated, and keep the difficulty suited to the class. If they left something open, choose sensibly rather than asking.
+
+## Editing an existing paper
+Call getStandalonePaper (a saved paper) or, in the in-app chat, getStandalonePaperDraft with a draftId (a draft you validated earlier in this chat and that is not saved). Never edit from memory. Change only what the user asked.
+
+To change a saved paper, call editStandalonePaper with find-and-replace edits and the paper's details; never write the whole paper again to change part of it. Each find is a piece of the html copied exactly from what getStandalonePaper returned (its latestVersionNo is expectedVersionNo), and long enough to occur only once. Its replace is the new text, written by the same rules as a whole paper. editStandalonePaper saves a new version; then tell the user in a sentence what changed. Write the whole paper again (validate, then save) only when the user asks for most of it to change. If a result ends with a "Result truncated" note you only saw part of the paper: never submit a revised paper built from it.
+
+${STANDALONE_QUESTION_PAPER_CHAT_PRINT_RULES}
+
+${STANDALONE_QUESTION_PAPER_DETAILS_RULES}
+
+${QUESTION_PAPER_VOCABULARY_RULES}
+${QUESTION_PAPER_CHAT_FIGURE_RULES.replace('a qpf_ id from a saved paper (getQuestionPaper)', 'a qpf_ id from a saved paper (getStandalonePaper)')}`;
+
+/** The object returned by the standalone paper learn tool. */
+export function buildStandaloneLearnPayload() {
+  return {
+    guide: STANDALONE_QUESTION_PAPER_GUIDE,
+    limits: L,
+    example: EXAMPLE_HINDI_MATH_HTML,
+  };
+}

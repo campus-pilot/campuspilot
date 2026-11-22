@@ -24,6 +24,8 @@ import { sweepResultPublications } from '@campuspilot/api/notifications/emitters
 import { sweepWhatsAppFailureAlerts } from '@campuspilot/api/notifications/failure-alerts';
 import { startRuntimeMonitor } from '@campuspilot/logger/perf';
 import { sweepLeadAlertOutbox } from '@campuspilot/api/leads/lead.outbox';
+import { registerGoogleSignUpHandler } from '@campuspilot/auth/google-sign-up';
+import { createPersonalSpaceAfterGoogleSignUp } from '@campuspilot/api/personal-space/personal-space.service';
 
 import { app, cadetMcpCatalog, cadetMcpHandler, mcpCatalog, mcpHandler } from './http';
 import { log } from './log';
@@ -175,6 +177,8 @@ function configureQuestionPaperGeneration() {
 
 async function main() {
   configureQuestionPaperGeneration();
+  // A new Google sign-up gets its personal space (docs/personal-space.md). Registered before any request is served.
+  registerGoogleSignUpHandler((userId) => createPersonalSpaceAfterGoogleSignUp(db, userId));
   // Every later phase and request expects the current schema.
   await phase('db.migrate', () => runMigrations());
   await phase('mcp.catalog', async () => {
