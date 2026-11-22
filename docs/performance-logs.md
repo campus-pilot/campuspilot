@@ -65,7 +65,8 @@ Only names, ids, sizes and durations are logged, never content.
 Question paper previews and draft previews also annotate `htmlBytes` (the size of the
 response's document), `paperId` and `versionNo`; the body adds `qpFormulas`, `qpFigures`
 and `qpBodyBytes`; a PDF adds `pdfHtmlBytes` and `pdfBytes`. A Word download that makes its file adds `docxHtmlBytes`,
-`docxBytes`, `docxTables`, `docxImages`, `docxSvgs` and `docxWarnings` (Pandoc's warning count).
+`docxBytes`, `docxTables`, `docxImages`, `docxSvgs`, `docxWorkUnits` (the HTML step's work budget spent,
+see docs/question-papers.md "Word download") and `docxWarnings` (Pandoc's warning count).
 
 ## Reading them
 

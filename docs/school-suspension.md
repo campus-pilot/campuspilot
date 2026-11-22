@@ -59,6 +59,14 @@ refused with its own error.
 | Cadet Portal procedures | `cadetProcedure` refuses every procedure that is not a read (turning notifications on for a device, marking notifications read). Sign-in and every read keep working. |
 | Cadet actions on `cadetLoginProcedure` (turning a device's notifications off) | Not held, for the reason they are not held by the `cadet` feature: they only undo something on the student's own device, and sign-out uses them. |
 
+A deliberate exception for a read: downloading a question paper version is a
+read, and when the version has no stored file in the format asked for (its PDF
+was removed, or it is the version's first Word download) the download makes the
+file and stores it as an artifact, also for a suspended school or one without a
+plan, like restoring a removed PDF (see [Question papers](question-papers.md#word-download)).
+Nothing the school's people wrote changes; the stored file is derived from a
+version that already exists.
+
 Not affected: signing in and out, a person's own account (password, profile),
 and anything a platform administrator does through the `systemAdmin`
 procedures (decided from the procedure's explicit `platformAdministration`
