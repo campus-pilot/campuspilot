@@ -363,7 +363,7 @@ the implementation and APIs in more detail.
   the two documents stay the content and their frames stay the same rectangle. On a phone a *Photos | Paper*
   switch above the frame swaps what it shows. Use this pattern when two documents are read against each
   other: one toggle, equal panes, no synchronised scrolling unless the two really map line for line. Heading, top-right overflow (All versions, Download latest
-  PDF, the ways to add a new version, Delete paper with an app confirmation), breadcrumbs for
+  PDF, Download latest as Word, the ways to add a new version, Delete paper with an app confirmation), breadcrumbs for
   navigation, no back button.
 - Uploading, reordering, deleting and generating are closed when the exam is
   completed (D43), when a generation is queued/running, or when the user can only

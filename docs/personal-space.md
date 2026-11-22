@@ -118,7 +118,7 @@ message the person reads next to the action (`PERSONAL_SPACE_LIMIT_MESSAGES`).
 
 | Constant | Value | What it bounds | Refusal |
 | --- | --- | --- | --- |
-| `PERSONAL_SPACE_STORAGE_QUOTA_BYTES` | 2 GiB (2,147,483,648 bytes) | Every byte the space stores for its papers (`personalSpaceStoredBytes`): page photos with their thumbnail (`thumb_byte_size`) and model copy (`model_byte_size`), figure images, and every version's PDF (`artifact.byte_size`). | BAD_REQUEST `PERSONAL_SPACE_STORAGE_FULL` |
+| `PERSONAL_SPACE_STORAGE_QUOTA_BYTES` | 2 GiB (2,147,483,648 bytes) | Every byte the space stores for its papers (`personalSpaceStoredBytes`): page photos with their thumbnail (`thumb_byte_size`) and model copy (`model_byte_size`), figure images, and every version's PDF and Word file (once downloaded; `artifact.byte_size`). | BAD_REQUEST `PERSONAL_SPACE_STORAGE_FULL` |
 | `STANDALONE_PAPERS_PER_SPACE_LIMIT` | 100 | Papers per space, used or not (`createStandalonePaper`). | BAD_REQUEST `PERSONAL_SPACE_PAPER_LIMIT` |
 | `STANDALONE_PAPER_MAX_VERSIONS` | 50 | Versions per standalone paper (versions are never deleted one by one). | BAD_REQUEST `STANDALONE_PAPER_VERSION_LIMIT` |
 | `STANDALONE_SAVES_PER_WINDOW` per `STANDALONE_SAVE_WINDOW_MS` | 30 per minute | Version saves (each one a printed PDF) of the space's standalone papers, every way in: the app, the assistant and MCP. The AI job's saves are not counted or refused (they are bounded by the job cap and the AI limit, and refusing one would waste a paid generation). | TOO_MANY_REQUESTS `STANDALONE_PAPER_SAVE_RATE` |
@@ -127,8 +127,9 @@ message the person reads next to the action (`PERSONAL_SPACE_LIMIT_MESSAGES`).
 How they are checked:
 
 - **Where.** Storage: reserving pages (refused once the space is full), storing
-  a photo (with its bytes), storing a figure (with its bytes), and saving a
-  version (with its PDF's bytes). Versions and save rate: every standalone
+  a photo (with its bytes), storing a figure (with its bytes), saving a
+  version (with its PDF's bytes), and the first Word download of a version (with
+  the file's bytes; a full space cannot make one, see docs/question-papers.md "Word download"). Versions and save rate: every standalone
   version save. Starting a generation refuses up front when the paper already
   has its versions or the space is full, before any model cost; the job's save
   checks again and fails as `storage_full` or `version_limit`

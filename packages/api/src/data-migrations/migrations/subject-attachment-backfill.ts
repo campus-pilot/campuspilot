@@ -11,13 +11,13 @@ const storedSubjects = sql`case when jsonb_typeof(${classTable.config} -> 'subje
 const hasSubjectWithoutAttachment = sql<boolean>`exists (select 1 from jsonb_each(${storedSubjects}) as s where jsonb_typeof(s.value) = 'object' and not (s.value ? 'attachment'))`;
 
 /**
- * Follow-up of migration 0081 after the rolling deploy (exam README,
- * "Subjects offered in an exam"). 0081 ran before the new release
+ * Follow-up of migration 0082 after the rolling deploy (exam README,
+ * "Subjects offered in an exam"). 0082 ran before the new release
  * served traffic, but API servers of the previous release kept running until
  * the rollout finished, and their class configuration schema strips unknown
  * keys, so a subject they saved has no `attachment`. Reads already treat
  * such a subject as a classroom subject (`readStoredClassConfig`); this
- * stores the fact explicitly, exactly as 0081 did.
+ * stores the fact explicitly, exactly as 0082 did.
  *
  * Reads, in ID order and without a lock, the classes that still have a
  * subject without `attachment`, then locks those FOR UPDATE SKIP LOCKED: a

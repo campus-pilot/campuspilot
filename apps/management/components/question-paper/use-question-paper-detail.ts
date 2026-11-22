@@ -1,6 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { VersionDownloadFormat } from '@campuspilot/components/question-paper/version-download';
 import { toast } from '@campuspilot/ui/lib/toast';
 import { orpc } from '@/lib/orpc';
 import { detailPollInterval, isConflict, requestErrorMessage, type QuestionPaperScope } from './question-paper-model';
@@ -99,14 +100,21 @@ export function pageTurningOf(rotate: ReturnType<typeof useRotatePage>, pageRevi
   };
 }
 
+/** What a failed download says when the server's refusal gives no sentence of its own. */
+export const downloadFailedMessage = (format: VersionDownloadFormat) =>
+  format === 'docx' ? 'The Word file could not be prepared.' : 'The PDF could not be prepared.';
+
 /**
- * Downloads the PDF of a version: asks for a five-minute signed URL and
- * navigates to it (an attachment, so the page stays put). Call
- * `mutate({ target, versionNo })`.
+ * Downloads a version as its PDF or as an editable Word file: asks for a
+ * five-minute signed URL and navigates to it (an attachment, so the page stays
+ * put). The first Word download of a version makes the file, so it can take a
+ * few seconds; `variables.format` says which one is being prepared. Call
+ * `mutate({ target, versionNo, format })`.
  */
 export function useDownloadQuestionPaper() {
   return useMutation({
-    mutationFn: ({ target, versionNo }: { target: PaperTarget; versionNo: number }) => paperCalls.download(target, versionNo),
+    mutationFn: ({ target, versionNo, format }: { target: PaperTarget; versionNo: number; format: VersionDownloadFormat }) =>
+      paperCalls.download(target, versionNo, format),
     onSuccess: ({ url }) => {
       window.location.assign(url);
     },

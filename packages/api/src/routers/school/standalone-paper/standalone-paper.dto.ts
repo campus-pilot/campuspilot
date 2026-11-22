@@ -20,6 +20,7 @@ import {
   startGenerationInputSchema,
   templatePrintsSchema,
   versionNoInputSchema,
+  downloadFormatSchema,
   versionSummarySchema,
 } from '../question-paper/question-paper.dto';
 
@@ -231,4 +232,5 @@ export const releaseStandalonePaperPageInputSchema = releasePageInputSchema.omit
 export const deleteStandalonePaperPageInputSchema = deletePageInputSchema.omit(examKeyFields).extend(standalonePaperRefSchema.shape);
 export const rotateStandalonePaperPageInputSchema = rotatePageInputSchema.omit(examKeyFields).extend(standalonePaperRefSchema.shape);
 export const standalonePaperVersionNoInputSchema = versionNoInputSchema.omit(examKeyFields).extend(standalonePaperRefSchema.shape);
+export const standalonePaperDownloadInputSchema = standalonePaperVersionNoInputSchema.extend({ format: downloadFormatSchema });
 export const learnStandalonePaperInputSchema = z.object({ schoolId: id.describe('School id of the personal space.') });

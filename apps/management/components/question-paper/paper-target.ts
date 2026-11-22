@@ -4,6 +4,7 @@ import { CLASS_ACTIONS, SCHOOL_ACTIONS, type PermissionCheck } from '@campuspilo
 import type { detailOutputSchema } from '@campuspilot/api/routers/school/question-paper/question-paper.dto';
 import type { standalonePaperDetailOutputSchema, StandalonePaperDetailsDto } from '@campuspilot/api/routers/school/standalone-paper/standalone-paper.dto';
 import type { AssistantMessageSeed } from '@campuspilot/assistant-contract/attachments';
+import type { VersionDownloadFormat } from '@campuspilot/components/question-paper/version-download';
 import type { z } from 'zod';
 
 import { client, orpc } from '@/lib/orpc';
@@ -152,10 +153,11 @@ export const paperCalls = {
       ? client.school.startStandalonePaperGeneration({ ...target, ...input })
       : client.school.startQuestionPaperGeneration({ ...target, ...input }),
   deletePaper: (target: PaperTarget) => (isStandaloneTarget(target) ? client.school.deleteStandalonePaper(target) : client.school.deleteQuestionPaper(target)),
-  download: (target: PaperTarget, versionNo: number) =>
+  /** A five-minute URL of a version's PDF or, made on its first download, its Word file (`format`). */
+  download: (target: PaperTarget, versionNo: number, format: VersionDownloadFormat) =>
     isStandaloneTarget(target)
-      ? client.school.getStandalonePaperDownload({ ...target, versionNo })
-      : client.school.getQuestionPaperDownload({ ...target, versionNo }),
+      ? client.school.getStandalonePaperDownload({ ...target, versionNo, format })
+      : client.school.getQuestionPaperDownload({ ...target, versionNo, format }),
 };
 
 /**

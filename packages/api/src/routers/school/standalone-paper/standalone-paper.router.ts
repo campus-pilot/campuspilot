@@ -48,7 +48,7 @@ import { STANDALONE_QUESTION_PAPER_PRINTS } from '../question-paper/question-pap
 import {
   checkQuestionPaperDraft,
   cleanedChatDraft,
-  downloadVersionPdf,
+  downloadVersion,
   findChatDraftContent,
   getVersion,
   renderStoredVersionHtml,
@@ -505,9 +505,9 @@ export const schoolStandalonePaperRouter = {
     }),
 
   getStandalonePaperDownload: protectedProcedure
-    .route(route('Download a standalone question paper version', 'Issue a five-minute download URL for the PDF of a saved version. If its stored PDF was removed, the version is printed again first.'))
+    .route(route('Download a standalone question paper version', 'Issue a five-minute download URL for the PDF (default) or an editable Word file (format: docx) of a saved version. If its stored PDF was removed, the version is printed again first; the Word file is made on its first download and stored.'))
     .meta(humanOnly('read'))
-    .input(dto.standalonePaperVersionNoInputSchema)
+    .input(dto.standalonePaperDownloadInputSchema)
     .use(readPapers)
     .use(requireQuestionPaperAssistantAccess())
     .output(downloadOutputSchema)
@@ -515,7 +515,7 @@ export const schoolStandalonePaperRouter = {
       try {
         const scope = await resolve(context, input);
         const version = await getVersion(context.db, scope.paperId, input.versionNo);
-        const file = await downloadVersionPdf(context.db, { scope, version, userId: userId(context), signal });
+        const file = await downloadVersion(context.db, { scope, version, userId: userId(context), format: input.format, signal });
         return { ...file, expiresIn: 300 };
       } catch (error) {
         throw toRpcError(error);

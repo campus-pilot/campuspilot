@@ -102,7 +102,7 @@ function refineModeTotal(
   }
 }
 
-/** A stored subject. Its `attachment` is always present (migration 0081 backfilled `school`). */
+/** A stored subject. Its `attachment` is always present (migration 0082 backfilled `school`). */
 export const subjectSchema = z
   .object({ ...subjectFields, attachment: subjectAttachmentSchema })
   .superRefine(refineModeTotal)
@@ -172,7 +172,7 @@ export type ExamMode = z.infer<typeof examModeSchema>;
  * subject written before attachments existed was a classroom subject, and
  * the only writers that still leave it out are API servers of the previous
  * release during a rolling deploy (their schema strips the unknown key).
- * Migration 0081 and the `subject-attachment-backfill` data migration store
+ * Migration 0082 and the `subject-attachment-backfill` data migration store
  * it explicitly; every current write path always stores it. Nothing else is
  * changed or validated here, so a read never fails on older data.
  */

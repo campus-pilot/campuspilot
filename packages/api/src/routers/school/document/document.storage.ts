@@ -26,16 +26,28 @@ export const readDocumentTemplate = async (key: string) => {
   if (!result.Body) throw new Error('Template object has no content.');
   return result.Body.transformToString();
 };
-export function documentDownloadUrl(key: string, name: string) {
+/** The download formats of a stored document: its extension and the content type the download is served with. */
+const DOWNLOAD_FORMATS = {
+  pdf: { extension: '.pdf', contentType: 'application/pdf' },
+  docx: { extension: '.docx', contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+} as const;
+
+/**
+ * A five-minute URL that downloads the object as an attachment named `name`
+ * (characters outside a safe set replaced) with the format's extension and
+ * content type. PDF unless a Word file (`docx`) is asked for.
+ */
+export function documentDownloadUrl(key: string, name: string, format: keyof typeof DOWNLOAD_FORMATS = 'pdf') {
+  const { extension, contentType } = DOWNLOAD_FORMATS[format];
   const filename =
-    name.replace(/[^a-zA-Z0-9 ._-]/g, '_').slice(0, 120) + '.pdf';
+    name.replace(/[^a-zA-Z0-9 ._-]/g, '_').slice(0, 120) + extension;
   return getSignedUrl(
     getS3Client(),
     new GetObjectCommand({
       Bucket: env.S3_BUCKET,
       Key: key,
       ResponseContentDisposition: `attachment; filename="${filename}"`,
-      ResponseContentType: 'application/pdf',
+      ResponseContentType: contentType,
     }),
     { expiresIn: 300 },
   );

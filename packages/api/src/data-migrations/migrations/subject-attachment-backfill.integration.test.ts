@@ -42,7 +42,7 @@ describe('subject attachment backfill (data migration) and reads of subjects wit
     schoolId = school.school.id;
     legacyId = (await createTestClass({ schoolId, label: 'Legacy' })).schoolClass.id;
     examOnlyId = (await createTestClass({ schoolId, label: 'Exam only' })).schoolClass.id;
-    // As the previous release (or the state before migration 0081) stored it.
+    // As the previous release (or the state before migration 0082) stored it.
     await db.execute(
       sql`update "class" set "config" = ${JSON.stringify({ subjects: { maths: { name: 'Maths', books: [], examModes: modes } } })}::jsonb where "id" = ${legacyId}`,
     );

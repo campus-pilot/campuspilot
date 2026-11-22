@@ -13,7 +13,7 @@ export const DATA_MIGRATIONS: readonly DataMigration[] = [
   // Plan Phase 1c (D-2b, D-32, D-34).
   admissionPhoneE164Migration,
   // Subjects saved without `attachment` by the previous release during the
-  // rollout of exam-only subjects (follow-up of migration 0081).
+  // rollout of exam-only subjects (follow-up of migration 0082).
   subjectAttachmentBackfillMigration,
 ];
 

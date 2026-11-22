@@ -87,7 +87,7 @@ legacy plan was deleted).
 ## Subjects offered in an exam
 
 Subjects live on the class (`class.config.subjects`). Every subject states where
-it is offered, `attachment` (migration 0081 backfilled `{ kind: 'school' }`):
+it is offered, `attachment` (migration 0082 backfilled `{ kind: 'school' }`):
 
 - `{ kind: 'school' }`: a classroom subject, offered in every examination.
 - `{ kind: 'exam', exams: [{ sessionId, examSlug }] }`: added from an
@@ -153,7 +153,7 @@ session FOR SHARE and then the class row FOR UPDATE:
   `exam_lifecycle` rows FOR SHARE, then the class row FOR UPDATE (the order
   legacy `createExamPlan` takes them in).
 - Reads: `class.config` is read through `readStoredClassConfig` (the column's
-  `fromDriver`), so a subject saved without `attachment` (before 0081, or by
+  `fromDriver`), so a subject saved without `attachment` (before 0082, or by
   the previous release during the rollout) reads as a classroom subject. The
   `subject-attachment-backfill` data migration stores it explicitly after the
   rollout; a platform admin can request it again.

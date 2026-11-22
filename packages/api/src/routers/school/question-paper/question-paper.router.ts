@@ -44,7 +44,7 @@ import {
   checkQuestionPaperDraft,
   cleanedChatDraft,
   copyQuestionPaperVersion,
-  downloadVersionPdf,
+  downloadVersion,
   findChatDraftContent,
   getVersion,
   renderStoredVersionHtml,
@@ -565,9 +565,9 @@ export const schoolQuestionPaperRouter = {
     }),
 
   getQuestionPaperDownload: protectedProcedure
-    .route(route('Download a question paper version', "Issue a five-minute download URL for the PDF of a saved version. If its stored PDF was removed, the version is printed again from its content and pinned template first."))
+    .route(route('Download a question paper version', "Issue a five-minute download URL for the PDF (default) or an editable Word file (format: docx) of a saved version. If its stored PDF was removed, the version is printed again from its content and pinned template first; the Word file is made from the same inputs on its first download and stored."))
     .meta(humanOnly('read'))
-    .input(dto.versionNoInputSchema)
+    .input(dto.downloadInputSchema)
     .use(readClass)
     .use(requireQuestionPaperAssistantAccess())
     .output(dto.downloadOutputSchema)
@@ -577,7 +577,7 @@ export const schoolQuestionPaperRouter = {
         const paper = await findPaper(context.db, scope.key);
         if (!paper) throw rpcError.notFound('Question paper');
         const version = await getVersion(context.db, paper.id, input.versionNo);
-        const file = await downloadVersionPdf(context.db, { scope, version, userId: userId(context), signal });
+        const file = await downloadVersion(context.db, { scope, version, userId: userId(context), format: input.format, signal });
         return { ...file, expiresIn: 300 };
       } catch (error) {
         throw toRpcError(error);

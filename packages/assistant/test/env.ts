@@ -46,6 +46,7 @@ export const ASSISTANT_TEST_ENV: Record<string, string> = {
   S3_ACCESS_KEY_ID: '',
   S3_SECRET_ACCESS_KEY: '',
   GOTENBERG_URL: 'http://gotenberg.invalid',
+  PANDOC_URL: 'http://pandoc.invalid',
   OPA_URL: 'http://opa.invalid',
   RESTATE_ADMIN_URL: 'http://restate.invalid:9070',
   RESTATE_FABRIC_URL: 'http://restate.invalid:8080',
