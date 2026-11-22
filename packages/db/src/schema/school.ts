@@ -4,17 +4,25 @@ import {
   check,
   index,
   jsonb,
+  pgEnum,
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   varchar,
 } from "drizzle-orm/pg-core";
 
 import { SCHOOL_TIERS } from "../feature-flags/catalogue";
+import { SCHOOL_KINDS } from "../school-kind";
 import { generateId } from "../id";
 import { user } from "./auth";
 import { admissionSettingsSchema } from "./jsonb";
 import type { AdmissionSettings } from "./jsonb";
+
+export { SCHOOL_KINDS, type SchoolKind } from "../school-kind";
+
+/** See `school-kind.ts`. */
+export const schoolKindEnum = pgEnum("school_kind", SCHOOL_KINDS);
 
 export const schoolTable = pgTable(
   "school",
@@ -98,9 +106,27 @@ export const schoolTable = pgTable(
     ownerUserId: text("owner_user_id").references(() => user.id, {
       onDelete: "set null",
     }),
+    /**
+     * Whether this is a real school or a person's personal space
+     * ({@link SCHOOL_KINDS}). Set when the row is created and never changed.
+     * A personal space's owner is the person it belongs to; at most one per
+     * owner (`school_personal_owner_unique`).
+     */
+    kind: schoolKindEnum("kind").notNull().default("school"),
   },
   (table) => [
     index("school_owner_user_id_idx").on(table.ownerUserId),
+    // One personal space per person. The owner may be cleared when the account is deleted (ON DELETE SET NULL); such
+    // rows no longer collide (NULLs are distinct).
+    uniqueIndex("school_personal_owner_unique")
+      .on(table.ownerUserId)
+      .where(sql`${table.kind} = 'personal'`),
+    // A demo school is a full school; it is never a personal space. Compared as text: an enum value added in a migration
+    // cannot be used in the transaction that adds it.
+    check(
+      "school_personal_not_demo_check",
+      sql`${table.kind}::text <> 'personal' or not ${table.isDemo}`,
+    ),
     check(
       "school_tier_check",
       sql`${table.tier} is null or ${table.tier} in (${sql.raw(SCHOOL_TIERS.map((tier) => `'${tier}'`).join(", "))})`,
