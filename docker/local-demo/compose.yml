@@ -78,6 +78,13 @@ services:
       CHROMIUM_DENY_PUBLIC_IPS: 'true'
     ports: ['127.0.0.1:58781:3000']
     restart: unless-stopped
+  pandoc:
+    image: pandoc/core:3.6.4
+    command: ['server', '--port=3030', '--timeout=25', '+RTS', '-M1024m', '-RTS']
+    user: '65534:65534'
+    read_only: true
+    ports: ['127.0.0.1:58782:3030']
+    restart: unless-stopped
   restate:
     image: docker.restate.dev/restatedev/restate:1.7.9
     command: ['--node-name=campuspilot-local']

@@ -44,6 +44,18 @@ services:
       - '8781:3000'
     restart: unless-stopped
 
+  # Pandoc's own HTTP server: turns a question paper into Word (.docx). Server mode is sandboxed
+  # (no file system or network access); it only reads what a request carries.
+  pandoc:
+    image: pandoc/core:3.6.4
+    container_name: campuspilot-pandoc
+    command: ['server', '--port=3030', '--timeout=25', '+RTS', '-M1024m', '-RTS']
+    user: '65534:65534'
+    read_only: true
+    ports:
+      - '8783:3030'
+    restart: unless-stopped
+
   redis:
     image: redis:8.10.1-alpine
     container_name: campuspilot-redis

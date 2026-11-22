@@ -33,6 +33,7 @@ if (!process.env.DOCKER_HOST && !fs.existsSync('/var/run/docker.sock')) {
 declare module 'vitest' {
   export interface ProvidedContext {
     GOTENBERG_URL: string;
+    PANDOC_URL: string;
     DATABASE_URL: string;
     REDIS_URL: string;
     OPA_URL: string;
@@ -46,6 +47,7 @@ let redisContainer: StartedRedisContainer | undefined;
 let opaContainer: StartedTestContainer | undefined;
 let rustfsContainer: StartedTestContainer | undefined;
 let gotenbergContainer: StartedTestContainer | undefined;
+let pandocContainer: StartedTestContainer | undefined;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const POLICIES_DIR = path.resolve(
@@ -101,7 +103,7 @@ const POSTGRES_SHARED_MEMORY_BYTES = 256 * 1024 * 1024;
 
 export default async function setup(project: TestProject) {
   // Spin up all dev-stack testcontainers in parallel
-  const [pgContainer, rdContainer, opContainer, storageContainer, pdfContainer] =
+  const [pgContainer, rdContainer, opContainer, storageContainer, pdfContainer, docxContainer] =
     await Promise.all([
       new PostgreSqlContainer('postgres:18.6')
         .withDatabase('campuspilot_test')
@@ -147,6 +149,12 @@ export default async function setup(project: TestProject) {
         .withExposedPorts(3000)
         .withWaitStrategy(Wait.forHttp('/health', 3000))
         .start(),
+      // The Word (.docx) converter: Pandoc's sandboxed HTTP server, as in docker/dev/compose.yml.
+      new GenericContainer('pandoc/core:3.6.4')
+        .withCommand(['server', '--port=3030', '--timeout=25'])
+        .withExposedPorts(3030)
+        .withWaitStrategy(Wait.forHttp('/version', 3030))
+        .start(),
     ]);
 
   postgresContainer = pgContainer;
@@ -154,6 +162,7 @@ export default async function setup(project: TestProject) {
   opaContainer = opContainer;
   rustfsContainer = storageContainer;
   gotenbergContainer = pdfContainer;
+  pandocContainer = docxContainer;
 
   const databaseUrl = pgContainer.getConnectionUri();
   const redisUrl = rdContainer.getConnectionUrl();
@@ -184,6 +193,10 @@ export default async function setup(project: TestProject) {
     'GOTENBERG_URL',
     `http://${pdfContainer.getHost()}:${pdfContainer.getMappedPort(3000)}`,
   );
+  project.provide(
+    'PANDOC_URL',
+    `http://${docxContainer.getHost()}:${docxContainer.getMappedPort(3030)}`,
+  );
   project.provide('DATABASE_URL', databaseUrl);
   project.provide('REDIS_URL', redisUrl);
   project.provide('OPA_URL', opaUrl);
@@ -197,6 +210,7 @@ export default async function setup(project: TestProject) {
       opaContainer?.stop(),
       rustfsContainer?.stop(),
       gotenbergContainer?.stop(),
+      pandocContainer?.stop(),
     ]);
   };
 }

@@ -31,6 +31,8 @@ export function requireWorkerControlSecretInProduction(
 
 export const SERVICES_ENV_SHAPE = {
   GOTENBERG_URL: z.url(),
+  /** The Pandoc server (`pandoc server`, its own sandboxed service) that turns a question paper into Word (.docx). */
+  PANDOC_URL: z.url(),
   OPA_URL: z.url(),
   REDIS_URL: z.url(),
   RESTATE_ADMIN_URL: z.url(),
