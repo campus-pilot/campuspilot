@@ -251,8 +251,12 @@ details, procedures, plain shell and job branch), the personal space screens
 in `apps/management`, or before letting another procedure serve personal
 spaces, read [Personal space](docs/personal-space.md). A procedure serves
 real schools only unless it says otherwise, reads included; the eligibility
-reads the linked Google account, never `email_verified`; details are not
-revisioned (every save overwrites them).
+reads the linked Google account, never `email_verified`; a person gets one
+space for good (`user.personal_space_created_at`); details are not
+revisioned (every save overwrites them). A new way to store bytes or print a
+PDF in a personal space must go through its limits
+(`personal-space.limits.ts`, the guide's "Limits" table) inside the write's
+transaction.
 
 ## Demo schools
 

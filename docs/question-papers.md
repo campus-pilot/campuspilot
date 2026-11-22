@@ -834,7 +834,8 @@ fails jobs that cannot progress (`dispatch_failed` after 10 minutes unaccepted,
 requests). Starting a job is refused while any page is still `awaiting` its photo, still
 `pending` its copies or `failed` (`pageNotReadyMessage`; the screen says the same beside the
 button before it is pressed). It is also refused when the school already has
-`QUESTION_PAPER_MAX_RUNNING_JOBS_PER_SCHOOL` (default 3) queued or running, because the
+`QUESTION_PAPER_MAX_RUNNING_JOBS_PER_SCHOOL` (default 3; a personal space:
+`PERSONAL_SPACE_MAX_RUNNING_JOBS`, 1, see [Personal space](personal-space.md)) queued or running, because the
 monthly-limit check reads a spend sum cached for ten minutes and would otherwise be
 passed by every job a user starts at once; the check runs under a per-school advisory
 lock. The cap bounds how many jobs run at the same time, not how far the cached limit
@@ -914,7 +915,8 @@ while the version renders cannot commit a version afterwards (the job stops quie
 plan that loses the paper's mode meanwhile fails the job as `plan_mode_removed`
 (`data.reason`), not `paper_unprintable`. A failed job has an `error_code` from `QUESTION_PAPER_JOB_FAILURES` (for the
 model path: `model_busy`, `model_error`, `model_rejected`, `provider_unavailable`, `invalid_output`,
-`output_too_long`) and a safe `error_message` the page shows; the page polls `getQuestionPaperDetail`.
+`output_too_long`; for a standalone paper also `storage_full` and `version_limit`, the
+personal space's limits) and a safe `error_message` the page shows; the page polls `getQuestionPaperDetail`.
 The job's own system prompt (`prompt.ts`) never enters chat.
 
 Model settings are separate `QUESTION_PAPER_*` env values (`QUESTION_PAPER_PROVIDER` and

@@ -138,7 +138,8 @@ returns; the hand-over to the worker (`sendQuestionPaperStart`, signed with
 accept, and fails jobs that can no longer progress (`dispatch_failed` after 10
 minutes unaccepted, `not_started` after 5 minutes accepted, `not_finished` after
 `QUESTION_PAPER_JOB_TIMEOUT_MINUTES` running, an env setting, default 40). Starting a job is refused while the school has
-`QUESTION_PAPER_MAX_RUNNING_JOBS_PER_SCHOOL` (default 3) queued or running jobs.
+`QUESTION_PAPER_MAX_RUNNING_JOBS_PER_SCHOOL` (default 3) queued or running jobs
+(`PERSONAL_SPACE_MAX_RUNNING_JOBS`, 1, in a personal space; docs/personal-space.md "Limits").
 
 Inputs: the paper key, `expectedPageRevision` and optional `instructions`, the
 teacher's note on what to change ("Keep the questions but change the numbers"). The

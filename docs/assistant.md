@@ -280,8 +280,8 @@ not told which. `beginRun` makes the choice from the message's `tier`, journals 
 run (`RunFacts.model`), and each step resolves the provider and its prices by that model
 (`ProviderRegistry.get` and `prices` with a model), so every cost row carries the model it
 called and that model's prices.
-`QUESTION_PAPER_MAX_RUNNING_JOBS_PER_SCHOOL` (default 3) caps the jobs (queued plus
-running) one school may have at once, which bounds how many run at the same time (not how far
+`QUESTION_PAPER_MAX_RUNNING_JOBS_PER_SCHOOL` (default 3; 1 for a personal space,
+`PERSONAL_SPACE_MAX_RUNNING_JOBS`) caps the jobs (queued plus running) one school may have at once, which bounds how many run at the same time (not how far
 the cached spend check can be overshot by jobs started one after another).
 The worker needs the same `QUESTION_PAPER_*` values as the API server.
 
