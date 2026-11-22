@@ -422,6 +422,26 @@ deliberate and must remain visible in future redesigns:
   feature, no footprint control (full A4). No default design is shipped; the body
   slot is placed exactly once.
 
+## Personal space decisions to preserve
+
+A personal space ([Personal space](../../../docs/personal-space.md)) is its
+own interface, not a school workspace with items hidden:
+
+- `PersonalSpaceShell`: no sidebar on any screen size; one bar with the
+  **Personal** label and the school switcher on the left, the trial status and
+  the user menu on the right. No breadcrumbs, command palette, notification
+  bell or voice launcher.
+- Its plan notice is inline under the bar (there is no app shell to hold an
+  `AppShellAlert`) and links the website's contact page in a new tab; it never
+  mentions billing or an administrator.
+- The papers list uses `TableSearchBar` and `TableFilterBar` over the compact
+  `DataTable`, like the admission table; its filters come from the papers'
+  own details.
+- The paper screen is the exam paper studio (`QuestionPaperStudio`,
+  `QuestionPaperStart`) with a standalone target (`paper-target.ts`); do not
+  fork it. What differs (no copy from an earlier paper, no template alert, the
+  details as the heading) is a prop of the shared screen, not a second screen.
+
 ## Corrections from the redesign
 
 | Earlier approach | Established direction |
