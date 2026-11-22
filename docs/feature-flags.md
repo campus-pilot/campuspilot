@@ -11,6 +11,12 @@ read them. This guide is the canonical reference: read it before adding a
 feature or a tier, gating a procedure or screen on a feature, or changing
 how tiers and adjustments are stored or enforced.
 
+A school's **kind** (`school.kind`: a real school or a personal space) is
+not a feature and not a tier: procedures declare the kinds they serve and a
+gate in `requireAuth` holds them ([Personal space](personal-space.md)). A
+personal space has the features of its plan like any school; its standalone
+papers are gated on `assistant`.
+
 ## Tiers
 
 A school has at most one standing tier (`school.tier`, no default; null

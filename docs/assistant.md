@@ -610,6 +610,12 @@ the worker logs a warning when it is on in production.
 
 ## Conversations shared with a question paper
 
+A standalone paper of a personal space is shared by its id instead
+(`assistant_conversation.standalone_paper_id`, seed `standalone_question_paper`), reached
+through the school's standalone paper permission; tools are offered per school kind
+(`ASSISTANT_TOOL_META.schoolKinds`, `toolCatalogForSchool`). See
+[Personal space](personal-space.md#assistant-and-mcp).
+
 A conversation is private to the user who started it, with one exception: a
 conversation started on a question paper's screen is **shared with that paper**,
 so a colleague who takes the paper over reads how it came to be and carries on.

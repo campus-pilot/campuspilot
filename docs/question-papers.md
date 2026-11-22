@@ -16,6 +16,12 @@ the demo seed's question papers.
 
 ## Product model
 
+A personal space's papers are **standalone papers** (`exam_question_paper.kind = 'standalone'`):
+no session, exam, class, subject or mode, no school template (a built-in plain
+shell), details the AI states, and their own procedures. Everything below is about
+exam papers unless it says otherwise; the shared services, the sanitiser, the renderer
+pipeline and the job serve both kinds. See [Personal space](personal-space.md).
+
 - A **paper** is one fact per `(session, exam, class, subject, mode)`, the
   natural key of an exam plan. "Mode" is the school-defined assessment mode of
   a subject (theory, practical, ...). One paper per key; sections of a class do
@@ -1113,6 +1119,12 @@ internal assessment, ...), so the tab's accordion and mode filter have several c
 modes to work with without further seed data.
 
 ## Extending
+
+- Shared services take a resolved paper (`ResolvedPaper`: an exam `PaperScope` or a
+  `StandalonePaperScope`). A new kind-specific rule goes through `isStandalonePaper` in one
+  helper (`question-paper.records.ts`, `question-paper.scope.ts`,
+  `question-paper.version.service.ts`); exam behaviour must not change. See
+  [Personal space](personal-space.md).
 
 - **An allowed element, attribute or CSS property**: change the allowlist in
   `question-paper.sanitize.ts` / `question-paper.css.ts`, with a test that a hostile variant of it
