@@ -1,4 +1,5 @@
 import { db } from '@campuspilot/db';
+import { assistantConversationTable, assistantItemTable, assistantRunTable } from '@campuspilot/db/schema/assistant';
 import { artifactTable } from '@campuspilot/db/schema/artifact';
 import {
   examQuestionPaperFigureTable,
@@ -8,11 +9,14 @@ import {
   examQuestionPaperVersionTable,
 } from '@campuspilot/db/schema/exam-question-paper';
 import { QUESTION_PAPER_EXAMPLES } from '@campuspilot/question-paper/examples';
+import { createRouterClient } from '@orpc/server';
 import { asc, eq } from 'drizzle-orm';
 import sharp from 'sharp';
 import { describe, expect, it, vi } from 'vitest';
 
-import { createHandlerContext, createTestClient } from '../../../../test/fixtures';
+import { createHandlerContext, createTestClient, type TestClient } from '../../../../test/fixtures';
+import type { Context } from '../../../context';
+import { appRouter } from '../../index';
 import { PERSONAL_SPACE_STORAGE_QUOTA_BYTES } from '../../../personal-space/personal-space.limits';
 import { personalSpaceStoredBytes } from '../../../personal-space/personal-space.storage';
 import { settleDerivatives } from '../../../../test/image-derivatives';
@@ -130,6 +134,53 @@ describe('standalone question papers', () => {
     await owner.client.school.saveStandalonePaperVersion({ schoolId: owner.schoolId, paperId, expectedVersionNo: 0, html: ENGLISH_SCIENCE, details: DETAILS });
     await expect(owner.client.school.deleteStandalonePaper({ schoolId: owner.schoolId, paperId })).resolves.toEqual({ deleted: true });
     expect(await db.select().from(examQuestionPaperTable).where(eq(examQuestionPaperTable.id, paperId))).toEqual([]);
+  });
+});
+
+describe('a standalone draft saved by id from the in-app assistant', () => {
+  it('saves the draft validateStandalonePaperDraft checked earlier in this conversation, and no exam paper draft', async () => {
+    const { schoolId, userId, session, client } = await personalSpaceOwner();
+    const { paperId } = await client.school.createStandalonePaper({ schoolId });
+    const [conversation] = await db.insert(assistantConversationTable).values({ schoolId, userId, provider: 'gemini', model: 'm' }).returning();
+    const [run] = await db
+      .insert(assistantRunTable)
+      .values({ conversationId: conversation!.id, schoolId, userId, clientRequestId: crypto.randomUUID(), surface: 'panel', sequence: 1 })
+      .returning();
+    let position = 0;
+    const recordToolCall = async (toolName: string, input: unknown) => {
+      position += 1;
+      await db.insert(assistantItemTable).values({
+        conversationId: conversation!.id,
+        runId: run!.id,
+        kind: 'tool_call',
+        status: 'succeeded',
+        position,
+        sequence: position,
+        itemKey: `item-${crypto.randomUUID()}`,
+        body: { toolUseId: `t${position}`, toolName, title: toolName, access: 'read', destructive: false, module: 'exams', input },
+      });
+    };
+    const agent = createRouterClient(appRouter, {
+      context: async (): Promise<Context> => ({
+        db,
+        headers: new Headers(),
+        session,
+        principal: { authMethod: 'assistant', assistantRun: { conversationId: conversation!.id, runId: run!.id, schoolId } },
+      }),
+    }) as unknown as TestClient;
+    const { draftId } = await client.school.validateStandalonePaperDraft({ schoolId, paperId, html: ENGLISH_SCIENCE });
+    const saveByDraft = () => agent.school.saveStandalonePaperVersion({ schoolId, paperId, expectedVersionNo: 0, draftId: draftId!, details: DETAILS });
+
+    // An exam paper's validate tool holds no draft of a standalone paper.
+    await recordToolCall('school.validateQuestionPaperDraft', { schoolId, html: ENGLISH_SCIENCE });
+    await expect(saveByDraft()).rejects.toMatchObject({ code: 'BAD_REQUEST', message: expect.stringContaining('No draft') });
+
+    // As the assistant records it: the MCP name, and the model's input (the school is filled in by the assistant).
+    await recordToolCall('school.validateStandalonePaperDraft', { paperId, html: ENGLISH_SCIENCE });
+    await expect(saveByDraft()).resolves.toMatchObject({ versionNo: 1, paperId });
+    const [row] = await db.select().from(examQuestionPaperVersionTable).where(eq(examQuestionPaperVersionTable.paperId, paperId));
+    expect(row).toMatchObject({ source: 'agent', sourceConversationId: conversation!.id });
+    await expect(agent.school.getStandalonePaperDraft({ schoolId, paperId, draftId: draftId! })).resolves.toMatchObject({ draftId });
   });
 });
 

@@ -275,13 +275,23 @@ export function invalidPaperError(problems: readonly string[]) {
   return rpcError.badRequest(`The question paper is not valid${more}. ${listed.join('; ')}`);
 }
 
-const DRAFT_TOOL_NAME = /(^|[._])validateQuestionPaperDraft$/;
+/**
+ * The validate tool whose calls hold a paper's drafts, by the paper's kind: a
+ * standalone paper's drafts are validated with `validateStandalonePaperDraft`
+ * (its own rules: the heading is part of the paper), an exam paper's with
+ * `validateQuestionPaperDraft`. A draft of one kind is never saved as the other.
+ */
+const DRAFT_TOOL_NAME = {
+  exam: /(^|[._])validateQuestionPaperDraft$/,
+  standalone: /(^|[._])validateStandalonePaperDraft$/,
+} as const satisfies Record<PaperConversationRef['kind'], RegExp>;
 /** How many of a conversation's newest tool calls are searched for a draft. */
 const DRAFT_SEARCH_DEPTH = 60;
 
 /**
  * Finds the HTML a chat agent validated earlier in this conversation
- * (design E7): the newest `validateQuestionPaperDraft` tool call whose input
+ * (design E7): the newest call of the paper kind's validate tool
+ * ({@link DRAFT_TOOL_NAME}) whose input
  * `html` hashes to `draftId`. A draft is not a database row; the chat transcript is
  * its only home, which is why this reads the assistant's items, scoped to the
  * conversation, its school and its user. External clients have no
@@ -302,7 +312,7 @@ export async function findChatDraftContent(
     .limit(DRAFT_SEARCH_DEPTH);
   for (const { body } of items) {
     const call = body as { toolName?: unknown; input?: unknown };
-    if (typeof call.toolName !== 'string' || !DRAFT_TOOL_NAME.test(call.toolName)) continue;
+    if (typeof call.toolName !== 'string' || !DRAFT_TOOL_NAME[input.paper.kind].test(call.toolName)) continue;
     const html = (call.input as { html?: unknown } | null)?.html;
     if (typeof html === 'string' && questionPaperDraftId(html) === input.draftId) return html;
   }
