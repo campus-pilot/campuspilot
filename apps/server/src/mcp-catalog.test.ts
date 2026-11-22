@@ -307,8 +307,9 @@ describe('catalog metadata', () => {
     // +8 question paper tools (list, get, versions, learn, validate, save, get draft, edit);
     // +1 school.updateExamClasses (change the classes taking part in an exam);
     // +10 standalone paper tools of a personal space (list, filter options, create,
-    // get, get draft, versions, learn, validate, save, edit).
-    expect(catalog.advanced).toHaveLength(129);
+    // get, get draft, versions, learn, validate, save, edit);
+    // +1 systemAdmin.getPersonalSpaceStats (the admin dashboard's personal space counts).
+    expect(catalog.advanced).toHaveLength(130);
   });
 });
 

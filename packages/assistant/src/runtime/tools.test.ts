@@ -111,7 +111,9 @@ describe('tools of a kind of school', () => {
       listed('school.listStandalonePapers', { [ASSISTANT_TOOL_META.schoolKinds]: ['personal'] }),
       listed('school.listStudents', {}),
     ];
-    const { tools } = await loadToolCatalog('token');
+    // Past the listing cache the tests above filled (and before the approval block's, further on).
+    vi.useFakeTimers({ now: Date.now() + 20 * 60_000, toFake: ['Date'] });
+    const { tools } = await loadToolCatalog('token').finally(() => vi.useRealTimers());
     expect(tools.get('school_listStandalonePapers')?.schoolKinds).toEqual(['personal']);
     expect(tools.get('school_listStudents')?.schoolKinds).toEqual(['school']);
   });
@@ -139,8 +141,8 @@ describe('approval', () => {
       { ...listed('school.saveQuestionPaperVersion', { [ASSISTANT_TOOL_META.skipsApproval]: true }), annotations: { readOnlyHint: false } },
       { ...listed('school.updateStudent'), annotations: { readOnlyHint: false } },
     ];
-    // Past the listing cache the tests above filled; this block is last so its own listing stays out of theirs.
-    vi.useFakeTimers({ now: Date.now() + 10 * 60_000, toFake: ['Date'] });
+    // Past the listing caches the tests above filled (the kinds block's runs until +25 minutes); this block is last so its own listing stays out of theirs.
+    vi.useFakeTimers({ now: Date.now() + 40 * 60_000, toFake: ['Date'] });
     const { tools } = await loadToolCatalog('token').finally(() => vi.useRealTimers());
     expect(requiresApproval(tools.get('school_getQuestionPaper')!)).toBe(false);
     expect(requiresApproval(tools.get('school_saveQuestionPaperVersion')!)).toBe(false);

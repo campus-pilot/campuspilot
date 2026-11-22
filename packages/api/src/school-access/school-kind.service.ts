@@ -1,5 +1,6 @@
 import type { DatabaseExecutor } from '@campuspilot/db';
 import { DEFAULT_SCHOOL_KINDS, type SchoolKind } from '@campuspilot/db/school-kind';
+import { getSchoolKind } from '@campuspilot/db/school-kind-store';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
 import { ORPCError } from '@orpc/server';
@@ -74,11 +75,11 @@ export async function readSchoolKind(db: DatabaseExecutor, schoolId: string): Pr
     schoolKinds.set(schoolId, known);
     return known;
   }
-  const [row] = await db.select({ kind: schoolTable.kind }).from(schoolTable).where(eq(schoolTable.id, schoolId)).limit(1);
-  if (!row) return null;
-  schoolKinds.set(schoolId, row.kind);
+  const kind = await getSchoolKind(db, schoolId);
+  if (kind === null) return null;
+  schoolKinds.set(schoolId, kind);
   if (schoolKinds.size > SCHOOL_KIND_CACHE_SIZE) schoolKinds.delete(schoolKinds.keys().next().value!);
-  return row.kind;
+  return kind;
 }
 
 /** Whether `userId` is a member of the school, for the reason a kind refusal gives. */

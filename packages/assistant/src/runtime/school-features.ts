@@ -1,8 +1,7 @@
 import { SCHOOL_FEATURE_KEYS, type SchoolFeatureKey } from '@campuspilot/db/feature-flags/catalogue';
 import { getSchoolFeatureFlags } from '@campuspilot/db/feature-flags/store';
 import type { SchoolKind } from '@campuspilot/db/school-kind';
-import { schoolTable } from '@campuspilot/db/schema/school';
-import { eq } from 'drizzle-orm';
+import { getSchoolKind } from '@campuspilot/db/school-kind-store';
 
 import { db } from '../db';
 
@@ -25,6 +24,5 @@ export async function readActiveSchoolFeatures(schoolId: string): Promise<Readon
  * tools never reach a personal space's data.
  */
 export async function readSchoolKind(schoolId: string): Promise<SchoolKind> {
-  const [row] = await db.select({ kind: schoolTable.kind }).from(schoolTable).where(eq(schoolTable.id, schoolId)).limit(1);
-  return row?.kind ?? 'school';
+  return (await getSchoolKind(db, schoolId)) ?? 'school';
 }

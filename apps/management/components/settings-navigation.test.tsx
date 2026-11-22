@@ -7,6 +7,7 @@ import type { AppShellNavigationEntry } from '@campuspilot/components/app-shell'
 // the server), so the navigation is imported only after they are set.
 process.env.NEXT_PUBLIC_SERVER_URL ??= 'http://localhost:3100';
 process.env.NEXT_PUBLIC_MCP_URL ??= 'http://localhost:3100/mcp';
+process.env.NEXT_PUBLIC_WEBSITE_URL ??= 'http://localhost:5174';
 const { settingsNavigation } = await import('./settings-navigation');
 
 const everything = () => true;

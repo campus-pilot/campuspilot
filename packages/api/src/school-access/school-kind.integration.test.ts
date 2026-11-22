@@ -40,7 +40,7 @@ describe('the school kind gate', () => {
   });
 
   it('refuses a personal space procedure for a real school', async () => {
-    const school = await createTestSchool({ features: ['assistant'] });
+    const school = await createTestSchool({ features: [{ feature: 'assistant', config: { monthlyLimitUsd: 20 } }] });
     const principal = await createSchoolStaffSession(school.id, [{ role: 'principal', meta: null }]);
     const error = await refusalOf(createTestClient(principal.session).school.listStandalonePapers({ schoolId: school.id }));
     expect(schoolKindRefusalOf(error)).toBe('school');
