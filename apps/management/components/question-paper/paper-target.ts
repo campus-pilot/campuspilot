@@ -156,14 +156,16 @@ export const paperCalls = {
     isStandaloneTarget(target)
       ? client.school.getStandalonePaperDownload({ ...target, versionNo })
       : client.school.getQuestionPaperDownload({ ...target, versionNo }),
-  preview: (target: PaperTarget, versionNo: number) =>
-    isStandaloneTarget(target)
-      ? client.school.getStandalonePaperPreview({ ...target, versionNo })
-      : client.school.getQuestionPaperPreview({ ...target, versionNo }),
 };
 
-/** The query options of a saved version's HTML preview (its notices and placeholders), for either kind. */
-export const paperPreviewQueryOptions = (target: PaperTarget, versionNo: number) => ({
-  queryKey: ['question-paper', 'preview', ...targetKeyOf(target), versionNo] as const,
-  queryFn: () => paperCalls.preview(target, versionNo),
-});
+/**
+ * The query options of a saved version's HTML preview (its notices and
+ * placeholders), for either kind. Both use their procedure's own oRPC query
+ * options, so the keys sit under `orpc.school.key()` (school-wide
+ * invalidation reaches them) and an exam paper's preview shares its cache
+ * entry with the source preview dialogs, which read the same procedure.
+ */
+export const paperPreviewQueryOptions = (target: PaperTarget, versionNo: number) =>
+  isStandaloneTarget(target)
+    ? orpc.school.getStandalonePaperPreview.queryOptions({ input: { ...target, versionNo } })
+    : orpc.school.getQuestionPaperPreview.queryOptions({ input: { ...target, versionNo } });

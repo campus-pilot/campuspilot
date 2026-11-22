@@ -190,6 +190,14 @@ export default function SchoolLayout({ children }: { children: ReactNode }) {
     navbarActions: personal && isRealSchoolSection(pathname, schoolId) ? null : resolveAdminPageActions(page, params),
   };
 
+  // Nothing of the school's pages mounts before its kind is known, so no page asks for what a personal space has not.
+  const body = schoolQuery.isPending ? (
+    <p className="p-6 text-center text-sm text-muted-foreground">Loading the school…</p>
+  ) : kind === undefined ? (
+    <p className="p-6 text-center text-sm text-destructive">Unable to load this school.</p>
+  ) : null;
+  if (body) return <AdminShell state={state}>{body}</AdminShell>;
+
   return (
     <AdminShell state={state}>
       {personal && isRealSchoolSection(pathname, schoolId) ? (
