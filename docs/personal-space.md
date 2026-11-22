@@ -120,12 +120,23 @@ school of a kind the procedure does not serve is refused, **reads included**.
   learns nothing. Unlike the read-only gate, non-members are held too: a
   platform administrator's grants must not write real-school data into a
   personal space.
-- Platform administration (`systemAdmin.*`) is not held (the admin app renews
-  a personal space's trial with the ordinary Billing card).
+- Platform administration is not held (the admin app renews a personal
+  space's trial with the ordinary Billing card). It is an explicit fact of the
+  procedure, `meta.platformAdministration` (`platformAdminProcedure` in
+  `packages/api/src/index.ts`), never read from the procedure's path or input:
+  every `systemAdmin.*` procedure is built on it and no other procedure is
+  (`school-kind.integration.test.ts` checks both), so an MCP call, which
+  passes the catalogue path but needs none, is decided the same way.
 
-`requireAuth` decides both of its school gates, this one and the read-only
-gate, from one read (`readSchoolGateFacts`: kind, membership, suspension and
-plan in one query; `assertSchoolGatesByCaller`).
+`requireAuth` decides both of its school gates in order
+(`assertSchoolGatesByCaller`): the kind, then for a write the read-only gate
+(`assertSchoolWritableByCaller`, unchanged: members only, suspension and plan).
+The kind comes from a bounded process cache (`readSchoolKind`, at most
+`SCHOOL_KIND_CACHE_SIZE` schools, least recently used dropped first). It needs
+no expiry because a school's kind never changes; a missing school is not
+remembered. So a read of a school of a kind the procedure serves runs no gate
+query after the first; membership is read only to word a kind refusal, and the
+read-only facts only for a write.
 
 Upload routes outside oRPC hold the same rule with the kinds they serve:
 admissions, the school logo and exam question paper pages are
@@ -212,13 +223,16 @@ labelled `paper-details` holding a JSON object. `splitQuestionPaperDetails`
 (`packages/question-paper/src/details.ts`) takes the block out before the
 fragment is read (so it is never mistaken for the paper), parses it and
 normalises every value (whitespace collapsed, control characters removed, cut
-to 160 characters, empty is null). A missing or malformed block in the first answer is a
-repair problem (`DETAILS_MISSING_PROBLEM`), never on its own a reason to fail
-the job. A repaired answer that leaves it out takes the first answer's
-details when that one had a block. When no answer has a readable block, the
-version **states no details and does not change the paper's** (`details:
-'keep'` in `saveQuestionPaperVersion`): the stored details stay as the last
-version that stated them left them. Chat saves always state all four.
+to 160 characters, empty is null). A missing or malformed block is never on
+its own a reason for a second request or for failing the job: a first answer
+that is otherwise valid is saved at once. Only when the first answer needs a
+repair anyway is the missing block added to its problems
+(`DETAILS_MISSING_PROBLEM`), so the repair returns it too. A repaired answer
+that leaves it out takes the first answer's details when that one had a block.
+When no answer has a readable block, the version **states no details and does
+not change the paper's** (`details: 'keep'` in `saveQuestionPaperVersion`):
+the stored details stay as the last version that stated them left them. Chat
+saves always state all four.
 
 ## Assistant and MCP
 
@@ -228,12 +242,17 @@ version that stated them left them. Chat saves always state all four.
   features (`readSchoolKind`). A personal space's conversation has the
   standalone paper tools and showing a view; its facts block says it is a
   personal space (`PERSONAL_SPACE_FACT`, kept out of the cached instructions).
-- External MCP clients: the gate refuses other tools per `schoolId`, and the
-  listing leaves out tools that serve none of the kinds of the user's schools
-  (`schoolKindsOfUser`), so someone whose only school is a personal space sees
-  only its tools. A tool whose input has no `schoolId` (account-level, such as
-  `school.listMySchools`) is not held by the kind gate and is listed for every
+- External MCP clients: the gate refuses other tools per `schoolId`. The
+  listing may hide a tool only when the user's memberships prove it unusable
+  (`listingSchoolKindsOf`): a member's listing leaves out tools that serve none
+  of the kinds of their schools, so someone whose only school is a personal
+  space sees only its tools. A platform administrator (who acts on any school
+  through platform grants) and a user with no membership (nothing proves a
+  tool unusable) are never narrowed by kind. A tool whose input has no
+  `schoolId` (account-level, such as `school.listMySchools`) or that is
+  platform administration is not held by the kind gate and is listed for every
   kind (`toolSchoolKindsOf`), so such a person can still find their schoolId.
+  A tool call passes the tool's catalogue path to the procedure.
 - A saved version shows in the chat with the `standalone_question_paper` view
   (`paperId`, `versionNo`), like an exam paper's `question_paper` view.
 - The paper's chat is seeded with `{ kind: 'standalone_question_paper', paperId }`
@@ -245,6 +264,9 @@ version that stated them left them. Chat saves always state all four.
   details, and that when the user changes the school, class, subject or exam
   in the paper it must change the details in the same save.
 - There is no general assistant page and no voice mode in a personal space.
+  The server refuses voice there too (`voiceRefusal` in
+  `packages/assistant/src/voice/access.ts`, for the status read and for
+  admission), not only the screens.
 
 ## Management
 
@@ -259,13 +281,17 @@ version that stated them left them. Chat saves always state all four.
   overlay is not mounted there (`OnlyInRealSchool`).
 - The papers page (`StandalonePaperList`): `TableSearchBar` and
   `TableFilterBar` (School, Class, Subject, Exam, from the papers' details)
-  over a compact table; **Create question paper** creates a paper and opens it.
-  The paper is created on the click, not on its first photo, message or save:
-  the shared studio (its upload queue, detail polling, chat and page URLs) is
-  built around an existing paper id, and creating it lazily would need a
-  paper-less studio or an in-place change of the paper under a mounted upload
-  queue. An unused paper is deleted from its menu; nothing hides or prunes
-  papers. The filter values are read behind the same gates as the list and
+  over a compact table; **Create question paper** opens a paper to write. The
+  shared studio (its upload queue, detail polling, chat and page URLs) is built
+  around an existing paper id, so the paper exists before its first photo,
+  message or save. `createStandalonePaper` therefore returns an **unused**
+  paper the space already has (no page, no version, no conversation; the
+  oldest, `reused: true`) instead of creating another, under the school's row
+  lock so creations sent at once get the same paper; only without one does it
+  create a paper. A space holds at most `STANDALONE_PAPERS_PER_SPACE_LIMIT`
+  (500) papers, counting every paper; beyond that it refuses with
+  BAD_REQUEST and asks to delete some. An unused paper is deleted from its
+  menu; nothing hides or prunes papers. The filter values are read behind the same gates as the list and
   read again after every change to a paper and every delete.
 - The paper page (`StandalonePaperWorkspace`) is the exam paper studio:
   photos, generate, chat, versions, preview and download, fed by the
@@ -296,7 +322,12 @@ and features, and settings, all `systemAdmin.*`. Its sessions, staff,
 students and document settings (real-school `school.*` procedures) are not in
 its navigation, and their addresses say "Not available for a personal space"
 instead of calling procedures the kind gate refuses; the Owner card is not
-shown (the owner is the person the space belongs to).
+shown (the owner is the person the space belongs to), and
+`systemAdmin.updateSchoolOwner` refuses a personal space (BAD_REQUEST). A
+personal space has no location: its profile form has no location field and
+sends none, and `systemAdmin.updateSchool` refuses a `location` for one. The
+school pages wait for the school's kind before showing anything (a loading
+line), so a personal space never mounts a real-school page.
 
 ## Demo schools
 

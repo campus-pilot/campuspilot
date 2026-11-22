@@ -22,7 +22,8 @@ shell), details the AI states, and their own procedures. Everything below is abo
 exam papers unless it says otherwise; the shared services, the sanitiser, the renderer
 pipeline and the job serve both kinds. A standalone paper's details are not revisioned:
 every save that states them replaces all four; a job version whose answer states none (no
-readable `paper-details` block, also after the repair) leaves them unchanged. See
+readable `paper-details` block) leaves them unchanged. A missing block alone never asks the
+model for a repair: it is added to the problems only of an answer that needs one anyway. See
 [Personal space](personal-space.md).
 
 - A **paper** is one fact per `(session, exam, class, subject, mode)`, the

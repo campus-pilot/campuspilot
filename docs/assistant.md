@@ -722,6 +722,8 @@ Voice needs all of these, each its own fact (`voice/access.ts`, `voiceRefusal`):
    settings, edited on the admin app's School › AI page. Settings saved before
    voice existed read as off.
 4. **Nobody is impersonating the user.**
+5. **The school is not a personal space** (`school.kind`, docs/personal-space.md):
+   a personal space has no voice mode, refused on the server as well as hidden.
 
 `getStatus` reports the result as `voice.available`; the voice button is shown
 only then. When the platform has no voice model, the admin app's School › AI
