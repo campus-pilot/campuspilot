@@ -34,7 +34,8 @@ describe('delivery log, resend and failure alerts', () => {
   const billRunId = 'frun_deliverylogtest00001';
 
   beforeAll(async () => {
-    schoolId = (await createTestSchool({ name: 'Delivery Log School' })).id;
+    // `cadet`: the WhatsApp copy of results is sent only while the school has the Cadet Portal.
+    schoolId = (await createTestSchool({ name: 'Delivery Log School', features: ['cadet'] })).id;
     const admission = await createTestAdmission({ schoolId, name: 'Kavya Failed' });
     admissionId = admission.id;
     await db
