@@ -41,6 +41,7 @@ import {
   subjectsForClasses,
   type ClassSelectionValues,
 } from './exam-class-model';
+import { ExamAddClassButton, ExamAddClassDialog } from './exam-add-class';
 import { ExamAddSubjectButton, ExamAddSubjectDialog } from './exam-add-subject';
 
 export function ExamPlanCreation({
@@ -86,9 +87,9 @@ export function ExamPlanCreation({
                       <DialogDescription>
                         Choose the classes taking part and, per class, the
                         subjects that get a plan. Subjects missing here can be
-                        added for this examination only or to the classroom.
-                        Start the examination when you are ready to enter
-                        results.
+                        added for this examination only or to the classroom,
+                        and a missing class can be added to the school. Start
+                        the examination when you are ready to enter results.
                       </DialogDescription>
                     </DialogHeader>
                     {reviewing && (
@@ -108,9 +109,13 @@ export function ExamPlanCreation({
     </div>
   );
 }
-/** What the review keeps outside its keyed form: the person's changes to carry and the class whose Add subject dialog is open. */
-type CarryValues = { changes: PlanSelectionChanges; addingTo: string | null };
-const carrySchema = z.object({ changes: z.custom<PlanSelectionChanges>(), addingTo: z.string().nullable() });
+/**
+ * What the review keeps outside its keyed form: the person's changes to
+ * carry, the class whose Add subject dialog is open and whether the Add
+ * classroom dialog is open (both dialogs outlive the remount their save causes).
+ */
+type CarryValues = { changes: PlanSelectionChanges; addingTo: string | null; addingClass: boolean };
+const carrySchema = z.object({ changes: z.custom<PlanSelectionChanges>(), addingTo: z.string().nullable(), addingClass: z.boolean() });
 
 /**
  * Loads the review and renders a fresh form per `configurationVersion`. The
@@ -122,7 +127,8 @@ const carrySchema = z.object({ changes: z.custom<PlanSelectionChanges>(), adding
  * The person's changes are held here too (`carry`): adding a subject changes
  * the review, which remounts the form, and the new form starts from the new
  * review's defaults with those changes applied (`applyPlanSelectionChanges`).
- * A class that gets its first subject is selected.
+ * A class that gets its first subject is selected. A class added with Add
+ * classroom has no subjects yet, so it joins the review unselected.
  */
 function GenerationPreview({
   scope,
@@ -141,7 +147,7 @@ function GenerationPreview({
     validators: { onChange: z.object({ message: z.string().nullable() }) },
   });
   const carry = useForm({
-    defaultValues: { changes: NO_PLAN_SELECTION_CHANGES, addingTo: null } as CarryValues,
+    defaultValues: { changes: NO_PLAN_SELECTION_CHANGES, addingTo: null, addingClass: false } as CarryValues,
     validators: { onChange: carrySchema },
   });
   if (query.isPending) return <LoadingExam />;
@@ -167,6 +173,7 @@ function GenerationPreview({
         onRefusal={(message) => refusal.setFieldValue('message', message)}
         onSelectionChange={remember}
         onAddSubject={(classId) => carry.setFieldValue('addingTo', classId)}
+        onAddClass={() => carry.setFieldValue('addingClass', true)}
       />
       <carry.Subscribe selector={(state) => state.values.addingTo}>
         {(addingTo) => {
@@ -180,6 +187,11 @@ function GenerationPreview({
             />
           ) : null;
         }}
+      </carry.Subscribe>
+      <carry.Subscribe selector={(state) => state.values.addingClass}>
+        {(addingClass) =>
+          addingClass ? <ExamAddClassDialog scope={scope} onClose={() => carry.setFieldValue('addingClass', false)} /> : null
+        }
       </carry.Subscribe>
     </div>
   );
@@ -201,6 +213,7 @@ function GenerationForm({
   onRefusal,
   onSelectionChange,
   onAddSubject,
+  onAddClass,
 }: {
   scope: ExamScope;
   preview: ExamPlanPreviewDto;
@@ -211,6 +224,7 @@ function GenerationForm({
   onRefusal: (message: string | null) => void;
   onSelectionChange: (value: ClassSelectionValues) => void;
   onAddSubject: (classId: string) => void;
+  onAddClass: () => void;
 }) {
   const queries = useExamCache();
   const exists = preview.existingPlanCount > 0;
@@ -286,6 +300,7 @@ function GenerationForm({
                       )
                     : undefined
                 }
+                actions={editable ? <ExamAddClassButton scope={scope} onAdd={onAddClass} /> : undefined}
               />
             )}
           </form.Field>
@@ -296,7 +311,8 @@ function GenerationForm({
       ) : preview.planCount === 0 ? (
         <Notice error>
           No class has subjects with valid assessment modes yet. Add a subject
-          to a class here or in class settings before creating this plan.
+          to a class here or in class settings, or add a classroom, before
+          creating this plan.
         </Notice>
       ) : null}
       <form.Subscribe

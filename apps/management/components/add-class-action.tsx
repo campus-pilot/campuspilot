@@ -31,11 +31,20 @@ function slugify(value: string) {
     .replace(/^-|-$/g, '');
 }
 
-function AddClassDialog({
+/**
+ * The Add classroom dialog: a school-wide class with its initial sections.
+ * Shared by `AddClassAction` and other screens that create a class in place
+ * (an examination's Create plan). `onCreated` runs after the class lists are
+ * refreshed and before the dialog closes, so a caller can refresh what it
+ * shows from the classes.
+ */
+export function AddClassDialog({
   schoolId,
+  onCreated,
   onClose,
 }: {
   schoolId: string;
+  onCreated?: () => Promise<void> | void;
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -60,6 +69,7 @@ function AddClassDialog({
             queryKey: orpc.school.getDashboard.key({ input: { schoolId } }),
           }),
         ]);
+        await onCreated?.();
         onClose();
       } catch (error) {
         form.setErrorMap({

@@ -33,6 +33,8 @@ export type ExamSubjectChoice = {
  * taking part stays selectable even without subjects. `subjects` adds a
  * checkbox per subject choosing which subjects get a plan, and
  * `renderAddSubject` the caller's (permission-gated) Add subject control.
+ * `actions` are the caller's (permission-gated) controls beside Select all,
+ * such as Add classroom.
  */
 export function ExamClassSelection({
   classes,
@@ -42,6 +44,7 @@ export function ExamClassSelection({
   error,
   subjects,
   renderAddSubject,
+  actions,
   onChange,
 }: {
   classes: ReviewClass[];
@@ -51,6 +54,7 @@ export function ExamClassSelection({
   error?: string;
   subjects?: ExamSubjectChoice;
   renderAddSubject?: (schoolClass: ReviewClass) => ReactNode;
+  actions?: ReactNode;
   onChange: (classIds: string[]) => void;
 }) {
   const all = allSelectableClassIds(classes, baseline);
@@ -60,6 +64,7 @@ export function ExamClassSelection({
         count={selected.length}
         total={all.length}
         disabled={disabled}
+        actions={actions}
         onSelectAll={() => onChange(all)}
         onDeselectAll={() => onChange([])}
       />
@@ -101,12 +106,14 @@ function SelectionToolbar({
   count,
   total,
   disabled,
+  actions,
   onSelectAll,
   onDeselectAll,
 }: {
   count: number;
   total: number;
   disabled: boolean;
+  actions?: ReactNode;
   onSelectAll: () => void;
   onDeselectAll: () => void;
 }) {
@@ -116,6 +123,7 @@ function SelectionToolbar({
         {count} of {total} classes take part
       </p>
       <div className="flex flex-wrap gap-2">
+        {actions}
         <Button type="button" variant="outline" disabled={disabled || count === total} onClick={onSelectAll}>
           Select all
         </Button>
