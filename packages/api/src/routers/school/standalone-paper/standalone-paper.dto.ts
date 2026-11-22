@@ -77,8 +77,18 @@ export const standalonePaperDetailsSchema = z.object({
 });
 export type StandalonePaperDetailsDto = z.infer<typeof standalonePaperDetailsSchema>;
 
+/**
+ * The most standalone papers one personal space holds (docs/personal-space.md).
+ * A hard cap: creating one more is refused until a paper is deleted.
+ */
+export const STANDALONE_PAPERS_PER_SPACE_LIMIT = 500;
+
 export const createStandalonePaperInputSchema = z.object({ schoolId: id.describe('School id of the personal space.') });
-export const createStandalonePaperOutputSchema = z.object({ paperId: z.string() });
+export const createStandalonePaperOutputSchema = z.object({
+  paperId: z.string(),
+  /** An unused paper the space already had was returned instead of a new one (`createStandalonePaper`). */
+  reused: z.boolean(),
+});
 
 /** The detail filters of the paper list; each is matched exactly against the paper's current detail. */
 export const standalonePaperFiltersSchema = z

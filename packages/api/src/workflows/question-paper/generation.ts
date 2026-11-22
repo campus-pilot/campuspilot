@@ -279,7 +279,7 @@ export async function runQuestionPaperGeneration(
     if (first.refusal) throw new QuestionPaperJobFailure('model_rejected', undefined, 'The model declined to answer.');
     if (first.unfinished) throw new QuestionPaperJobFailure('output_too_long', undefined, 'The answer stopped on the output limit.');
 
-    // The first answer must carry a standalone paper's details (a missing block asks for a repair); a repaired one need not.
+    // A repair of the first answer also asks for a standalone paper's missing details block; a repaired answer need not have one.
     let validation = await run('validate:1', () => validateAnswer(deps, plan, first.text, { requireDetails: true }));
     // The details of the first answer, for a repaired answer that leaves its details block out.
     const firstDetails = validation.ok ? undefined : detailsOfAnswer(plan, first.text);
@@ -663,11 +663,19 @@ async function callModel({
  * the sanitiser removes is not a problem, so the answer that passes is the
  * extracted fragment, which the save cleans again.
  */
+/**
+ * `requireDetails`: whether a standalone paper's missing details block joins
+ * the problems when the answer has others (true for the first answer, whose
+ * problems a repair fixes; false for the repaired one, after which nothing is
+ * asked again).
+ */
 async function validateAnswer(deps: GenerationDeps, plan: Plan, text: string, options: { requireDetails: boolean }): Promise<Validation> {
   // A standalone paper's answer carries its details in their own fenced block, taken out before the fragment is read.
   const standalone = isStandalonePaper(plan.scope);
   const split = standalone ? splitQuestionPaperDetails(text) : null;
-  // A missing or malformed details block is a problem for the repair, never on its own a reason to fail the job.
+  // A missing or malformed details block is asked for again only alongside the paper's own problems, in a repair that
+  // happens anyway. On its own it is never a problem: it neither fails the job nor costs a second paper request (the
+  // version then keeps the paper's stored details, `savedDetails`).
   const detailsProblems = split && !split.found && options.requireDetails ? [DETAILS_MISSING_PROBLEM] : [];
   const html = renameReservedClasses(extractQuestionPaperFragment(split ? split.text : text));
   if (html === '') return { ok: false, html, problems: ['The answer is empty. Return the HTML fragment of the paper.'] };
@@ -680,7 +688,6 @@ async function validateAnswer(deps: GenerationDeps, plan: Plan, text: string, op
   if (!hasPaperContent(checked.html)) {
     return { ok: false, html, problems: ['After cleaning, the answer holds no paper: it needs block elements (p, div, h1-h6, ul, ol, table, figure) with readable text.', ...detailsProblems] };
   }
-  if (detailsProblems.length > 0) return { ok: false, html, problems: detailsProblems };
   return split ? { ok: true, html, details: split.details, detailsFound: split.found } : { ok: true, html };
 }
 

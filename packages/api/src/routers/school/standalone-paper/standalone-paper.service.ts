@@ -1,13 +1,15 @@
-import type { DatabaseExecutor } from '@campuspilot/db';
+import type { Database, DatabaseExecutor } from '@campuspilot/db';
+import { assistantConversationTable } from '@campuspilot/db/schema/assistant';
 import {
   examQuestionPaperJobTable,
   examQuestionPaperPageTable,
   examQuestionPaperTable,
   examQuestionPaperVersionTable,
 } from '@campuspilot/db/schema/exam-question-paper';
-import { and, asc, count, desc, eq, ilike, inArray, isNotNull, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, ilike, inArray, isNotNull, notExists, or, sql, type SQL } from 'drizzle-orm';
 import type { z } from 'zod';
 
+import { lockSchool } from '../../../billing/billing.service';
 import { rpcError } from '../../../errors';
 import { createNextPageCursor, createPaginatedResult, resolvePaginationInput } from '../../../paginations';
 import { conversationRefOf, latestPaperConversationId } from '../question-paper/question-paper.conversations';
@@ -24,6 +26,7 @@ import {
 import type { StandalonePaperScope } from '../question-paper/question-paper.scope';
 import { STANDALONE_QUESTION_PAPER_PRINTS } from '../question-paper/question-paper.standalone-shell';
 import { getVersion } from '../question-paper/question-paper.version.service';
+import { STANDALONE_PAPERS_PER_SPACE_LIMIT } from './standalone-paper.dto';
 import type {
   getStandalonePaperOutputSchema,
   listStandalonePaperFilterOptionsOutputSchema,
@@ -52,14 +55,57 @@ export function detailsOf(paper: Pick<PaperRow, 'detailsSchoolName' | 'detailsCl
   };
 }
 
-/** Creates an empty standalone paper in a personal space. The caller has checked the school's kind and the permission. */
-export async function createStandalonePaper(db: DatabaseExecutor, input: { schoolId: string; userId: string }): Promise<{ paperId: string }> {
-  const [paper] = await db
-    .insert(examQuestionPaperTable)
-    .values({ schoolId: input.schoolId, kind: 'standalone', createdBy: input.userId })
-    .returning({ id: examQuestionPaperTable.id });
-  if (!paper) throw rpcError.internal();
-  return { paperId: paper.id };
+/**
+ * A paper for the person to start on (`createStandalonePaper`), in one
+ * transaction under the personal space's row lock, so creations sent at once
+ * see each other:
+ *
+ * - An **unused** paper the space already has is returned instead of a new
+ *   one (`reused: true`). Unused is decided from three facts, each read on its
+ *   own: the paper has no page (reserved or stored), no saved version
+ *   (`latest_version_no = 0`), and no conversation shared with it
+ *   (`assistant_conversation.standalone_paper_id`, live or deleted). Such a
+ *   paper holds nothing anyone made, so repeated clicks or a looping agent
+ *   never pile up empty papers. The oldest unused one is returned.
+ * - Otherwise a new paper is created, unless the space already holds
+ *   {@link STANDALONE_PAPERS_PER_SPACE_LIMIT} papers (BAD_REQUEST saying so).
+ *
+ * The caller has checked the school's kind and the permission.
+ */
+export async function createStandalonePaper(db: Database, input: { schoolId: string; userId: string }): Promise<{ paperId: string; reused: boolean }> {
+  return db.transaction(async (tx) => {
+    await lockSchool(tx, input.schoolId);
+    const standalone = and(eq(examQuestionPaperTable.schoolId, input.schoolId), eq(examQuestionPaperTable.kind, 'standalone'));
+    const [unused] = await tx
+      .select({ id: examQuestionPaperTable.id })
+      .from(examQuestionPaperTable)
+      .where(
+        and(
+          standalone,
+          eq(examQuestionPaperTable.latestVersionNo, 0),
+          notExists(tx.select({ id: examQuestionPaperPageTable.id }).from(examQuestionPaperPageTable).where(eq(examQuestionPaperPageTable.paperId, examQuestionPaperTable.id))),
+          notExists(
+            tx
+              .select({ id: assistantConversationTable.id })
+              .from(assistantConversationTable)
+              .where(and(eq(assistantConversationTable.schoolId, input.schoolId), eq(assistantConversationTable.standalonePaperId, examQuestionPaperTable.id))),
+          ),
+        ),
+      )
+      .orderBy(asc(examQuestionPaperTable.createdAt), asc(examQuestionPaperTable.id))
+      .limit(1);
+    if (unused) return { paperId: unused.id, reused: true };
+    const [held] = await tx.select({ count: count() }).from(examQuestionPaperTable).where(standalone);
+    if ((held?.count ?? 0) >= STANDALONE_PAPERS_PER_SPACE_LIMIT) {
+      throw rpcError.badRequest(`A personal space can hold at most ${STANDALONE_PAPERS_PER_SPACE_LIMIT} question papers. Delete some to create another.`);
+    }
+    const [paper] = await tx
+      .insert(examQuestionPaperTable)
+      .values({ schoolId: input.schoolId, kind: 'standalone', createdBy: input.userId })
+      .returning({ id: examQuestionPaperTable.id });
+    if (!paper) throw rpcError.internal();
+    return { paperId: paper.id, reused: false };
+  });
 }
 
 /** The row of a resolved standalone paper, or NOT_FOUND (deleted meanwhile). */

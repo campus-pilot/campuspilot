@@ -56,6 +56,7 @@ import {
   type SavedVersion,
 } from '../question-paper/question-paper.version.service';
 import * as dto from './standalone-paper.dto';
+import { STANDALONE_PAPERS_PER_SPACE_LIMIT } from './standalone-paper.dto';
 import {
   createStandalonePaper,
   getStandalonePaper,
@@ -156,7 +157,7 @@ export const schoolStandalonePaperRouter = {
     }),
 
   createStandalonePaper: protectedProcedure
-    .route(route('Create a standalone question paper', 'Create an empty question paper in the personal space and return its paperId. Write it with saveStandalonePaperVersion (after learn_standalone_question_paper).'))
+    .route(route('Create a standalone question paper', `Get a question paper to write in the personal space and return its paperId: an unused paper the space already has (no pages, versions or conversation; reused true), or a new one. At most ${STANDALONE_PAPERS_PER_SPACE_LIMIT} papers per space. Write it with saveStandalonePaperVersion (after learn_standalone_question_paper).`))
     .meta(tool('write'))
     .input(dto.createStandalonePaperInputSchema)
     .use(managePapers)

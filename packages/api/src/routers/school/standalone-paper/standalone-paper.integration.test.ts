@@ -18,6 +18,7 @@ import { defaultGenerationDeps, runQuestionPaperGeneration, type StepRunner } fr
 import type { QuestionPaperModel, TextResult } from '../../../workflows/question-paper/model';
 import { STANDALONE_PAPER_JOB_SYSTEM_PROMPT, TEMPLATE_PRINTS_START } from '../../../workflows/question-paper/prompt';
 import { STANDALONE_QUESTION_PAPER_SHELL } from '../question-paper/question-paper.standalone-shell';
+import { STANDALONE_PAPERS_PER_SPACE_LIMIT } from './standalone-paper.dto';
 import { handleStandalonePaperPageStore } from './standalone-paper.http';
 
 /** The worker's image job runs inline (`test/image-derivatives.ts`), as in the exam paper job's suite. */
@@ -77,6 +78,28 @@ describe('standalone question papers', () => {
     const searched = await client.school.listStandalonePapers({ schoolId, searchQuery: 'class 9' });
     expect(searched.items.map((item) => item.paperId)).toEqual([paperId]);
     expect((await client.school.listStandalonePapers({ schoolId })).pagination.totalItems).toBe(2);
+  });
+
+  it('returns an unused paper instead of creating another, and caps the papers of a space', async () => {
+    const { client, schoolId } = await personalSpaceOwner();
+    const first = await client.school.createStandalonePaper({ schoolId });
+    expect(first.reused).toBe(false);
+    // No page, no version, no conversation: the same paper again, also for creations sent at once.
+    const [again, alsoAgain] = await Promise.all([client.school.createStandalonePaper({ schoolId }), client.school.createStandalonePaper({ schoolId })]);
+    expect(again).toEqual({ paperId: first.paperId, reused: true });
+    expect(alsoAgain.paperId).toBe(first.paperId);
+    // Once it holds a page it is used: a new paper is created.
+    await client.school.reserveStandalonePaperPages({ schoolId, paperId: first.paperId, fileNames: ['page.jpg'] });
+    const second = await client.school.createStandalonePaper({ schoolId });
+    expect(second).toMatchObject({ reused: false });
+    expect(second.paperId).not.toBe(first.paperId);
+    await client.school.saveStandalonePaperVersion({ schoolId, paperId: second.paperId, expectedVersionNo: 0, html: ENGLISH_SCIENCE, details: DETAILS });
+
+    // At the cap, nothing more is created.
+    await db.insert(examQuestionPaperTable).values(
+      Array.from({ length: STANDALONE_PAPERS_PER_SPACE_LIMIT - 2 }, () => ({ schoolId, kind: 'standalone' as const, latestVersionNo: 1 })),
+    );
+    await expect(client.school.createStandalonePaper({ schoolId })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
 
   it('prints in the built-in plain shell, with the body once', async () => {
@@ -183,23 +206,27 @@ describe('the generation job for a standalone paper', () => {
     expect(version).toMatchObject({ source: 'ai_job', templateRevisionId: null });
   });
 
-  it('asks for the details in the repair, and keeps the paper’s stored details when no answer states them', async () => {
+  it('saves a valid first answer without a details block at once, keeping the paper’s stored details', async () => {
     const { schoolId, paperId, client, job } = await queueStandaloneJob();
     // The paper already states details from an earlier version.
     await client.school.saveStandalonePaperVersion({ schoolId, paperId, expectedVersionNo: 0, html: ENGLISH_SCIENCE, details: DETAILS });
-    const { model, requests } = scriptedModel([ENGLISH_SCIENCE, ENGLISH_SCIENCE]);
+    const { model, requests } = scriptedModel([ENGLISH_SCIENCE]);
     expect(await runJob(job.id, model)).toEqual({ status: 'succeeded', versionNo: 2 });
-    expect(requests).toHaveLength(2);
-    expect(JSON.stringify(requests[1]!.parts)).toContain('no readable paper-details block');
+    // A missing block alone costs no second request.
+    expect(requests).toHaveLength(1);
     const [saved] = await db.select().from(examQuestionPaperTable).where(eq(examQuestionPaperTable.id, paperId));
     // A version that states no details does not change them.
     expect(saved).toMatchObject({ detailsSchoolName: DETAILS.schoolName, detailsClassName: DETAILS.className, detailsSubjectName: DETAILS.subjectName, detailsExamName: DETAILS.examName });
   });
 
-  it('takes the details of a repair that adds the block', async () => {
+  it('asks for the missing block in a repair the paper needs anyway, and takes its details', async () => {
     const { paperId, job } = await queueStandaloneJob();
-    const { model } = scriptedModel([ENGLISH_SCIENCE, withDetails(ENGLISH_SCIENCE, { ...DETAILS, className: 'Class 6' })]);
+    const broken = ENGLISH_SCIENCE.replace('data-math="\\mathrm{H_2O}"', 'data-math="\\frac{1"');
+    expect(broken).not.toBe(ENGLISH_SCIENCE);
+    const { model, requests } = scriptedModel([broken, withDetails(ENGLISH_SCIENCE, { ...DETAILS, className: 'Class 6' })]);
     expect(await runJob(job.id, model)).toEqual({ status: 'succeeded', versionNo: 1 });
+    expect(requests).toHaveLength(2);
+    expect(JSON.stringify(requests[1]!.parts)).toContain('no readable paper-details block');
     const [saved] = await db.select().from(examQuestionPaperTable).where(eq(examQuestionPaperTable.id, paperId));
     expect(saved!.detailsClassName).toBe('Class 6');
   });
