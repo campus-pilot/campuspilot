@@ -8,10 +8,17 @@ import { studentTable } from "@campuspilot/db/schema/student";
 import { SYSTEM_ACTIONS } from "@campuspilot/opa/policies/system";
 import { and, asc, count, countDistinct, eq, sql } from "drizzle-orm";
 
+import { examQuestionPaperTable, examQuestionPaperVersionTable } from "@campuspilot/db/schema/exam-question-paper";
+import { readSchoolFeatureConfig } from "@campuspilot/db/feature-flags/store";
+
+import { schoolSpendWindow, schoolWindowSpendUsd } from "../../../assistant/spend";
 import { rpcError, toRpcError } from "../../../errors";
+import { PERSONAL_SPACE_STORAGE_QUOTA_BYTES } from "../../../personal-space/personal-space.limits";
+import { personalSpaceStoredBytes } from "../../../personal-space/personal-space.storage";
 import { platformAdminProcedure } from "../../../index";
 import { requireSystemPermission } from "../../../permissions/system";
 import {
+  personalSpaceStatsOutputSchema,
   platformStatsOutputSchema,
   schoolStatsInputSchema,
   schoolStatsOutputSchema,
@@ -179,6 +186,60 @@ export const statsRouter = {
                 )),
               }
             : null,
+        };
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
+  getPersonalSpaceStats: platformAdminProcedure
+    .route({
+      summary: "Read personal space statistics (platform admin only)",
+      description:
+        "Platform-administrator tool. Read one personal space's standalone question papers and versions, its stored bytes against its storage quota, and its AI spend in the current spend window against the assistant's limit. Refused for a school that is not a personal space. Not intended for school users.",
+      tags: ["System Admin", "Stats"],
+    })
+    .meta({ mcp: MCP_META })
+    .input(schoolStatsInputSchema)
+    .use(requireSystemPermission(SYSTEM_ACTIONS.READ_SCHOOL_STATS))
+    .output(personalSpaceStatsOutputSchema)
+    .handler(async ({ context, input }) => {
+      const { schoolId } = input;
+      try {
+        const [school] = await context.db
+          .select({ kind: schoolTable.kind })
+          .from(schoolTable)
+          .where(eq(schoolTable.id, schoolId))
+          .limit(1);
+        if (!school) throw rpcError.notFound("School");
+        if (school.kind !== "personal") throw rpcError.badRequest("This school is not a personal space.");
+        const now = new Date();
+        const [[papers], [versions], storedBytes, window, spentUsd, assistant] = await Promise.all([
+          context.db
+            .select({ total: count() })
+            .from(examQuestionPaperTable)
+            .where(and(eq(examQuestionPaperTable.schoolId, schoolId), eq(examQuestionPaperTable.kind, "standalone"))),
+          context.db
+            .select({ total: count() })
+            .from(examQuestionPaperVersionTable)
+            .where(and(eq(examQuestionPaperVersionTable.schoolId, schoolId), eq(examQuestionPaperVersionTable.paperKind, "standalone"))),
+          personalSpaceStoredBytes(context.db, schoolId),
+          schoolSpendWindow(context.db, schoolId, now),
+          schoolWindowSpendUsd(context.db, schoolId, now),
+          readSchoolFeatureConfig(context.db, schoolId, "assistant"),
+        ]);
+        return {
+          papers: papers?.total ?? 0,
+          versions: versions?.total ?? 0,
+          storedBytes,
+          storageQuotaBytes: PERSONAL_SPACE_STORAGE_QUOTA_BYTES,
+          aiSpend: {
+            spentUsd,
+            settingsValid: assistant.status !== "invalid",
+            monthlyLimitUsd: assistant.status === "invalid" ? null : (assistant.config?.monthlyLimitUsd ?? null),
+            windowStart: window.start,
+            windowEnd: window.end,
+          },
         };
       } catch (error) {
         throw toRpcError(error);

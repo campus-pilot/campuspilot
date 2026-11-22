@@ -19,6 +19,7 @@ import { handleSchoolManifestBlob } from '../routers/school/manifest/manifest.bl
 import { addBillingPeriods } from '../billing/billing.contract';
 import { SELF_SERVICE_ASSISTANT_MONTHLY_LIMIT_USD } from '../school-creation/school-creation.contract';
 import { personalSpaceName, personalSpaceRefusalOf, UNNAMED_PERSONAL_SPACE_NAME } from './personal-space.contract';
+import { PERSONAL_SPACE_STORAGE_QUOTA_BYTES } from './personal-space.limits';
 import { createPersonalSpaceAfterGoogleSignUp, readPersonalSpaceStatus } from './personal-space.service';
 
 /** Personal spaces (docs/personal-space.md). */
@@ -160,6 +161,19 @@ describe('what a personal space shows in public', () => {
     expect((await handleSchoolManifestBlob({ db }, { schoolId })).status).toBe(404);
     expect((await handleCadetManifestBlob({ db }, { schoolId })).status).toBe(404);
     expect((await handleSchoolLogoBlob({ db }, { schoolId, size: '192' }, new Request('http://localhost/logo'))).status).toBe(404);
+  });
+});
+
+describe('what platform administration reads about a personal space', () => {
+  it('its papers, versions, storage against the quota and AI spend, and nothing for a real school', async () => {
+    const { client, schoolId } = await personalSpaceOwner();
+    await client.school.createStandalonePaper({ schoolId });
+    const admin = createTestClient(await createAdminSession());
+    const stats = await admin.systemAdmin.getPersonalSpaceStats({ schoolId });
+    expect(stats).toMatchObject({ papers: 1, versions: 0, storedBytes: 0, storageQuotaBytes: PERSONAL_SPACE_STORAGE_QUOTA_BYTES, aiSpend: { spentUsd: expect.any(String), settingsValid: true } });
+    expect(stats.aiSpend.monthlyLimitUsd).toBe(SELF_SERVICE_ASSISTANT_MONTHLY_LIMIT_USD);
+    const school = await createTestSchool();
+    await expectRpcCode(admin.systemAdmin.getPersonalSpaceStats({ schoolId: school.id }), 'BAD_REQUEST');
   });
 });
 

@@ -84,6 +84,8 @@ const organizationColumns: DataTableColumnDef<SchoolDto>[] = [
   {
     accessorKey: 'location',
     header: 'Location',
+    // A personal space has no location: a dash, as for a missing registration.
+    cell: ({ row }) => (row.original.location === '' ? '—' : row.original.location),
   },
   {
     id: 'registrationNo',
@@ -97,9 +99,13 @@ const organizationColumns: DataTableColumnDef<SchoolDto>[] = [
     header: 'Status',
     enableSorting: false,
     // Demo rows always show their seeding job's own status (which reads
-    // "Onboarded" once it succeeded); other rows show onboarding.
+    // "Onboarded" once it succeeded); a personal space has no guided setup,
+    // so it shows no status (its Personal badge says what it is); other rows
+    // show onboarding.
     cell: ({ row }) =>
-      row.original.isDemo ? (
+      row.original.kind === 'personal' ? (
+        <span className="text-muted-foreground">—</span>
+      ) : row.original.isDemo ? (
         <DemoSchoolJobStatus schoolId={row.original.id} />
       ) : (
         <Badge
