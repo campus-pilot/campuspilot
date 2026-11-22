@@ -145,8 +145,8 @@ Cadet visibility rule, and the checklist for extending notices.
 
 Before changing anything question-paper-related (the `exam_question_paper_*`
 tables, `routers/school/question-paper` and its MCP tools, a school's quick
-papers (standalone papers of a real school, their `print_layout`, session,
-details and `school.standalone_paper.oversee`), the Question papers page and
+papers (standalone papers of a real school, their `print_layout`, printed
+heading snapshot, details and `school.standalone_paper.oversee`), the Question papers page and
 its sidebar entry, the HTML fragment
 rules and limits in `packages/question-paper`, the `question_paper_body`
 sanitiser, the renderer and the `question_paper`

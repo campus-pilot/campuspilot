@@ -107,12 +107,7 @@ export type StandalonePaperDetailsDto = z.infer<typeof standalonePaperDetailsSch
  */
 export { STANDALONE_PAPERS_PER_SPACE_LIMIT } from '../../../personal-space/personal-space.limits';
 
-export const createStandalonePaperInputSchema = z.object({
-  schoolId: id.describe('School id (a school or a personal space).'),
-  sessionId: id
-    .optional()
-    .describe("In a school (required there): the academic session the paper belongs to, whose years its template prints. Not sent for a personal space, which has no sessions."),
-});
+export const createStandalonePaperInputSchema = z.object({ schoolId: id.describe('School id (a school or a personal space).') });
 export const createStandalonePaperOutputSchema = z.object({
   paperId: z.string(),
   /** An unused paper the space already had was returned instead of a new one (`createStandalonePaper`). */
@@ -139,8 +134,6 @@ export const listStandalonePapersInputSchema = createListInputSchema({
 /** One paper as the list shows it. */
 export const standalonePaperListItemSchema = z.object({
   paperId: z.string(),
-  /** The session a school's quick paper belongs to (papers of every session are listed); null in a personal space. */
-  sessionId: z.string().nullable(),
   details: standalonePaperDetailsSchema,
   pageCount: z.number().int(),
   latestVersionNo: z.number().int(),
@@ -169,8 +162,6 @@ export const standalonePaperFactsSchema = z.object({
   paperId: z.string(),
   /** How the paper prints: with the school's template (a school's quick paper), or on the plain page (a personal space's). */
   printLayout: z.enum(['school_template', 'plain']),
-  /** The session a school's quick paper belongs to; null in a personal space. */
-  sessionId: z.string().nullable(),
   details: standalonePaperDetailsSchema,
   pageCount: z.number().int(),
   pageRevision: z.number().int(),

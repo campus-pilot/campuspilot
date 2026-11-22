@@ -50,8 +50,9 @@ const pagePermissions = (schoolId: string): PermissionCheck[] => [
 ];
 
 /**
- * Creates a quick paper in the session (or reuses an unused one of the
- * person's) and opens it on its first screen: photos, a PDF or a description.
+ * Creates a quick paper (or reuses an unused one of the person's) and opens it
+ * on its first screen: photos, a PDF or a description. It belongs to no
+ * session; it opens under the session the page is in.
  * Why creating failed is said beside the button until the next attempt.
  */
 export function CreateQuickPaperButton({ scope, placement }: { scope: QuestionPapersScope; placement: 'header' | 'empty' }) {
@@ -68,7 +69,7 @@ export function CreateQuickPaperButton({ scope, placement }: { scope: QuestionPa
           type="button"
           variant={placement === 'header' ? 'default' : 'outline'}
           disabled={create.isPending}
-          onClick={() => create.mutate({ schoolId: scope.schoolId, sessionId: scope.sessionId })}
+          onClick={() => create.mutate({ schoolId: scope.schoolId })}
         >
           <Plus data-icon="inline-start" aria-hidden />
           {create.isPending ? 'Creating…' : 'Create question paper'}
@@ -185,7 +186,7 @@ function usePaperFilters(scope: QuestionPapersScope): TableFilterConfig<keyof Sc
 
 /**
  * A school's Question papers page (docs/question-papers.md "The Question
- * papers page"): the session's quick papers and exam papers in one compact
+ * papers page"): the school's quick papers and the session's exam papers in one compact
  * table under the standard search and filter bars, most recently changed
  * first. It opens on quick papers; an exam paper is listed only once it has a
  * version unless a status is picked. Behind the same gates as its procedures:

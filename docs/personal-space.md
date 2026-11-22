@@ -7,8 +7,8 @@ writes the whole printed paper, heading included. It is a school of kind
 read-only gate all work exactly as for a school. It holds only **standalone
 question papers**: papers with no session, examination, class, subject or
 mode, and no school template. A real school has standalone papers too, its
-**quick papers**, which print with the school's template and belong to a
-session: see [Question papers, "Quick papers in a school"](question-papers.md#quick-papers-in-a-school),
+**quick papers**, which print with the school's template and, like a
+personal space's, belong to no session: see [Question papers, "Quick papers in a school"](question-papers.md#quick-papers-in-a-school),
 which also records who reaches which paper (`oversee`) for both kinds.
 
 This guide is the canonical reference. Read it before changing who gets a
@@ -28,7 +28,7 @@ and `0080_personal-space-limits.sql`):
 | One per person | partial unique index `school_personal_owner_unique` on `owner_user_id` where `kind = 'personal'` | At most one live personal space per owner (a backstop; `personal_space_created_at` is the rule). |
 | Not a demo | CHECK `school_personal_not_demo_check` | A demo school is never a personal space. |
 | Paper kind | `exam_question_paper.kind` (`exam` \| `standalone`, default `exam`) | An exam paper keyed by its plan, or a standalone paper. Never changed. |
-| Exam key | `session_id`, `exam_slug`, `class_id`, `subject_slug`, `mode_slug` (nullable) | All set for an exam paper; the last four null for a standalone one, whose `session_id` is set exactly when it prints with the school's template (a school's quick paper) and null in a personal space (CHECK `exam_question_paper_kind_key_check`). The unique key is unchanged: NULLs never collide. Code that reads an exam paper's key from a row uses `examKeyPart` (a null there is a broken row). |
+| Exam key | `session_id`, `exam_slug`, `class_id`, `subject_slug`, `mode_slug` (nullable) | All set for an exam paper, all null for a standalone one, a school's quick paper included (CHECK `exam_question_paper_kind_key_check`). The unique key is unchanged: NULLs never collide. Code that reads an exam paper's key from a row uses `examKeyPart` (a null there is a broken row). |
 | Print layout | `exam_question_paper.print_layout` (`school_template` \| `plain`) | `plain` for every paper of a personal space (the built-in shell), `school_template` for an exam paper and a school's quick paper. Set by `createStandalonePaper` from the school's kind and never changed (migration 0083). |
 | Paper details | `details_school_name`, `details_class_name`, `details_subject_name`, `details_exam_name` (nullable text, at most 160 characters each), `details_max_marks` (nullable whole number, 1 to 10,000) | What a standalone paper states about its school, class, subject, examination and maximum marks. Always null for an exam paper (same CHECK). **Not revisioned**: every saved version overwrites all five in the save's own transaction with the details that save supplied. |
 | Version template | `exam_question_paper_version.template_revision_id` (nullable), `paper_kind` and `paper_print_layout` | Null exactly for a version of a `plain` paper (CHECK `exam_question_paper_version_template_check`); `paper_kind` and `paper_print_layout` are held equal to the paper's by the composite foreign keys `(paper_id, paper_kind)` and `(paper_id, paper_print_layout)`. |

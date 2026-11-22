@@ -25,7 +25,7 @@ import { convertDocumentPdf } from '../document/document.render';
 import { assertPersonalSpaceStorageRoom, assertStandaloneVersionRoom } from '../../../personal-space/personal-space.storage';
 import { documentDownloadUrl, persistDocumentObject } from '../document/document.storage';
 import { attachmentFigureIds, attachmentFigureProblems, chatFiguresOf, convertAttachmentFigures, isAttachmentFigureId, type ChatFigures } from './question-paper.attachments';
-import { buildPaperContext } from './question-paper.print-context';
+import { buildPaperContext, currentQuickPaperPrintedDetails } from './question-paper.print-context';
 import { conversationRefOf, isPaperChat, type PaperConversationRef } from './question-paper.conversations';
 import { createMathRenderer, renderMathSpans } from './question-paper.math';
 import {
@@ -420,20 +420,15 @@ async function versionNamesOf(db: DatabaseExecutor, scope: ResolvedPaper, versio
 }
 
 /**
- * The heading details a new version of a quick paper prints and keeps
- * (`printed_details`): the ones the save states, else the paper's as stored.
- * Null for any other paper: an exam paper prints its plan's names, a plain
- * paper carries its heading in its body.
+ * The heading a new version of a quick paper prints and keeps
+ * (`printed_details`, `currentQuickPaperPrintedDetails`): the names and marks
+ * the save states, else the paper's as stored, with the school's active
+ * session. Null for any other paper: an exam paper prints its plan's facts, a
+ * plain paper carries its heading in its body.
  */
-function printedDetailsOf(scope: ResolvedPaper, stated: QuestionPaperDetails | undefined, paper: PaperRow | undefined): QuestionPaperPrintedDetails | null {
+async function printedDetailsFor(db: DatabaseExecutor, scope: ResolvedPaper, stated: QuestionPaperDetails | undefined): Promise<QuestionPaperPrintedDetails | null> {
   if (!isStandalonePaper(scope) || printLayoutOf(scope) !== 'school_template') return null;
-  if (stated) return { className: stated.className, subjectName: stated.subjectName, examName: stated.examName, maxMarks: stated.maxMarks };
-  return {
-    className: paper?.detailsClassName ?? null,
-    subjectName: paper?.detailsSubjectName ?? null,
-    examName: paper?.detailsExamName ?? null,
-    maxMarks: paper?.detailsMaxMarks ?? null,
-  };
+  return currentQuickPaperPrintedDetails(db, scope, stated);
 }
 
 /** The planned maximum marks a new version of this paper snapshots: the exam plan's, none for a standalone paper. */
@@ -684,8 +679,8 @@ export async function copyQuestionPaperVersion(
  * paper's context (`buildPaperContext`: an exam paper's plan facts, a quick
  * paper's session and details), or the built-in shell for a `plain` paper.
  * `planMaxMarks` is what an exam paper's header shows (the version's own
- * snapshot when an old version is printed again); `details` are a quick
- * paper's details to print when a save is about to store new ones.
+ * snapshot when an old version is printed again); `printed` is a quick
+ * paper's heading to print (a save's, or a stored version's snapshot).
  */
 async function renderPaperDocument(
   db: DatabaseExecutor,
@@ -695,7 +690,7 @@ async function renderPaperDocument(
     body: Awaited<ReturnType<typeof renderQuestionPaperBody>>;
     versionNo: number;
     planMaxMarks: number | null;
-    details?: QuestionPaperPrintedDetails;
+    printed?: QuestionPaperPrintedDetails;
     generatedAt?: Date;
   },
 ): Promise<string> {
@@ -705,7 +700,7 @@ async function renderPaperDocument(
     return renderStandaloneQuestionPaperDocument(body);
   }
   const context = await measure('qp.context', () =>
-    buildPaperContext(db, scope, { versionNo: input.versionNo, planMaxMarks: input.planMaxMarks, details: input.details }, input.generatedAt),
+    buildPaperContext(db, scope, { versionNo: input.versionNo, planMaxMarks: input.planMaxMarks, printed: input.printed }, input.generatedAt),
   );
   return renderQuestionPaperDocument({ template, context, body });
 }
@@ -744,8 +739,8 @@ async function renderAndStore(
   const details = isStandalonePaper(scope) && input.details && input.details !== 'keep' ? input.details : undefined;
   // A quick paper's heading prints the details this very save states (its row's when the save keeps them), and the
   // version keeps them, so it prints the same later (`printed_details`).
-  const printedDetails = printedDetailsOf(scope, details, paper);
-  const html = await renderPaperDocument(db, { scope, template: input.template, body, versionNo, planMaxMarks, details: printedDetails ?? undefined });
+  const printedDetails = await printedDetailsFor(db, scope, details);
+  const html = await renderPaperDocument(db, { scope, template: input.template, body, versionNo, planMaxMarks, printed: printedDetails ?? undefined });
   const pdf = await convertDocumentPdf(html, 'question_paper', input.signal);
   // A standalone paper's PDF is named after the details this very save states, or the paper's own when it keeps them.
   const names: PaperNames =
@@ -887,7 +882,7 @@ export async function renderStoredVersionHtml(
     body,
     versionNo: version.versionNo,
     planMaxMarks: version.planMaxMarks,
-    details: version.printedDetails ?? undefined,
+    printed: version.printedDetails ?? undefined,
     generatedAt,
   });
   return { html, templateName: template.kind === 'template' ? template.name : null };
@@ -1077,7 +1072,7 @@ async function storedVersionTemplateHtml(db: DatabaseExecutor, scope: ResolvedPa
   const template = await pinnedPrintTemplateOf(db, scope, version);
   if (template.kind === 'plain') return renderStandaloneQuestionPaperShell();
   const context = await measure('qp.context', () =>
-    buildPaperContext(db, scope, { versionNo: version.versionNo, planMaxMarks: version.planMaxMarks, details: version.printedDetails ?? undefined }),
+    buildPaperContext(db, scope, { versionNo: version.versionNo, planMaxMarks: version.planMaxMarks, printed: version.printedDetails ?? undefined }),
   );
   return measure('qp.document.render', () => renderQuestionPaperTemplate(template.content, context));
 }

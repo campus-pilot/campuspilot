@@ -19,13 +19,13 @@ describe('the Question papers page', () => {
   beforeAll(async () => {
     world = await createQuestionPaperWorld();
     const { teacher, otherTeacher, manager } = world.people;
-    const { schoolId, sessionId } = world;
+    const { schoolId } = world;
     // An exam paper of the teacher's class with a version, and one with only a page reserved (no version).
     generatedExam = (await manager.client.school.saveQuestionPaperVersion({ ...world.key(), expectedVersionNo: 0, html: ENGLISH_SCIENCE })).paperId;
     await manager.client.school.reserveQuestionPaperPages({ ...world.key({ subjectSlug: 'math', modeSlug: 'theory' }), fileNames: ['page.jpg'] });
     emptyExam = (await manager.client.school.getQuestionPaperDetail(world.key({ subjectSlug: 'math', modeSlug: 'theory' }))).paper.paperId!;
     // Quick papers: one generated, one not yet, and one of another teacher.
-    generatedQuick = (await teacher.client.school.createStandalonePaper({ schoolId, sessionId })).paperId;
+    generatedQuick = (await teacher.client.school.createStandalonePaper({ schoolId })).paperId;
     await teacher.client.school.saveStandalonePaperVersion({
       schoolId,
       paperId: generatedQuick,
@@ -33,9 +33,9 @@ describe('the Question papers page', () => {
       html: ENGLISH_SCIENCE,
       details: { schoolName: null, className: 'Class 7', subjectName: 'English', examName: 'Unit Test 1', maxMarks: 20 },
     });
-    draftQuick = (await teacher.client.school.createStandalonePaper({ schoolId, sessionId })).paperId;
+    draftQuick = (await teacher.client.school.createStandalonePaper({ schoolId })).paperId;
     await teacher.client.school.reserveStandalonePaperPages({ schoolId, paperId: draftQuick, fileNames: ['page.jpg'] });
-    otherTeachersQuick = (await otherTeacher.client.school.createStandalonePaper({ schoolId, sessionId })).paperId;
+    otherTeachersQuick = (await otherTeacher.client.school.createStandalonePaper({ schoolId })).paperId;
   });
 
   const list = (who: keyof QuestionPaperWorld['people'], filters: Record<string, string> = {}, searchQuery = '') =>

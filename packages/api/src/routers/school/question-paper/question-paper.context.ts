@@ -1,8 +1,7 @@
 import type { DatabaseExecutor } from "@campuspilot/db";
 import { schoolTable } from "@campuspilot/db/schema/school";
-import { schoolSessionTable } from "@campuspilot/db/schema/session";
 import type { QuestionPaperPrintedDetails } from "@campuspilot/db/schema/exam-question-paper";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import { rpcError } from "../../../errors";
 import { buildSchoolDocumentContext } from "../document/document.context";
@@ -112,8 +111,14 @@ async function schoolBlockOf(db: DatabaseExecutor, schoolId: string): Promise<Qu
   return buildSchoolDocumentContext(school);
 }
 
-/** The details of a quick paper its school's template prints: the shape a version keeps (`printed_details`). */
+/**
+ * What a quick paper's heading prints: the shape a version keeps
+ * (`printed_details`): the paper's names and marks, and the session years.
+ */
 export type QuickPaperPrintedDetails = QuestionPaperPrintedDetails;
+
+/** The paper's own facts among {@link QuickPaperPrintedDetails}: the names and the maximum marks. */
+export type QuickPaperNamedDetails = Pick<QuickPaperPrintedDetails, "className" | "subjectName" | "examName" | "maxMarks">;
 
 /**
  * The template context of a quick paper (a standalone paper of a real school
@@ -122,37 +127,34 @@ export type QuickPaperPrintedDetails = QuestionPaperPrintedDetails;
  * template renders it:
  *
  * - `school`: the school, as for every document.
- * - `session`: the session the paper belongs to (`exam_question_paper.session_id`).
+ * - `session`: the printed session years. A quick paper belongs to no
+ *   session; a new print takes the school's active session
+ *   (`currentQuickPaperPrintedDetails`), a stored version its own snapshot.
  * - the exam name, class name, subject name and `maxMarks` come from the
- *   paper's details (the ones a save is about to store, when it states
- *   them); a detail the paper does not state is an empty name, or null marks.
+ *   paper's details (the ones a save is about to store, or a version's
+ *   snapshot); a detail the paper does not state is an empty name, or null
+ *   marks.
  * - A quick paper has no exam slug, order, subject slug or mode: those are
  *   empty (`order` 0), never invented.
  */
 export async function buildQuickPaperContext(
   db: DatabaseExecutor,
-  input: { schoolId: string; sessionId: string; details: QuickPaperPrintedDetails; versionNo: number | null },
+  input: { schoolId: string; printed: QuickPaperPrintedDetails; versionNo: number | null },
   generatedAt: Date = new Date(),
 ): Promise<QuestionPaperContext> {
-  const [session] = await db
-    .select({ startYear: schoolSessionTable.sessionStartYear, endYear: schoolSessionTable.sessionEndYear })
-    .from(schoolSessionTable)
-    .where(and(eq(schoolSessionTable.id, input.sessionId), eq(schoolSessionTable.schoolId, input.schoolId)))
-    .limit(1);
-  if (!session) throw rpcError.notFound("Academic session");
-  const { details } = input;
+  const { printed } = input;
   return {
     school: await schoolBlockOf(db, input.schoolId),
-    session: { startYear: session.startYear, endYear: session.endYear },
+    session: { startYear: printed.sessionStartYear, endYear: printed.sessionEndYear },
     generatedAt: generatedAt.toISOString(),
-    exam: { name: details.examName ?? "", slug: "", order: 0 },
+    exam: { name: printed.examName ?? "", slug: "", order: 0 },
     questionPaper: {
-      className: details.className ?? "",
-      subjectName: details.subjectName ?? "",
+      className: printed.className ?? "",
+      subjectName: printed.subjectName ?? "",
       subjectSlug: "",
       modeName: "",
       modeSlug: "",
-      maxMarks: details.maxMarks,
+      maxMarks: printed.maxMarks,
       totalMarks: null,
       timeAllowed: null,
       language: null,
@@ -187,7 +189,7 @@ export const QUICK_PAPER_DETAIL_PLACEHOLDERS = {
 } as const;
 
 /** A quick paper's context with {@link QUICK_PAPER_DETAIL_PLACEHOLDERS} for every detail it does not state ({@link QuestionPaperPrintsContext}). */
-export function withDetailPlaceholders(context: QuestionPaperContext, details: QuickPaperPrintedDetails): QuestionPaperPrintsContext {
+export function withDetailPlaceholders(context: QuestionPaperContext, details: QuickPaperNamedDetails): QuestionPaperPrintsContext {
   return {
     ...context,
     exam: { ...context.exam, name: details.examName ?? QUICK_PAPER_DETAIL_PLACEHOLDERS.examName },

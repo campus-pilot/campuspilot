@@ -32,8 +32,17 @@ import { classTable } from "./class";
 import { schoolTable } from "./school";
 import { schoolSessionTable } from "./session";
 
-/** The details a quick paper's version printed (`exam_question_paper_version.printed_details`). */
-export type QuestionPaperPrintedDetails = Pick<QuestionPaperDetails, "className" | "subjectName" | "examName" | "maxMarks">;
+/**
+ * What a quick paper's version printed in the school template's heading
+ * (`exam_question_paper_version.printed_details`): the paper's class, subject
+ * and exam names and maximum marks, and the years of the school's academic
+ * session the heading printed (the session that was active when the version
+ * was saved; a quick paper itself belongs to no session).
+ */
+export type QuestionPaperPrintedDetails = Pick<QuestionPaperDetails, "className" | "subjectName" | "examName" | "maxMarks"> & {
+  sessionStartYear: number;
+  sessionEndYear: number;
+};
 
 /**
  * Question papers (docs/question-papers.md, written in the last phase of the
@@ -100,11 +109,11 @@ export const questionPaperVersionSourceEnum = pgEnum(
  * row is created and never changed:
  * - `exam`: the paper of one (session, exam, class, subject, mode) of an exam
  *   plan; the five key columns are set and the school's template prints it.
- * - `standalone`: a paper not tied to an exam plan, with no exam, class,
- *   subject or mode. In a personal space it has no session either and prints
- *   in the plain shell (the AI writes the whole heading); in a real school it
- *   is a "quick paper": it belongs to the session it was created in and the
- *   school's template prints its heading ({@link QUESTION_PAPER_PRINT_LAYOUTS}).
+ * - `standalone`: a paper not tied to an exam plan or a session, with no
+ *   session, exam, class, subject or mode (the five key columns are null). In
+ *   a personal space it prints in the plain shell (the AI writes the whole
+ *   heading); in a real school it is a "quick paper" and the school's
+ *   template prints its heading ({@link QUESTION_PAPER_PRINT_LAYOUTS}).
  *   Its details (school, class, subject and exam names, maximum marks) are the
  *   `details_*` columns.
  */
@@ -154,12 +163,7 @@ export const examQuestionPaperTable = pgTable(
      * created. Always `school_template` for an `exam` paper (CHECK).
      */
     printLayout: questionPaperPrintLayoutEnum("print_layout").notNull().default("school_template"),
-    /**
-     * The five key columns: all set for an `exam` paper. A `standalone` paper
-     * has no exam, class, subject or mode; its `session_id` is set exactly when
-     * it prints with the school's template (a quick paper of a real school,
-     * created in that session), and null in a personal space (CHECK).
-     */
+    /** The five key columns: all set for an `exam` paper, all null for a `standalone` one (CHECK). */
     sessionId: text("session_id").references(() => schoolSessionTable.id),
     examSlug: text("exam_slug"),
     classId: text("class_id").references(() => classTable.id),
@@ -230,10 +234,6 @@ export const examQuestionPaperTable = pgTable(
     unique("exam_question_paper_id_kind_unique").on(table.id, table.kind),
     /** The target of the versions' (paper_id, paper_print_layout) foreign key. */
     unique("exam_question_paper_id_print_layout_unique").on(table.id, table.printLayout),
-    /** A session's quick papers, most recently changed first. */
-    index("exam_question_paper_quick_idx")
-      .on(table.schoolId, table.sessionId, table.updatedAt)
-      .where(sql`${table.kind} = 'standalone' and ${table.sessionId} is not null`),
     check(
       "exam_question_paper_counters_check",
       sql`${table.latestVersionNo} >= 0 and ${table.pageRevision} >= 0`,
@@ -245,8 +245,7 @@ export const examQuestionPaperTable = pgTable(
         when 'exam' then num_nonnulls(${table.sessionId}, ${table.examSlug}, ${table.classId}, ${table.subjectSlug}, ${table.modeSlug}) = 5
           and num_nonnulls(${table.detailsSchoolName}, ${table.detailsClassName}, ${table.detailsSubjectName}, ${table.detailsExamName}, ${table.detailsMaxMarks}) = 0
           and ${table.printLayout}::text = 'school_template'
-        else num_nulls(${table.examSlug}, ${table.classId}, ${table.subjectSlug}, ${table.modeSlug}) = 4
-          and (${table.sessionId} is null) = (${table.printLayout}::text = 'plain')
+        else num_nulls(${table.sessionId}, ${table.examSlug}, ${table.classId}, ${table.subjectSlug}, ${table.modeSlug}) = 5
       end`,
     ),
     check(
@@ -554,9 +553,10 @@ export const examQuestionPaperVersionTable = pgTable(
      */
     planMaxMarks: integer("plan_max_marks"),
     /**
-     * What a quick paper's version printed in the school template's heading:
-     * the class, subject and exam names and the maximum marks of the details
-     * this save stated (or the paper's, when it stated none). A snapshot like
+     * What a quick paper's version printed in the school template's heading
+     * ({@link QuestionPaperPrintedDetails}): the class, subject and exam names
+     * and the maximum marks of the details this save stated (or the paper's,
+     * when it stated none), and the school's active session at the save. A snapshot like
      * `plan_max_marks`: a paper's details are not revisioned, so without it an
      * old version's preview, Word file or restored PDF would print the
      * paper's details as they are now. Set exactly for a version of a

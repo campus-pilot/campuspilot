@@ -53,6 +53,7 @@ import {
   type PageRow,
   type PaperRow,
 } from './question-paper.records';
+import { currentQuickPaperPrintedDetails } from './question-paper.print-context';
 import { hasSelectedQuestionPaperTemplate } from './question-paper.render';
 import {
   assertResolvedPaperWritable,
@@ -1052,6 +1053,8 @@ export async function startQuestionPaperGeneration(
   // A plain paper (a personal space's) prints in the built-in shell: it needs no template. Every other paper, a quick
   // paper of a school included, prints with the school's selected template.
   if (printLayoutOf(scope) !== 'plain' && !(await hasSelectedQuestionPaperTemplate(db, paperSchoolIdOf(scope)))) throw templateMissingError();
+  // A quick paper's heading prints the school's active session: refused now, before any model cost, without one.
+  if (isStandalonePaper(scope) && printLayoutOf(scope) === 'school_template') await currentQuickPaperPrintedDetails(db, scope);
   const jobId = await db.transaction(async (tx) => {
     await assertResolvedPaperWritableLocked(tx, scope);
     const paper = await lockPaperOf(tx, scope).catch((error: unknown) => {

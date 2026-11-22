@@ -168,9 +168,9 @@ describe('demo school seed steps (2 classes, without Restate)', () => {
     expect(
       seededPapers.filter((paper) => paper.kind === 'exam').map((paper) => [paper.examSlug, paper.subjectSlug, paper.modeSlug, paper.latestVersionNo, paper.pageRevision]),
     ).toEqual([['annual-examination', 'mathematics', 'written', 1, 2]]);
-    // Its quick papers too, in the session, printed with the school's template and stating their planned details.
+    // Its quick papers too, in no session, printed with the school's template and stating their planned details.
     const quickPapers = seededPapers.filter((paper) => paper.kind === 'standalone');
-    expect(quickPapers.map((paper) => [paper.printLayout, paper.sessionId !== null, paper.latestVersionNo]).sort()).toEqual(plan.quickPapers.map(() => ['school_template', true, 1]));
+    expect(quickPapers.map((paper) => [paper.printLayout, paper.sessionId, paper.latestVersionNo]).sort()).toEqual(plan.quickPapers.map(() => ['school_template', null, 1]));
     expect(quickPapers.map((paper) => paper.detailsSubjectName).sort()).toEqual(plan.quickPapers.map((paper) => paper.details.subjectName).sort());
 
     // Seed steps call the real posting and release procedures, so every bill,

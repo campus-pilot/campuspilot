@@ -51,17 +51,22 @@ const modeNameSql = sql<string | null>`case when ${paper.kind} = 'exam' then coa
 const likePattern = (term: string) => `%${term.replace(/[\\%_]/g, (character) => `\\${character}`)}%`;
 
 /**
- * The papers of the session the caller may see, before any filter: exam
- * papers of the classes they may read, and quick papers they reach (their
- * own, or every one with `oversee`). False (nothing) when they have neither.
+ * The papers the caller may see on the session's page, before any filter:
+ * the session's exam papers of the classes they may read, and the school's
+ * quick papers they reach (their own, or every one with `oversee`), which
+ * belong to no session and so show on every session's page. False (nothing)
+ * when they have neither.
  */
 function visibleWhere(input: { schoolId: string; sessionId: string }, access: SchoolQuestionPaperAccess): SQL {
-  const exam = access.exam && access.exam.classIds.length > 0 ? and(eq(paper.kind, 'exam'), inArray(paper.classId, [...access.exam.classIds])) : undefined;
+  const exam =
+    access.exam && access.exam.classIds.length > 0
+      ? and(eq(paper.kind, 'exam'), eq(paper.sessionId, input.sessionId), inArray(paper.classId, [...access.exam.classIds]))
+      : undefined;
   const quick = access.quick
     ? and(eq(paper.kind, 'standalone'), access.quick.oversee ? undefined : eq(paper.createdBy, access.quick.userId))
     : undefined;
   const either = exam && quick ? or(exam, quick) : (exam ?? quick);
-  return and(eq(paper.schoolId, input.schoolId), eq(paper.sessionId, input.sessionId), either ?? sql`false`)!;
+  return and(eq(paper.schoolId, input.schoolId), either ?? sql`false`)!;
 }
 
 /** The filters as SQL; see `schoolQuestionPaperFiltersSchema` for what each means, the default status rule included. */

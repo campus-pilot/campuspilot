@@ -11,6 +11,6 @@ test('a record of one session returns to its list in the new session (review U4)
   assert.equal(sessionSwitchSuffix('/exam/term-1/results'), '/exam');
   assert.equal(sessionSwitchSuffix('/notices/ntc_1'), '/notices');
   assert.equal(sessionSwitchSuffix('/notices/ntc_1/edit'), '/notices');
-  // A quick paper belongs to the session it was created in.
-  assert.equal(sessionSwitchSuffix('/question-papers/qp_1'), '/question-papers');
+  // A quick paper belongs to no session: the same paper opens under the other session.
+  assert.equal(sessionSwitchSuffix('/question-papers/qp_1'), '/question-papers/qp_1');
 });

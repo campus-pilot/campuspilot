@@ -159,8 +159,8 @@ export type DemoQuestionPaper = {
 };
 
 /**
- * One quick paper the demo writes (a standalone paper of the school, in the
- * demo's session), with the details its template prints and dated from `asOf`.
+ * One quick paper the demo writes (a standalone paper of the school), with
+ * the details its template prints and dated from `asOf`.
  */
 export type DemoQuickPaper = {
   key: string;

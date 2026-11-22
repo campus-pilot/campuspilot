@@ -1,8 +1,7 @@
 import type { Database, DatabaseExecutor } from '@campuspilot/db';
 import { assistantConversationTable } from '@campuspilot/db/schema/assistant';
 import { examQuestionPaperPageTable, examQuestionPaperTable } from '@campuspilot/db/schema/exam-question-paper';
-import { schoolSessionTable } from '@campuspilot/db/schema/session';
-import { and, asc, count, desc, eq, ilike, isNotNull, isNull, notExists, or, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, ilike, isNotNull, notExists, or, type SQL } from 'drizzle-orm';
 import type { z } from 'zod';
 
 import { lockSchool } from '../../../billing/billing.service';
@@ -72,42 +71,27 @@ export const reachedPapersWhere = (reach: StandalonePaperReach): SQL | undefined
  * other. How it prints is decided here, once, from the school's kind
  * (`readSchoolKind`) and stored on the row (`print_layout`):
  *
- * - In a **personal space**: `plain`, no session (`sessionId` must not be
- *   sent), and at most {@link STANDALONE_PAPERS_PER_SPACE_LIMIT} papers
- *   (`personalSpaceLimitError('papers')`).
- * - In a **real school** (a quick paper): `school_template`, in the session
- *   the caller names (`sessionId`, required, a session of this school), with
- *   no count limit (docs/question-papers.md "Quick papers in a school").
+ * - In a **personal space**: `plain`, and at most
+ *   {@link STANDALONE_PAPERS_PER_SPACE_LIMIT} papers (`personalSpaceLimitError('papers')`).
+ * - In a **real school** (a quick paper): `school_template`, with no count
+ *   limit (docs/question-papers.md "Quick papers in a school").
  *
- * An **unused** paper of the caller's in the same place (the same session, or
- * none) is returned instead of a new one (`reused: true`). Unused is decided
- * from three facts, each read on its own: the paper has no page (reserved or
- * stored), no saved version (`latest_version_no = 0`), and no conversation
- * shared with it (`assistant_conversation.standalone_paper_id`, live or
- * deleted). Only the caller's own (`created_by`): a paper someone else
- * created is never handed to another person, even an empty one. Such a paper
- * holds nothing anyone made, so repeated clicks or a looping agent never pile
- * up empty papers. The oldest unused one is returned.
+ * Neither belongs to a session. An **unused** paper of the caller's is
+ * returned instead of a new one (`reused: true`). Unused is decided from three
+ * facts, each read on its own: the paper has no page (reserved or stored), no
+ * saved version (`latest_version_no = 0`), and no conversation shared with it
+ * (`assistant_conversation.standalone_paper_id`, live or deleted). Only the
+ * caller's own (`created_by`): a paper someone else created is never handed
+ * to another person, even an empty one. Such a paper holds nothing anyone
+ * made, so repeated clicks or a looping agent never pile up empty papers. The
+ * oldest unused one is returned.
  *
  * The caller has checked the school's kind and the permission.
  */
-export async function createStandalonePaper(
-  db: Database,
-  input: { schoolId: string; userId: string; sessionId: string | null },
-): Promise<{ paperId: string; reused: boolean }> {
+export async function createStandalonePaper(db: Database, input: { schoolId: string; userId: string }): Promise<{ paperId: string; reused: boolean }> {
   const personal = (await readSchoolKind(db, input.schoolId)) === 'personal';
-  if (personal && input.sessionId !== null) throw rpcError.badRequest('A personal space has no academic sessions: create the paper without a sessionId.');
-  if (!personal && input.sessionId === null) throw rpcError.badRequest('Choose the academic session the question paper belongs to (sessionId).');
   return db.transaction(async (tx) => {
     await lockSchool(tx, input.schoolId);
-    if (input.sessionId !== null) {
-      const [session] = await tx
-        .select({ id: schoolSessionTable.id })
-        .from(schoolSessionTable)
-        .where(and(eq(schoolSessionTable.id, input.sessionId), eq(schoolSessionTable.schoolId, input.schoolId)))
-        .limit(1);
-      if (!session) throw rpcError.notFound('Academic session');
-    }
     const standalone = and(eq(examQuestionPaperTable.schoolId, input.schoolId), eq(examQuestionPaperTable.kind, 'standalone'));
     const [unused] = await tx
       .select({ id: examQuestionPaperTable.id })
@@ -116,7 +100,6 @@ export async function createStandalonePaper(
         and(
           standalone,
           eq(examQuestionPaperTable.createdBy, input.userId),
-          input.sessionId === null ? isNull(examQuestionPaperTable.sessionId) : eq(examQuestionPaperTable.sessionId, input.sessionId),
           eq(examQuestionPaperTable.latestVersionNo, 0),
           notExists(tx.select({ id: examQuestionPaperPageTable.id }).from(examQuestionPaperPageTable).where(eq(examQuestionPaperPageTable.paperId, examQuestionPaperTable.id))),
           notExists(
@@ -142,7 +125,6 @@ export async function createStandalonePaper(
         schoolId: input.schoolId,
         kind: 'standalone',
         printLayout: personal ? 'plain' : 'school_template',
-        sessionId: input.sessionId,
         createdBy: input.userId,
       })
       .returning({ id: examQuestionPaperTable.id });
@@ -164,7 +146,6 @@ async function factsOf(db: DatabaseExecutor, paper: PaperRow): Promise<z.infer<t
   return {
     paperId: paper.id,
     printLayout: paper.printLayout,
-    sessionId: paper.sessionId,
     details: detailsOf(paper),
     pageCount: pages?.count ?? 0,
     pageRevision: paper.pageRevision,
@@ -285,7 +266,6 @@ export async function listStandalonePapers(
       const facts = listFactsOf(paper.id);
       return {
         paperId: paper.id,
-        sessionId: paper.sessionId,
         details: detailsOf(paper),
         pageCount: facts.pageCount,
         latestVersionNo: paper.latestVersionNo,

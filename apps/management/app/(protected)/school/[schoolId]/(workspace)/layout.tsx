@@ -227,14 +227,15 @@ function navigationFor(
 
 /**
  * The sidebar's Question papers entry: the session's Question papers page
- * (docs/question-papers.md "The Question papers page"), its quick papers and
- * exam papers in one list. Left out without a selected session (the page is a
- * session's). Its gates are separate facts, each checked on its own: a paper
- * permission (`READ_EXAM_PLANS` for exam papers or `READ_STANDALONE_PAPERS`
- * for quick papers, either one, as the page's procedures) and the assistant
- * (question papers are part of the `assistant` feature, so the entry shows
- * only where the school has AI and the person's role may use it). An exam's
- * own Question paper pages stay under Examinations.
+ * (docs/question-papers.md "The Question papers page"), the quick papers and
+ * the session's exam papers in one list. Left out without a selected session
+ * (the page is a session's). Its gates are separate facts, each checked on its
+ * own: `MANAGE_STANDALONE_PAPERS`, because the entry is for the people who
+ * write question papers (someone who cannot create one, an accountant, is not
+ * offered it; the page itself still answers anyone its procedures serve), and
+ * the assistant (question papers are part of the `assistant` feature, so the
+ * entry shows only where the school has AI and the person's role may use it).
+ * An exam's own Question paper pages stay under Examinations.
  */
 function questionPapersEntry(schoolId: string, href: string): AppShellNavigationItem {
   return {
@@ -244,12 +245,7 @@ function questionPapersEntry(schoolId: string, href: string): AppShellNavigation
     href,
     icon: NotebookPen,
     wrap: (children) => (
-      <RequirePermissions
-        mode="any"
-        permissions={[SCHOOL_ACTIONS.READ_EXAM_PLANS, SCHOOL_ACTIONS.READ_STANDALONE_PAPERS].map(
-          (action) => ({ action, resource: { kind: 'school', schoolId } }) as PermissionCheck,
-        )}
-      >
+      <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.MANAGE_STANDALONE_PAPERS, resource: { kind: 'school', schoolId } }}>
         <AssistantAccess schoolId={schoolId}>{children}</AssistantAccess>
       </RequirePermissions>
     ),

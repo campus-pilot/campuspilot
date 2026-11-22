@@ -6,7 +6,7 @@ import type { DefaultTreeAdapterMap } from 'parse5';
 import type { QuestionPaperContext, QuestionPaperPrintsContext } from './question-paper.context';
 import { QUESTION_PAPER_TEMPLATE_PRINTS_LINE_CHARS, QUESTION_PAPER_TEMPLATE_PRINTS_LINES, type TemplatePrints } from './question-paper.dto';
 import { leanLines } from './question-paper.lean';
-import { buildPaperPrintsContext } from './question-paper.print-context';
+import { buildPaperPrintsContext, isQuickPaperNoActiveSessionError } from './question-paper.print-context';
 import { renderQuestionPaperTemplate, selectedQuestionPaperTemplate } from './question-paper.render';
 import { paperSchoolIdOf, printLayoutOf, type ResolvedPaper } from './question-paper.scope';
 import { STANDALONE_QUESTION_PAPER_PRINTS } from './question-paper.standalone-shell';
@@ -144,5 +144,10 @@ export async function readTemplatePrints(db: DatabaseExecutor, scope: ResolvedPa
   const template = await selectedQuestionPaperTemplate(db, paperSchoolIdOf(scope));
   if (!template) return null;
   // The version number of a paper that is being written is not known yet, exactly as in a draft preview.
-  return templatePrintsFor(template.content, await buildPaperPrintsContext(db, scope, generatedAt));
+  // A quick paper of a school without an active session cannot print yet: its lines are not known.
+  const context = await buildPaperPrintsContext(db, scope, generatedAt).catch((error: unknown) => {
+    if (isQuickPaperNoActiveSessionError(error)) return null;
+    throw error;
+  });
+  return context ? templatePrintsFor(template.content, context) : null;
 }

@@ -4,14 +4,15 @@
  *
  * Most pages exist in every session, so the same page of the other session
  * opens. A page about one record of the current session does not: an
- * examination's plans, a notice and a quick paper belong to exactly one session, so
+ * examination's plans and a notice belong to exactly one session, so
  * switching away from them returns to that area's list in the new session
  * instead of showing the old session's record under the new session's
- * navigation. Writing a new notice is not about a record and is kept.
+ * navigation. Writing a new notice is not about a record and is kept, and
+ * neither is a quick paper (`/question-papers/<id>`), which belongs to no
+ * session: the same paper opens under the other session.
  */
 export function sessionSwitchSuffix(suffix: string): string {
   if (suffix.startsWith('/exam/')) return '/exam';
   if (suffix.startsWith('/notices/') && suffix !== '/notices/new') return '/notices';
-  if (suffix.startsWith('/question-papers/')) return '/question-papers';
   return suffix;
 }

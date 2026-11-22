@@ -68,18 +68,6 @@ export function createManagementCommandRegistry(
       </RequirePermissions>
     );
 
-  const anyPermissionWrap = (actions: (typeof SCHOOL_ACTIONS)[keyof typeof SCHOOL_ACTIONS][]) =>
-    (children: ReactNode) => (
-      <RequirePermissions
-        mode="any"
-        permissions={actions.map(
-          (action) => ({ action, resource: { kind: 'school', schoolId: context.schoolId } }) as PermissionCheck,
-        )}
-      >
-        {children}
-      </RequirePermissions>
-    );
-
   // A feature and a permission are separate gates; a command of a feature needs both.
   const studentManagementWrap = (inner: (children: ReactNode) => ReactNode) =>
     (children: ReactNode) => (
@@ -137,13 +125,11 @@ export function createManagementCommandRegistry(
       requiresSession: true,
       destination: ({ schoolId, sessionId }) =>
         sessionId ? schoolSessionHref(schoolId, sessionId, '/question-papers') : schoolHref(schoolId),
-      // Separate gates, each its own fact, as the sidebar entry: either paper
-      // permission the page lists by, and the assistant (question papers
-      // belong to its feature).
+      // Separate gates, each its own fact, as the sidebar entry: creating quick
+      // papers (the command is for the people who write papers), and the
+      // assistant (question papers belong to its feature).
       wrap: (children) =>
-        anyPermissionWrap([SCHOOL_ACTIONS.READ_EXAM_PLANS, SCHOOL_ACTIONS.READ_STANDALONE_PAPERS])(
-          <AssistantAccess schoolId={context.schoolId}>{children}</AssistantAccess>,
-        ),
+        permissionWrap(SCHOOL_ACTIONS.MANAGE_STANDALONE_PAPERS)(<AssistantAccess schoolId={context.schoolId}>{children}</AssistantAccess>),
     },
     {
       id: 'settings',

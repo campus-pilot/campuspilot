@@ -1,5 +1,6 @@
 import { db } from '@campuspilot/db';
 import { examQuestionPaperTable, examQuestionPaperVersionTable } from '@campuspilot/db/schema/exam-question-paper';
+import { schoolSessionTable } from '@campuspilot/db/schema/session';
 import { QUESTION_PAPER_EXAMPLES } from '@campuspilot/question-paper/examples';
 import { eq } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -7,6 +8,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { expectFeatureDisabled, expectPermissionDenied } from '../../../../test/feature-flags';
 import { setTestSchoolFeature } from '../../../../test/fixtures';
 import { createQuestionPaperWorld, type QuestionPaperWorld } from '../../../../test/question-paper';
+import { QUICK_PAPER_NO_ACTIVE_SESSION_REASON } from '../question-paper/question-paper.print-context';
 import { STANDALONE_PAPER_MAX_VERSIONS, STANDALONE_PAPERS_PER_SPACE_LIMIT } from '../../../personal-space/personal-space.limits';
 
 /** Quick papers: standalone papers of a real school (docs/question-papers.md "Quick papers in a school"). */
@@ -23,11 +25,12 @@ describe('quick papers in a school', () => {
 
   it('creates a quick paper in a session that prints with the school template, its details in the heading', async () => {
     const { teacher } = world.people;
-    const { schoolId, sessionId } = world;
-    const { paperId, reused } = await teacher.client.school.createStandalonePaper({ schoolId, sessionId });
+    const { schoolId } = world;
+    const { paperId, reused } = await teacher.client.school.createStandalonePaper({ schoolId });
     expect(reused).toBe(false);
     const [row] = await db.select().from(examQuestionPaperTable).where(eq(examQuestionPaperTable.id, paperId));
-    expect(row).toMatchObject({ kind: 'standalone', printLayout: 'school_template', sessionId, examSlug: null, classId: null, createdBy: teacher.userId });
+    // It belongs to no session.
+    expect(row).toMatchObject({ kind: 'standalone', printLayout: 'school_template', sessionId: null, examSlug: null, classId: null, createdBy: teacher.userId });
 
     // Before any detail is stated, the template's lines show placeholders for what the details will fill in.
     const empty = await teacher.client.school.getStandalonePaper({ schoolId, paperId });
@@ -53,7 +56,8 @@ describe('quick papers in a school', () => {
     expect(draft.templateName).not.toBeNull();
 
     // Each version keeps the heading it printed: a later save's details never change an earlier version's print.
-    expect(version!.printedDetails).toEqual({ className: 'Class 8', subjectName: 'Science', examName: 'Unit Test 1', maxMarks: 25 });
+    // The heading printed the school's active session, kept with the version.
+    expect(version!.printedDetails).toEqual({ className: 'Class 8', subjectName: 'Science', examName: 'Unit Test 1', maxMarks: 25, sessionStartYear: 2026, sessionEndYear: 2027 });
     await teacher.client.school.saveStandalonePaperVersion({
       schoolId,
       paperId,
@@ -68,16 +72,10 @@ describe('quick papers in a school', () => {
     expect(second.html).toContain('Unit Test 2');
   });
 
-  it('needs a session of the school in a school, and none in a personal space', async () => {
-    const { teacher } = world.people;
-    await expect(teacher.client.school.createStandalonePaper({ schoolId: world.schoolId })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
-    await expect(teacher.client.school.createStandalonePaper({ schoolId: world.schoolId, sessionId: 'ses_missing' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
-  });
-
   it("reaches only the creator's papers, unless the role oversees every one", async () => {
     const { teacher, otherTeacher, principal, coordinator, manager } = world.people;
-    const { schoolId, sessionId } = world;
-    const { paperId } = await teacher.client.school.createStandalonePaper({ schoolId, sessionId });
+    const { schoolId } = world;
+    const { paperId } = await teacher.client.school.createStandalonePaper({ schoolId });
     await teacher.client.school.reserveStandalonePaperPages({ schoolId, paperId, fileNames: ['page.jpg'] });
 
     // Another teacher: the paper is not found, for reads and changes, and not listed.
@@ -94,21 +92,21 @@ describe('quick papers in a school', () => {
 
   it('never hands one person an empty paper another person created', async () => {
     const { teacher, otherTeacher } = world.people;
-    const { schoolId, sessionId } = world;
-    const mine = await teacher.client.school.createStandalonePaper({ schoolId, sessionId });
-    const theirs = await otherTeacher.client.school.createStandalonePaper({ schoolId, sessionId });
+    const { schoolId } = world;
+    const mine = await teacher.client.school.createStandalonePaper({ schoolId });
+    const theirs = await otherTeacher.client.school.createStandalonePaper({ schoolId });
     expect(theirs.paperId).not.toBe(mine.paperId);
-    await expect(teacher.client.school.createStandalonePaper({ schoolId, sessionId })).resolves.toEqual({ paperId: mine.paperId, reused: true });
+    await expect(teacher.client.school.createStandalonePaper({ schoolId })).resolves.toEqual({ paperId: mine.paperId, reused: true });
   });
 
   it('refuses the accountant, and everyone while the school has no assistant', async () => {
     const { accountant, teacher } = world.people;
     await expectPermissionDenied(accountant.client.school.listStandalonePapers({ schoolId: world.schoolId }));
-    await expectPermissionDenied(accountant.client.school.createStandalonePaper({ schoolId: world.schoolId, sessionId: world.sessionId }));
+    await expectPermissionDenied(accountant.client.school.createStandalonePaper({ schoolId: world.schoolId }));
     await setTestSchoolFeature(world.schoolId, 'assistant', false);
     try {
       await expectFeatureDisabled(teacher.client.school.listStandalonePapers({ schoolId: world.schoolId }), 'assistant');
-      await expectFeatureDisabled(teacher.client.school.createStandalonePaper({ schoolId: world.schoolId, sessionId: world.sessionId }), 'assistant');
+      await expectFeatureDisabled(teacher.client.school.createStandalonePaper({ schoolId: world.schoolId }), 'assistant');
       await expectFeatureDisabled(teacher.client.school.listSchoolQuestionPapers({ schoolId: world.schoolId, sessionId: world.sessionId }), 'assistant');
     } finally {
       await setTestSchoolFeature(world.schoolId, 'assistant', true);
@@ -117,18 +115,17 @@ describe('quick papers in a school', () => {
 
   it('has none of a personal space limits: more papers and versions than a space may hold', async () => {
     const { teacher } = world.people;
-    const { schoolId, sessionId } = world;
+    const { schoolId } = world;
     await db.insert(examQuestionPaperTable).values(
       Array.from({ length: STANDALONE_PAPERS_PER_SPACE_LIMIT }, () => ({
         schoolId,
-        sessionId,
         kind: 'standalone' as const,
         printLayout: 'school_template' as const,
         latestVersionNo: 1,
         createdBy: teacher.userId,
       })),
     );
-    const { paperId } = await teacher.client.school.createStandalonePaper({ schoolId, sessionId });
+    const { paperId } = await teacher.client.school.createStandalonePaper({ schoolId });
     await db.update(examQuestionPaperTable).set({ latestVersionNo: STANDALONE_PAPER_MAX_VERSIONS }).where(eq(examQuestionPaperTable.id, paperId));
     await expect(
       teacher.client.school.saveStandalonePaperVersion({ schoolId, paperId, expectedVersionNo: STANDALONE_PAPER_MAX_VERSIONS, html: ENGLISH_SCIENCE, details: DETAILS }),
@@ -136,12 +133,27 @@ describe('quick papers in a school', () => {
   });
 });
 
+describe('quick papers need an active session to print', () => {
+  it("refuses a save and a generation while the school has no active session, whose years the heading prints", async () => {
+    const world = await createQuestionPaperWorld();
+    const { teacher } = world.people;
+    const { schoolId } = world;
+    const { paperId } = await teacher.client.school.createStandalonePaper({ schoolId });
+    await db.update(schoolSessionTable).set({ isActive: false }).where(eq(schoolSessionTable.id, world.sessionId));
+    // Reading still works; what the template prints is not known yet.
+    await expect(teacher.client.school.getStandalonePaper({ schoolId, paperId })).resolves.toMatchObject({ templatePrints: null });
+    await expect(
+      teacher.client.school.saveStandalonePaperVersion({ schoolId, paperId, expectedVersionNo: 0, html: ENGLISH_SCIENCE, details: DETAILS }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST', data: { reason: QUICK_PAPER_NO_ACTIVE_SESSION_REASON } });
+  });
+});
+
 describe('quick papers need a template to print', () => {
   it('refuses a save and a generation while the school has no question paper template', async () => {
     const world = await createQuestionPaperWorld({ template: false });
     const { teacher } = world.people;
-    const { schoolId, sessionId } = world;
-    const { paperId } = await teacher.client.school.createStandalonePaper({ schoolId, sessionId });
+    const { schoolId } = world;
+    const { paperId } = await teacher.client.school.createStandalonePaper({ schoolId });
     const detail = await teacher.client.school.getStandalonePaperDetail({ schoolId, paperId });
     expect(detail.templateConfigured).toBe(false);
     await expect(

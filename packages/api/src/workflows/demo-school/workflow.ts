@@ -191,7 +191,7 @@ export async function runDemoSeedSteps(options: {
       await step(`question-paper:${paper.key}`, async () => seedQuestionPaper(await seed(), { sessionId, classIdsBySlug, paper }));
     }
     for (const paper of plan.quickPapers) {
-      await step(`quick-paper:${paper.key}`, async () => seedQuickPaper(await seed(), { sessionId, paper }));
+      await step(`quick-paper:${paper.key}`, async () => seedQuickPaper(await seed(), { paper }));
     }
   });
 

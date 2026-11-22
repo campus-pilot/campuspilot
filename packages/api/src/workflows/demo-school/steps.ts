@@ -969,19 +969,20 @@ export async function seedQuestionPaper(
 
 /**
  * Writes one planned quick paper (docs/question-papers.md "Quick papers in a
- * school"): a standalone paper of the demo's session, created by the seed's
- * user (as every seeded paper), with version 1 (a built-in example) and the planned details,
+ * school"): a standalone paper of the demo school (it belongs to no
+ * session; its heading prints the demo's active session), created by the
+ * seed's user (as every seeded paper), with version 1 (a built-in example) and the planned details,
  * printed with the school's template. Like {@link seedQuestionPaper} it calls
  * the service functions (the demo keeps the assistant off) and calls no model.
  *
- * Idempotent on its natural key, the details it states (subject and exam) in
- * the session, by the same creator: a paper that already states them is not
+ * Idempotent on its natural key, the details it states (subject and exam),
+ * by the same creator: a paper that already states them is not
  * written again. A crash after the paper was created but before its version
  * left an unused paper, which `createStandalonePaper` hands back on the
  * replay instead of creating another. The upload is fenced like every demo
  * object, and the dates are set from the plan afterwards.
  */
-export async function seedQuickPaper(ctx: SeedContext, input: { sessionId: string; paper: DemoQuickPaper }): Promise<{ paperId: string; versionNo: number }> {
+export async function seedQuickPaper(ctx: SeedContext, input: { paper: DemoQuickPaper }): Promise<{ paperId: string; versionNo: number }> {
   const { paper } = input;
   const userId = ctx.context.session!.user.id;
   const [stated] = await db
@@ -990,7 +991,6 @@ export async function seedQuickPaper(ctx: SeedContext, input: { sessionId: strin
     .where(
       and(
         eq(examQuestionPaperTable.schoolId, ctx.schoolId),
-        eq(examQuestionPaperTable.sessionId, input.sessionId),
         eq(examQuestionPaperTable.kind, 'standalone'),
         eq(examQuestionPaperTable.createdBy, userId),
         eq(examQuestionPaperTable.detailsSubjectName, paper.details.subjectName),
@@ -998,7 +998,7 @@ export async function seedQuickPaper(ctx: SeedContext, input: { sessionId: strin
       ),
     )
     .limit(1);
-  const paperId = stated?.id ?? (await createStandalonePaper(db, { schoolId: ctx.schoolId, userId, sessionId: input.sessionId })).paperId;
+  const paperId = stated?.id ?? (await createStandalonePaper(db, { schoolId: ctx.schoolId, userId })).paperId;
   const scope = await findStandalonePaperScope(db, { schoolId: ctx.schoolId, paperId });
   let row = (await findPaperOf(db, scope))!;
   if (row.latestVersionNo < 1) {

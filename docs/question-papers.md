@@ -105,11 +105,10 @@ The management app mirrors this: the Question paper tab, its marketplace card an
 its settings page exist only when the `assistant` feature is on and (for the tab)
 the user's role may use it. While the answer is loading the tab is absent and
 Results stays the default (`useAssistantGate`). The sidebar's **Question papers** entry
-and the command palette's **Question papers** command open the Question papers page
-and follow its gates, each its own fact: either paper permission (`READ_EXAM_PLANS` or
-`READ_STANDALONE_PAPERS`, `mode="any"`) and the assistant (`AssistantAccess`); the
-sidebar entry is also left out while no session is selected (see "The Question papers
-page").
+and the command palette's **Question papers** command open the Question papers page.
+Their gates are each their own fact: creating quick papers (`MANAGE_STANDALONE_PAPERS`)
+and the assistant (`AssistantAccess`); the sidebar entry is also left out while no
+session is selected (see "The Question papers page").
 
 ## Quick papers in a school
 
@@ -126,20 +125,20 @@ by `createStandalonePaper` from the school's kind and never changed:
 | Fact | Personal space | School (quick paper) |
 | --- | --- | --- |
 | `print_layout` | `plain`: the built-in shell, the AI writes the whole heading | `school_template`: the school's selected question paper template prints the heading, as for an exam paper; the AI writes the body only, leaving out every line the template prints (`templatePrints`) |
-| `session_id` | null | the session it was created in (`createStandalonePaper` takes `sessionId`, required in a school, refused in a personal space); its template prints the session's years |
 | Version template | none (`template_revision_id` null) | the template revision it printed with, pinned (CHECK on `paper_print_layout`, held equal to the paper's by a composite foreign key) |
-| Version heading | in the body | `printed_details` (class, subject and exam names and maximum marks): the details the version's heading printed, a snapshot like `plan_max_marks` (CHECK: set exactly for a quick paper's version) |
+| Version heading | in the body | `printed_details` (class, subject and exam names, maximum marks and the session years): what the version's heading printed, a snapshot like `plan_max_marks` (CHECK: set exactly for a quick paper's version) |
 
 Migration `0083_school-quick-papers.sql` added `print_layout` (and the version's
 `paper_print_layout`), the fifth detail `details_max_marks` (a whole number from 1 to
-10,000, null when the paper states none), and the CHECKs: an exam paper is always
-`school_template`; a standalone paper's `session_id` is set exactly when it is
-`school_template`. Existing standalone papers (all a personal space's) became `plain`.
+10,000, null when the paper states none), `printed_details`, and the CHECKs: an exam
+paper is always `school_template`; a standalone paper of either layout has no session,
+exam, class, subject or mode. Existing standalone papers (all a personal space's) became
+`plain`.
 
 **Printing.** A quick paper's template context (`buildQuickPaperContext`,
 `question-paper.context.ts`; `buildPaperContext` chooses per paper) has the school as
-every document, the session's years, and the paper's details for the exam name, class,
-subject and `maxMarks`; a quick paper has no exam slug, order, subject slug or mode, so
+every document, the active session's years (see "Sessions" below), and the paper's
+details for the exam name, class, subject and `maxMarks`; a quick paper has no exam slug, order, subject slug or mode, so
 those are empty, never invented. The marketplace designs print the mode and the footer's
 exam name only when there is one (a school's already imported revision does not have
 that guard and prints an empty "()" after the subject until the school imports the
@@ -173,17 +172,20 @@ an id reveals nothing; the lists and filter values leave such papers out; a pape
 creator was deleted is reached through `oversee` only. The assistant's conversations
 shared with a standalone paper follow the same rule (`mayReachStandalonePaper` in
 `packages/assistant/src/conversation-access.ts`), and so does a chat's seed.
-`createStandalonePaper` reuses only the caller's own unused paper in the same session.
+`createStandalonePaper` reuses only the caller's own unused paper.
 The trusted generation job reads its paper with `findStandalonePaperScope` (no reach
 check: the start procedure checked it).
 
-**Sessions.** A quick paper belongs to the session it was created in: the Question
-papers page of that session lists it, switching session from its screen returns to the
-new session's list (`sessionSwitchSuffix`), and `listStandalonePapers` (the agents' list)
-returns the papers of every session with each one's `sessionId`. Unlike an exam paper, a
-quick paper is not locked when its session stops being the active one: it stays writable
-(an open product decision; the school's read-only gate still applies). A session that
-holds papers cannot be deleted (the foreign key refuses it), as with exam papers.
+**Sessions.** A quick paper belongs to no session, like a personal space's paper (the
+product owner asked for it): every session's Question papers page lists it, switching
+session from its screen keeps the same paper open (`sessionSwitchSuffix`), it is never
+locked by a session ending, and deleting a session never touches it. Its heading prints
+the years of the school's **active** session at the time of each print: a new version
+keeps them in `printed_details`, so an old version keeps printing its own years. A school
+without an active session cannot print a quick paper: saving, a generation (refused up
+front, before any model cost) and a draft preview answer BAD_REQUEST
+(`QUICK_PAPER_NO_ACTIVE_SESSION_REASON`), and `templatePrints` is null (not known).
+Reading, uploading photos and downloading saved versions keep working.
 
 **No limits of a personal space.** A school has any number of quick papers and versions,
 and no save rate or storage quota: the personal space limits (`personal-space.limits.ts`)
@@ -198,18 +200,19 @@ caller's role. A school without AI has no quick papers, no Question papers entry
 page.
 
 **Demo schools.** A demo seeds two quick papers (`quickPapers` in
-`seed/question-papers.json`, `seedQuickPaper`), idempotent on the details they state in
-the session; the purge needs nothing new (the same tables).
+`seed/question-papers.json`, `seedQuickPaper`), idempotent on the details they state;
+the purge needs nothing new (the same tables).
 
 ## The Question papers page
 
 `/school/{schoolId}/sessions/{sessionId}/question-papers` (management, the session's
-page like Notices): the session's exam papers and quick papers in one compact table
+page like Notices): the session's exam papers and the school's quick papers (which
+belong to no session, so every session's page lists them) in one compact table
 (`SchoolQuestionPaperList`), with `TableSearchBar` and `TableFilterBar`, server
 pagination, most recently changed first (`updated_at`). A quick paper opens at
 `.../question-papers/{paperId}` (`StandalonePaperWorkspace`, the personal space's screen
-with the address it lives at); an exam paper opens its own screen in its examination.
-**Create question paper** creates a quick paper in the session.
+with the address it lives at, under the session the person is in); an exam paper opens
+its own screen in its examination. **Create question paper** creates a quick paper.
 
 - **Procedures**: `listSchoolQuestionPapers` and `listSchoolQuestionPaperFilterOptions`
   (`question-paper.school-list.router.ts`), real schools only, hidden from MCP. Checked in
@@ -230,8 +233,11 @@ with the address it lives at); an exam paper opens its own screen in its examina
 - **Columns**: Paper (subject, with the mode of an exam paper), Class, Exam, Type, Created
   by, Status (`cellStatus`) and Updated; a phone keeps Paper (with type, class and exam
   under it) and Status.
-- **Gates in the app**: the sidebar entry, the palette command and the page wait for
-  either paper permission and the assistant, as the procedures.
+- **Gates in the app**: the page waits for either paper permission and the assistant,
+  as its procedures. The sidebar entry and the palette command are for the people who
+  write question papers: they need `MANAGE_STANDALONE_PAPERS` (creating a quick paper)
+  and the assistant, so someone who cannot create a paper (an accountant, who holds
+  `READ_EXAM_PLANS`) is not offered them.
 
 ## Data model
 

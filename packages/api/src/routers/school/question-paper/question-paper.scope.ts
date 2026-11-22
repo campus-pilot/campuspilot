@@ -190,8 +190,6 @@ export type StandalonePaperScope = {
    * one: {@link printLayoutOf} reads that as `plain`.
    */
   printLayout?: QuestionPaperPrintLayout;
-  /** The session a quick paper belongs to (its template prints it); null for a plain paper. */
-  sessionId?: string | null;
 };
 
 /**
@@ -263,7 +261,6 @@ async function readStandalonePaper(
     .select({
       id: examQuestionPaperTable.id,
       printLayout: examQuestionPaperTable.printLayout,
-      sessionId: examQuestionPaperTable.sessionId,
       createdBy: examQuestionPaperTable.createdBy,
     })
     .from(examQuestionPaperTable)
@@ -277,7 +274,7 @@ async function readStandalonePaper(
     .limit(1);
   if (!paper) return null;
   return {
-    scope: { kind: 'standalone', schoolId: input.schoolId, paperId: paper.id, printLayout: paper.printLayout, sessionId: paper.sessionId },
+    scope: { kind: 'standalone', schoolId: input.schoolId, paperId: paper.id, printLayout: paper.printLayout },
     createdBy: paper.createdBy,
   };
 }

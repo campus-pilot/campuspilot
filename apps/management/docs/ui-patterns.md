@@ -133,8 +133,8 @@ product owner replaced it with a plain link to one page that lists the papers
 
 ### Question papers page
 
-`/sessions/<id>/question-papers` lists the session's quick papers and exam papers
-in one table, the admission pattern: `TableSearchBar` and `TableFilterBar` (Type,
+`/sessions/<id>/question-papers` lists the school's quick papers (they belong to no
+session, so every session's page has them) and the session's exam papers in one table, the admission pattern: `TableSearchBar` and `TableFilterBar` (Type,
 Status, Exam, Class, Subject) over a compact `DataTable` with server pagination,
 **Create question paper** in the header. It opens on the Type filter set to Quick
 papers (`defaultFilters`), so the filter shows as set and can be cleared. Never call
@@ -142,7 +142,8 @@ them "standalone" in the UI: they are **Quick papers**, the others **Exam papers
 A phone keeps the Paper column (with type, class and exam under it) and Status.
 A quick paper's screen is the personal space's `StandalonePaperWorkspace` at
 `/question-papers/<paperId>`, under the management shell with the "Question papers"
-breadcrumb as the way back. See
+breadcrumb as the way back. The sidebar entry and the palette command are shown only to
+people who may create quick papers (and use the assistant). See
 [Question papers](../../../docs/question-papers.md#the-question-papers-page).
 
 ## Empty states and configuration-driven creation

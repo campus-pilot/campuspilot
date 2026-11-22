@@ -138,7 +138,7 @@ const chatOf = (scope: StandalonePaperScope) => conversationRefOf(scope);
  */
 export const schoolStandalonePaperRouter = {
   listStandalonePapers: protectedProcedure
-    .route(route('List quick question papers', "The quick question papers (papers not tied to an exam plan) of the school or personal space that you can open: your own, or every one when you oversee them. Most recently changed first, from every session of a school (each with its sessionId; null in a personal space), with their details (school, class, subject, exam and maximum marks as the paper states them), page count, latest version number and any running or failed AI generation. searchQuery matches any name; filters match one name exactly (values from listStandalonePaperFilterOptions)."))
+    .route(route('List quick question papers', "The quick question papers (papers not tied to an exam plan) of the school or personal space that you can open: your own, or every one when you oversee them. Most recently changed first, with their details (school, class, subject, exam and maximum marks as the paper states them), page count, latest version number and any running or failed AI generation. searchQuery matches any name; filters match one name exactly (values from listStandalonePaperFilterOptions)."))
     .meta(tool('read'))
     .input(dto.listStandalonePapersInputSchema)
     .use(readPapers)
@@ -168,7 +168,7 @@ export const schoolStandalonePaperRouter = {
     }),
 
   createStandalonePaper: protectedProcedure
-    .route(route('Create a quick question paper', `Get a quick question paper (not tied to an exam plan) to write and return its paperId: an unused paper of yours the school already has (no pages, versions or conversation; reused true), or a new one. In a school, sessionId is the academic session the paper belongs to (its template prints it); a personal space takes none and holds at most ${STANDALONE_PAPERS_PER_SPACE_LIMIT} papers. Write it with saveStandalonePaperVersion (after learn_standalone_question_paper).`))
+    .route(route('Create a quick question paper', `Get a quick question paper (not tied to an exam plan) to write and return its paperId: an unused paper of yours the school already has (no pages, versions or conversation; reused true), or a new one. A quick paper belongs to no session (in a school its template prints the session that is active when a version is saved); a personal space holds at most ${STANDALONE_PAPERS_PER_SPACE_LIMIT} papers. Write it with saveStandalonePaperVersion (after learn_standalone_question_paper).`))
     .meta(tool('write'))
     .input(dto.createStandalonePaperInputSchema)
     .use(managePapers)
@@ -176,7 +176,7 @@ export const schoolStandalonePaperRouter = {
     .output(dto.createStandalonePaperOutputSchema)
     .handler(async ({ context, input }) => {
       try {
-        return await createStandalonePaper(context.db, { schoolId: input.schoolId, userId: userId(context), sessionId: input.sessionId ?? null });
+        return await createStandalonePaper(context.db, { schoolId: input.schoolId, userId: userId(context) });
       } catch (error) {
         throw toRpcError(error);
       }

@@ -6,14 +6,16 @@ import { schoolSessionHref } from '@/components/school-route';
 /**
  * A school's Question papers page and its quick papers (docs/question-papers.md
  * "The Question papers page"). The page is the session's, like Notices and
- * Documents: the session switcher changes which papers it lists.
+ * Documents: the session switcher changes which exam papers it lists. Quick
+ * papers belong to no session, so every session's page lists them and a quick
+ * paper's screen opens under whichever session the person is in.
  */
 export type QuestionPapersScope = { schoolId: string; sessionId: string };
 
 /** The Question papers page of a session. */
 export const schoolQuestionPapersHref = ({ schoolId, sessionId }: QuestionPapersScope) => schoolSessionHref(schoolId, sessionId, '/question-papers');
 
-/** One quick paper's screen (a standalone paper of the school), below the page. */
+/** One quick paper's screen (a standalone paper of the school), below the page of the session the person is in. */
 export const quickPaperHref = (scope: QuestionPapersScope, paperId: string) => `${schoolQuestionPapersHref(scope)}/${encodeURIComponent(paperId)}`;
 
 /** Where a listed paper opens: a quick paper's own screen, or an exam paper's screen in its examination. */

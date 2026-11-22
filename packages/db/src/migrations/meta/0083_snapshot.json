@@ -7479,34 +7479,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "exam_question_paper_quick_idx": {
-          "name": "exam_question_paper_quick_idx",
-          "columns": [
-            {
-              "expression": "school_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "session_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "updated_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"exam_question_paper\".\"kind\" = 'standalone' and \"exam_question_paper\".\"session_id\" is not null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -7601,7 +7573,7 @@
         },
         "exam_question_paper_kind_key_check": {
           "name": "exam_question_paper_kind_key_check",
-          "value": "case \"exam_question_paper\".\"kind\"::text\n        when 'exam' then num_nonnulls(\"exam_question_paper\".\"session_id\", \"exam_question_paper\".\"exam_slug\", \"exam_question_paper\".\"class_id\", \"exam_question_paper\".\"subject_slug\", \"exam_question_paper\".\"mode_slug\") = 5\n          and num_nonnulls(\"exam_question_paper\".\"details_school_name\", \"exam_question_paper\".\"details_class_name\", \"exam_question_paper\".\"details_subject_name\", \"exam_question_paper\".\"details_exam_name\", \"exam_question_paper\".\"details_max_marks\") = 0\n          and \"exam_question_paper\".\"print_layout\"::text = 'school_template'\n        else num_nulls(\"exam_question_paper\".\"exam_slug\", \"exam_question_paper\".\"class_id\", \"exam_question_paper\".\"subject_slug\", \"exam_question_paper\".\"mode_slug\") = 4\n          and (\"exam_question_paper\".\"session_id\" is null) = (\"exam_question_paper\".\"print_layout\"::text = 'plain')\n      end"
+          "value": "case \"exam_question_paper\".\"kind\"::text\n        when 'exam' then num_nonnulls(\"exam_question_paper\".\"session_id\", \"exam_question_paper\".\"exam_slug\", \"exam_question_paper\".\"class_id\", \"exam_question_paper\".\"subject_slug\", \"exam_question_paper\".\"mode_slug\") = 5\n          and num_nonnulls(\"exam_question_paper\".\"details_school_name\", \"exam_question_paper\".\"details_class_name\", \"exam_question_paper\".\"details_subject_name\", \"exam_question_paper\".\"details_exam_name\", \"exam_question_paper\".\"details_max_marks\") = 0\n          and \"exam_question_paper\".\"print_layout\"::text = 'school_template'\n        else num_nulls(\"exam_question_paper\".\"session_id\", \"exam_question_paper\".\"exam_slug\", \"exam_question_paper\".\"class_id\", \"exam_question_paper\".\"subject_slug\", \"exam_question_paper\".\"mode_slug\") = 5\n      end"
         },
         "exam_question_paper_details_max_marks_check": {
           "name": "exam_question_paper_details_max_marks_check",
