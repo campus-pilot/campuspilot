@@ -35,18 +35,23 @@ import {
   type PaperRow,
   type VersionRow,
 } from './question-paper.records';
-import { estimatedBodyBytes, figureIdsToPlaceholders } from './question-paper.body';
+import { estimatedBodyBytes, figureIdsToPlaceholders, fragmentFigureIds } from './question-paper.body';
 import { assertCopySourceAllowed, copySourceFigures, copySourceNotFoundError, storedFigureIds } from './question-paper.copy';
 import type { PaperKey } from './question-paper.dto';
 import {
+  loadFigureAssets,
   QUESTION_PAPER_BODY_MAX_BYTES,
   QUESTION_PAPER_FIGURES_MAX_BYTES,
   readPinnedQuestionPaperTemplate,
   renderQuestionPaperBody,
   renderQuestionPaperDocument,
+  renderQuestionPaperTemplate,
   renderStandaloneQuestionPaperDocument,
+  renderStandaloneQuestionPaperShell,
   selectedQuestionPaperTemplate,
 } from './question-paper.render';
+import { convertQuestionPaperDocx, DOCX_CONTENT_TYPE } from './question-paper.docx-convert';
+import { questionPaperDocxHtml } from './question-paper.docx-html';
 import { sanitizeQuestionPaperBody, type SanitizedQuestionPaperBody } from './question-paper.sanitize';
 import {
   assertResolvedPaperWritable,
@@ -885,6 +890,17 @@ export async function downloadVersionPdf(
   return { url: await documentDownloadUrl(s3Key, fileName), fileName: `${fileName}.pdf` };
 }
 
+/** The format a version is downloaded in: its PDF (the default), or an editable Word file. */
+export type VersionDownloadFormat = 'pdf' | 'docx';
+
+/** A short-lived download URL for a version in the format asked for ({@link downloadVersionPdf}, {@link downloadVersionDocx}). */
+export function downloadVersion(
+  db: Database,
+  input: { scope: ResolvedPaper; version: VersionRow; userId: string; format: VersionDownloadFormat; signal?: AbortSignal },
+): Promise<{ url: string; fileName: string }> {
+  return input.format === 'docx' ? downloadVersionDocx(db, input) : downloadVersionPdf(db, input);
+}
+
 /** Prints the version again and stores the PDF as its artifact; answers with the new object's key. */
 async function restoreVersionPdf(
   db: Database,
@@ -925,6 +941,127 @@ async function restoreVersionPdf(
         .where(and(eq(examQuestionPaperVersionTable.id, version.id), stillWithout))
         .returning({ id: examQuestionPaperVersionTable.id });
       if (updated.length === 0) throw new PdfAlreadyStoredError();
+    },
+  );
+  return s3Key;
+}
+
+/** A concurrent download stored a Word file for the same version first; this one is discarded. */
+class DocxAlreadyStoredError extends Error {}
+
+/**
+ * The storage key of a version's Word (.docx) file (docs/question-papers.md
+ * "Word download"). It is made on the version's FIRST Word download, from the
+ * same inputs as its PDF (the stored fragment, the paper's own figures, the
+ * pinned template revision or the standalone shell), stored as an artifact
+ * of kind `docx` and reused by every later download. A Word file whose
+ * artifact was deleted (the pointer is then null) is made again. Two first
+ * downloads racing keep the first file and discard the second, like
+ * {@link storedVersionPdfKey}.
+ *
+ * A download is a read (a suspended school or a personal space past its
+ * trial can still download), and making the file is part of answering it, as
+ * restoring a removed PDF is. In a personal space the file counts toward the
+ * storage quota like the version's PDF: a full space is refused
+ * (`PERSONAL_SPACE_STORAGE_FULL`) before anything is converted, and again in
+ * the transaction that records it.
+ */
+export async function storedVersionDocxKey(
+  db: Database,
+  input: { scope: ResolvedPaper; version: VersionRow; userId: string; signal?: AbortSignal },
+): Promise<string> {
+  const { scope } = input;
+  let version = input.version;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (version.docxArtifactId) {
+      const [artifact] = await db
+        .select({ s3Key: artifactTable.s3Key, status: artifactTable.status })
+        .from(artifactTable)
+        .where(and(eq(artifactTable.id, version.docxArtifactId), eq(artifactTable.schoolId, paperSchoolIdOf(scope))))
+        .limit(1);
+      if (artifact?.status === 'ready') return artifact.s3Key;
+    }
+    const made = await makeVersionDocx(db, { ...input, version }).catch((error: unknown) => {
+      if (error instanceof DocxAlreadyStoredError) return null;
+      throw error;
+    });
+    if (made) return made;
+    version = await getVersion(db, version.paperId, version.versionNo);
+  }
+  throw rpcError.conflict('The Word file of this version is being prepared. Try again.');
+}
+
+/** A short-lived download URL for a version's Word file ({@link storedVersionDocxKey}), named like its PDF. */
+export async function downloadVersionDocx(
+  db: Database,
+  input: { scope: ResolvedPaper; version: VersionRow; userId: string; signal?: AbortSignal },
+): Promise<{ url: string; fileName: string }> {
+  const s3Key = await storedVersionDocxKey(db, input);
+  const fileName = downloadFileName(await paperNamesOf(db, input.scope), input.version.versionNo);
+  return { url: await documentDownloadUrl(s3Key, fileName, 'docx'), fileName: `${fileName}.docx` };
+}
+
+/**
+ * The rendered template document of a stored version with the body slot still
+ * in place, exactly as its PDF prints around the body: the pinned revision with
+ * the version's own context (an exam paper), or the built-in shell (a
+ * standalone paper).
+ */
+async function storedVersionTemplateHtml(db: DatabaseExecutor, scope: ResolvedPaper, version: VersionRow): Promise<string> {
+  const template = await pinnedPrintTemplateOf(db, scope, version);
+  if (template.kind === 'standalone' || isStandalonePaper(scope)) return renderStandaloneQuestionPaperShell();
+  const context = await measure('qp.context', () =>
+    buildQuestionPaperContext(db, { ...scope, planMaxMarks: version.planMaxMarks ?? scope.planMaxMarks }, { versionNo: version.versionNo }),
+  );
+  return measure('qp.document.render', () => renderQuestionPaperTemplate(template.content, context));
+}
+
+/** Converts the version to Word and stores the file as its artifact; answers with the new object's key. */
+async function makeVersionDocx(
+  db: Database,
+  input: { scope: ResolvedPaper; version: VersionRow; userId: string; signal?: AbortSignal },
+): Promise<string> {
+  const { scope, version } = input;
+  const schoolId = paperSchoolIdOf(scope);
+  // Early look: a full personal space is refused before any conversion (any other school has no quota).
+  await assertPersonalSpaceStorageRoom(db, { schoolId, addedBytes: 0, lock: false });
+  const template = await storedVersionTemplateHtml(db, scope, version);
+  const figures = await measure('qp.figures.load', () =>
+    loadFigureAssets(db, { schoolId, paperId: version.paperId, figureIds: fragmentFigureIds(version.contentHtml) }),
+  );
+  const html = measure('qp.docx.html', () => questionPaperDocxHtml({ fragment: version.contentHtml, figures, template }));
+  const docx = await convertQuestionPaperDocx(html, input.signal);
+  const artifactId = generateId('artifact');
+  const s3Key = `schools/${schoolId}/documents/${artifactId}.docx`;
+  await persistDocumentObject(
+    db,
+    {
+      id: artifactId,
+      schoolId,
+      kind: 'docx',
+      documentType: 'question_paper',
+      name: artifactName(await paperNamesOf(db, scope), version.versionNo),
+      s3Key,
+      contentType: DOCX_CONTENT_TYPE,
+      pageSize: 'full',
+      templateRevisionId: version.templateRevisionId,
+      ...artifactScopeOf(scope),
+      studentIds: [],
+      studentCount: 0,
+      createdBy: input.userId,
+    },
+    docx,
+    async (tx, artifact) => {
+      await assertPersonalSpaceStorageRoom(tx, { schoolId, addedBytes: artifact.byteSize, lock: true });
+      const stillWithout = version.docxArtifactId
+        ? eq(examQuestionPaperVersionTable.docxArtifactId, version.docxArtifactId)
+        : isNull(examQuestionPaperVersionTable.docxArtifactId);
+      const updated = await tx
+        .update(examQuestionPaperVersionTable)
+        .set({ docxArtifactId: artifact.id })
+        .where(and(eq(examQuestionPaperVersionTable.id, version.id), stillWithout))
+        .returning({ id: examQuestionPaperVersionTable.id });
+      if (updated.length === 0) throw new DocxAlreadyStoredError();
     },
   );
   return s3Key;

@@ -160,19 +160,24 @@ export function renderQuestionPaperDocument(input: {
  * There is no school context: the shell reads nothing but the slot.
  */
 export function renderStandaloneQuestionPaperDocument(body: RenderedBody): string {
-  const html = measure('qp.document.render', () =>
-    substituteQuestionPaperBody(
-      combineDocuments(
-        [renderDocument(STANDALONE_QUESTION_PAPER_SHELL, { questionPaper: { bodyHtml: QUESTION_PAPER_SLOT } }, { maxOutputChars: QUESTION_PAPER_TEMPLATE_RENDER_MAX_CHARS })],
-        'question_paper',
-      ),
-      body.html,
-    ),
-  );
+  const html = measure('qp.document.render', () => substituteQuestionPaperBody(renderStandaloneQuestionPaperShell(), body.html));
   if (Buffer.byteLength(html, 'utf8') > QUESTION_PAPER_DOCUMENT_MAX_BYTES) {
     throw rpcError.badRequest('This document exceeds the 25 MB rendering limit. Use fewer or smaller figures.');
   }
   return html;
+}
+
+/**
+ * The built-in shell of a standalone paper rendered, sanitised and laid out on
+ * A4 exactly as {@link renderStandaloneQuestionPaperDocument} prints it, with the
+ * slot still in place: the shell's counterpart of {@link renderQuestionPaperTemplate}
+ * (the Word conversion reads the heading and footer around the slot from it).
+ */
+export function renderStandaloneQuestionPaperShell(): string {
+  return combineDocuments(
+    [renderDocument(STANDALONE_QUESTION_PAPER_SHELL, { questionPaper: { bodyHtml: QUESTION_PAPER_SLOT } }, { maxOutputChars: QUESTION_PAPER_TEMPLATE_RENDER_MAX_CHARS })],
+    'question_paper',
+  );
 }
 
 /** A pinned template revision of this school (never another school's or another type's). */
