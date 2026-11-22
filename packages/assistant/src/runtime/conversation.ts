@@ -694,7 +694,9 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
       access: tool.readOnly ? 'read' : 'write',
       destructive: tool.destructive,
       module: tool.module,
-      input: toolUse.input ?? {},
+      // The arguments the tool is called with, the conversation's school included for a school-scoped tool
+      // (`toolInputFor`): the chat's cards and approvals read the call from here, as it was made.
+      input: toolInputFor(tool, toolUse.input, run.schoolId),
     };
     const item = await tx((t, emit) =>
       store.insertItem(t, emit, {

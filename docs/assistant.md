@@ -75,7 +75,9 @@ permissions.
    (`modelInputSchemaOf`, `toolInputFor` in `src/runtime/tools.ts`): models
    mistype long random ids, and a one-character slip was refused as another
    school. A `schoolId` the model sends anyway is passed on unchanged, so the
-   API still refuses a call naming another school.
+   API still refuses a call naming another school. The tool call item records
+   the arguments as called (school included), since the chat's draft cards and
+   approvals read the call from it.
 5. A write pauses on a Restate awakeable until the user approves or declines
    it in the UI. The decision is saved on the approval row and handed to the
    worker (`AssistantControl.resolveApproval`, which wakes the run with the

@@ -395,6 +395,23 @@ describe('a text-only reply', () => {
   });
 });
 
+describe('a school-scoped tool call', () => {
+  it("records and makes the call with the conversation's school, which the model did not send", async () => {
+    const validate = mcpTool('school.validateStandalonePaperDraft', 'read', { schoolScoped: true, module: 'exams' });
+    const call = { id: 'tu_validate', name: validate.modelName, input: { paperId: 'qpp_1', html: '<p>Q1</p>' } };
+    const { turn, invoke } = await arrange({ script: [fakeReply({ toolUses: [call] }), fakeReply({ text: 'Checked.' })] });
+    loadToolCatalogMock.mockResolvedValue(catalogOf(listStudents, updateStudent, validate));
+    callToolMock.mockResolvedValueOnce(toolSuccess('{"valid":true}'));
+
+    await invoke().done;
+
+    const withSchool = { ...call.input, schoolId: turn.schoolId };
+    expect(callToolMock).toHaveBeenCalledExactlyOnceWith(TOKEN, validate, withSchool);
+    // The chat's draft card reads the call's school from the item, as the call was made.
+    expect((await readTurn(turn)).toolCalls[0]?.body.input).toEqual(withSchool);
+  });
+});
+
 describe('a read tool call', () => {
   it('runs without approval and its result reaches the next model step', async () => {
     const { provider, turn, events, invoke } = await arrange({
