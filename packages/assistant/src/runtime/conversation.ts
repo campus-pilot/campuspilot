@@ -27,7 +27,7 @@ import {
 import { buildModelContextWithStats, type ModelContextDeps, type PaperPagePhoto } from './context';
 import { foreignRunIds, transcriptForProvider, type HandoffEntry } from './handoff';
 import { buildAssistantPrompt, istInstant, type AssistantConversationFacts } from './prompt';
-import { readActiveSchoolFeatures } from './school-features';
+import { readActiveSchoolFeatures, readSchoolKind } from './school-features';
 import { unavailableSchoolWork } from './unavailable-work';
 import type { ProviderRegistry } from './providers/registry';
 import { billedUsageOf, type ModelProvider, type ModelToolResult } from './providers/types';
@@ -115,7 +115,7 @@ export type AssistantConversationDeps = {
    * shared with one (see `context.ts`). Injected by `apps/worker` for the same
    * reason; without it such a conversation is shown no photos.
    */
-  loadPaperPages?: (input: { schoolId: string; paper: store.PaperKeyParts }) => Promise<PaperPagePhoto[]>;
+  loadPaperPages?: (input: { schoolId: string; paper: store.PaperKeyParts } | { schoolId: string; standalonePaperId: string }) => Promise<PaperPagePhoto[]>;
 };
 
 type RunFailure = { code: string; message: string; detail?: string };
@@ -190,6 +190,12 @@ type RunFacts = {
   model?: string;
   /** The question paper the conversation is shared with, whose photos every request shows; absent for any other conversation. */
   paper?: store.PaperKeyParts | null;
+  /**
+   * The standalone paper the conversation is shared with (docs/personal-space.md),
+   * whose photos every request shows; absent for any other conversation and
+   * for a run journaled before standalone papers existed.
+   */
+  standalonePaperId?: string | null;
   facts: AssistantConversationFacts;
 };
 
@@ -382,6 +388,7 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
       providerId: provider.id,
       model: provider.model,
       paper: store.sharedPaperOf(conversation),
+      standalonePaperId: store.sharedStandalonePaperOf(conversation),
       facts: {
         schoolId: run.schoolId,
         schoolName: await lookUpSchoolName(run.id, run.schoolId),
@@ -399,8 +406,8 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
    * feature switched off mid-conversation stops being offered at once).
    */
   async function schoolToolCatalog(token: string, schoolId: string) {
-    const [catalog, active] = await Promise.all([loadToolCatalog(token), readActiveSchoolFeatures(schoolId)]);
-    return toolCatalogForSchool(catalog, active);
+    const [catalog, active, schoolKind] = await Promise.all([loadToolCatalog(token), readActiveSchoolFeatures(schoolId), readSchoolKind(schoolId)]);
+    return { ...toolCatalogForSchool(catalog, active, schoolKind), schoolKind };
   }
 
   /** The school's display name, through the same MCP tools as everything else. */
@@ -472,6 +479,10 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
       {
         loadAttachment: deps.loadAttachment ?? (async () => ({ kind: 'missing' })),
         ...(run.paper && deps.loadPaperPages ? { loadPaperPages: () => deps.loadPaperPages!({ schoolId: run.schoolId, paper: run.paper! }) } : {}),
+        // A conversation shared with a standalone paper (docs/personal-space.md) is shown that paper's photos the same way.
+        ...(!run.paper && run.standalonePaperId && deps.loadPaperPages
+          ? { loadPaperPages: () => deps.loadPaperPages!({ schoolId: run.schoolId, standalonePaperId: run.standalonePaperId! }) }
+          : {}),
       },
     );
     const itemKey = assistantMessageItemKey(run.runId, step);
@@ -507,7 +518,7 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
     try {
       result = await provider.step({
         // Read with the tools above, so the model is told about exactly the features whose tools it was not given.
-        prompt: buildAssistantPrompt(run.facts, unavailableSchoolWork(catalog.withheldFeatures)),
+        prompt: buildAssistantPrompt(run.facts, unavailableSchoolWork(catalog.withheldFeatures), { schoolKind: catalog.schoolKind }),
         tools: catalog.ordered,
         transcript,
         onText,

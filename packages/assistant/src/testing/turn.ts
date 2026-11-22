@@ -265,6 +265,7 @@ export function mcpTool(mcpName: string, access: 'read' | 'write', overrides: Pa
     exposure: 'core',
     module: 'students',
     features: [],
+    schoolKinds: ['school'],
     ...overrides,
   };
 }

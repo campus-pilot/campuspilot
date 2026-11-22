@@ -90,3 +90,17 @@ export async function assertSchoolKindServedByCaller(
   if (facts.member) throw schoolKindUnsupportedError(facts.kind);
   throw rpcError.forbidden();
 }
+
+/**
+ * The kinds of the schools a user belongs to, for the MCP listing: a tool
+ * that serves none of them could only ever be refused, so it is not listed
+ * (a user whose only school is a personal space sees only its tools).
+ */
+export async function schoolKindsOfUser(db: DatabaseExecutor, userId: string): Promise<ReadonlySet<SchoolKind>> {
+  const rows = await db
+    .selectDistinct({ kind: schoolTable.kind })
+    .from(schoolMemberTable)
+    .innerJoin(schoolTable, eq(schoolTable.id, schoolMemberTable.schoolId))
+    .where(eq(schoolMemberTable.userId, userId));
+  return new Set(rows.map((row) => row.kind));
+}

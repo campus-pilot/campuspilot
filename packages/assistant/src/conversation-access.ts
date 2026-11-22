@@ -1,8 +1,8 @@
 import { assertPermission, checkPermissions } from '@campuspilot/api/permissions/authorization';
-import { CLASS_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
+import { CLASS_ACTIONS, SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 
 import type { AssistantSession } from './session';
-import { sharedPaperOf, type ConversationRow, type PaperKeyParts } from './store';
+import { sharedPaperOf, sharedStandalonePaperOf, type ConversationRow, type PaperKeyParts } from './store';
 
 /**
  * What the caller wants to do with a conversation:
@@ -32,7 +32,18 @@ const PAPER_ACTION = {
  * Seeing the assistant in the school at all (`assertCanSee`) is checked by
  * the caller first, for every need; continuing also needs use access.
  */
+/** The school permission that a need asks for in a conversation shared with a standalone paper (docs/personal-space.md). */
+const STANDALONE_PAPER_ACTION = {
+  read: SCHOOL_ACTIONS.READ_STANDALONE_PAPERS,
+  continue: SCHOOL_ACTIONS.MANAGE_STANDALONE_PAPERS,
+} as const;
+
 export async function mayReachConversation(session: AssistantSession, row: ConversationRow, need: ConversationNeed): Promise<boolean> {
+  // A conversation shared with a standalone paper is reached through the paper's school permission, like an exam paper's.
+  if (sharedStandalonePaperOf(row) !== null) {
+    const [allowed] = await checkPermissions(session.context, [{ action: STANDALONE_PAPER_ACTION[need], resource: { kind: 'school', schoolId: row.schoolId } }]);
+    return allowed === true;
+  }
   const paper = sharedPaperOf(row);
   if (!paper) return row.userId === session.user.id;
   const [allowed] = await checkPermissions(session.context, [
@@ -49,5 +60,16 @@ export async function assertMayManagePaper(session: AssistantSession, schoolId: 
   await assertPermission(session.context, {
     action: CLASS_ACTIONS.MANAGE_EXAM_QUESTION_PAPERS,
     resource: { kind: 'class', schoolId, classId: paper.classId },
+  });
+}
+
+/**
+ * Throws FORBIDDEN unless the user may manage the school's standalone papers:
+ * the right to start a conversation shared with one, or to read its history.
+ */
+export async function assertMayManageStandalonePaper(session: AssistantSession, schoolId: string): Promise<void> {
+  await assertPermission(session.context, {
+    action: SCHOOL_ACTIONS.MANAGE_STANDALONE_PAPERS,
+    resource: { kind: 'school', schoolId },
   });
 }

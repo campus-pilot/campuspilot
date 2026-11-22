@@ -87,13 +87,13 @@ describe('tools of a school', () => {
     const papers = mcpTool('school.listQuestionPapers', 'read');
     const catalog = catalogOf(students, papers, notices);
 
-    const staffOnly = toolCatalogForSchool(catalog, new Set(['assistant']));
+    const staffOnly = toolCatalogForSchool(catalog, new Set(['assistant']), 'school');
     expect(staffOnly.ordered.map(({ mcpName }) => mcpName)).toEqual(['school.listQuestionPapers']);
     expect(staffOnly.tools.has('school_listStudents')).toBe(false);
     // The features that took a tool away: what the model is told about.
     expect([...staffOnly.withheldFeatures].sort()).toEqual(['notices', 'studentManagement']);
 
-    const everything = toolCatalogForSchool(catalog, new Set(['studentManagement', 'notices', 'assistant']));
+    const everything = toolCatalogForSchool(catalog, new Set(['studentManagement', 'notices', 'assistant']), 'school');
     expect(everything.ordered.map(({ mcpName }) => mcpName)).toEqual(['school.listStudents', 'school.listQuestionPapers', 'school.listNotices']);
     expect([...everything.withheldFeatures]).toEqual([]);
   });
@@ -101,7 +101,34 @@ describe('tools of a school', () => {
   it('does not count a missing feature that gates none of the tools', () => {
     // The assistant has no notice tools: a school without notices loses nothing, so nothing is withheld.
     const catalog = catalogOf(mcpTool('school.listStudents', 'read', { features: ['studentManagement'] }), mcpTool('school.listQuestionPapers', 'read'));
-    expect([...toolCatalogForSchool(catalog, new Set(['studentManagement'])).withheldFeatures]).toEqual([]);
+    expect([...toolCatalogForSchool(catalog, new Set(['studentManagement']), 'school').withheldFeatures]).toEqual([]);
+  });
+});
+
+describe('tools of a kind of school', () => {
+  it('reads the kinds a tool serves from its metadata, real schools only when it names none', async () => {
+    mcp.tools = [
+      listed('school.listStandalonePapers', { [ASSISTANT_TOOL_META.schoolKinds]: ['personal'] }),
+      listed('school.listStudents', {}),
+    ];
+    const { tools } = await loadToolCatalog('token');
+    expect(tools.get('school_listStandalonePapers')?.schoolKinds).toEqual(['personal']);
+    expect(tools.get('school_listStudents')?.schoolKinds).toEqual(['school']);
+  });
+
+  it('offers a personal space only its own tools, and a real school never those', () => {
+    const students = mcpTool('school.listStudents', 'read');
+    const standalone = mcpTool('school.listStandalonePapers', 'read', { schoolKinds: ['personal'] });
+    const both = mcpTool('school.getFeatureFlags', 'read', { schoolKinds: ['school', 'personal'] });
+    const catalog = catalogOf(students, standalone, both);
+    expect(toolCatalogForSchool(catalog, new Set(['assistant']), 'personal').ordered.map(({ mcpName }) => mcpName)).toEqual([
+      'school.listStandalonePapers',
+      'school.getFeatureFlags',
+    ]);
+    expect(toolCatalogForSchool(catalog, new Set(['assistant']), 'school').ordered.map(({ mcpName }) => mcpName)).toEqual([
+      'school.listStudents',
+      'school.getFeatureFlags',
+    ]);
   });
 });
 

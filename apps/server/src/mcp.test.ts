@@ -552,3 +552,41 @@ describe('school feature gates', () => {
     expect(await listed(undefined)).toEqual(['listPupils', 'listRooms']);
   });
 });
+
+describe('school kinds in the listing', () => {
+  const route = (summary: string) => ({ summary, description: `${summary}.`, tags: ['Test'] });
+  const schoolInput = z.object({ schoolId: z.string() });
+  async function kindCatalog() {
+    const listRooms = protectedProcedure.meta(mcpMeta()).route(route('List rooms')).input(schoolInput).handler(() => []);
+    const listPapers = protectedProcedure
+      .meta({ ...mcpMeta(), schoolKinds: ['personal'] })
+      .route(route('List papers'))
+      .input(schoolInput)
+      .handler(() => []);
+    return buildMcpCatalog({ listRooms, listPapers });
+  }
+
+  it('records the kinds a tool serves, real schools only when it names none', async () => {
+    const byName = new Map((await kindCatalog()).core.map((tool) => [tool.name, tool]));
+    expect(byName.get('listRooms')?.schoolKinds).toEqual(['school']);
+    expect(byName.get('listPapers')?.schoolKinds).toEqual(['personal']);
+  });
+
+  it("lists a tool only while one of the user's schools is of a kind it serves", async () => {
+    const catalog = await kindCatalog();
+    const listed = async (availableSchoolKinds?: ReadonlySet<'school' | 'personal'>) => {
+      const server = createCampusPilotMcpServer({ catalog, availableSchoolKinds, createContext: async () => asContext({}), reportError: vi.fn() });
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const client = new Client({ name: 'campuspilot-test', version: '0.1.0' });
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      openConnections.push({ client, close: async () => { await client.close(); await server.close(); } });
+      return (await client.listTools()).tools.map(({ name }) => name).sort();
+    };
+    // A user whose only school is a personal space sees only its tools.
+    expect(await listed(new Set(['personal']))).toEqual(['listPapers']);
+    expect(await listed(new Set(['school']))).toEqual(['listRooms']);
+    expect(await listed(new Set(['school', 'personal']))).toEqual(['listPapers', 'listRooms']);
+    expect(await listed(undefined)).toEqual(['listPapers', 'listRooms']);
+  });
+});

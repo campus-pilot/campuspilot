@@ -53,6 +53,13 @@ export type AssistantTool = {
    */
   features: readonly string[];
   /**
+   * The kinds of school the tool's procedure serves (from the API's
+   * listing). A conversation in a school of another kind is never offered the
+   * tool ({@link toolCatalogForSchool}). A tool listed without kinds serves
+   * real schools only, so a personal space fails closed.
+   */
+  schoolKinds: readonly string[];
+  /**
    * How many characters of this tool's result the model reads, when the
    * procedure declares it (`outputChars`); the default limit applies
    * otherwise.
@@ -97,6 +104,8 @@ const SHOW_VIEW_TOOL: AssistantTool = {
   exposure: 'core',
   module: 'assistant',
   features: [],
+  // Showing a view reaches nothing, so it is offered in every kind of school.
+  schoolKinds: ['school', 'personal'],
 };
 
 /**
@@ -174,6 +183,9 @@ export async function loadToolCatalog(token: string): Promise<AssistantToolCatal
       features: Array.isArray(meta[ASSISTANT_TOOL_META.features])
         ? (meta[ASSISTANT_TOOL_META.features] as unknown[]).map(String)
         : [],
+      schoolKinds: Array.isArray(meta[ASSISTANT_TOOL_META.schoolKinds])
+        ? (meta[ASSISTANT_TOOL_META.schoolKinds] as unknown[]).map(String)
+        : ['school'],
       ...(typeof meta[ASSISTANT_TOOL_META.outputChars] === 'number'
         ? { outputChars: meta[ASSISTANT_TOOL_META.outputChars] as number }
         : {}),
@@ -197,6 +209,10 @@ export async function loadToolCatalog(token: string): Promise<AssistantToolCatal
  * of which the API would refuse. The listing (and its cache) is the same for
  * every school; only this view differs.
  *
+ * It also leaves out every tool that does not serve the school's kind
+ * (docs/personal-space.md): a personal space is offered only its standalone
+ * paper tools and showing a view; a real school never those.
+ *
  * `withheldFeatures` is the features that took at least one tool out: the
  * missing features the model should be told about. A feature that gates none
  * of the assistant's tools is not in it, whether the school has it or not.
@@ -204,9 +220,12 @@ export async function loadToolCatalog(token: string): Promise<AssistantToolCatal
 export function toolCatalogForSchool(
   catalog: AssistantToolCatalog,
   activeFeatures: ReadonlySet<string>,
+  schoolKind: string,
 ): AssistantToolCatalog & { withheldFeatures: ReadonlySet<string> } {
   const withheldFeatures = new Set<string>();
   const ordered = catalog.ordered.filter((tool) => {
+    // A tool of another kind of school is left out first: its features say nothing about this school.
+    if (!tool.schoolKinds.includes(schoolKind)) return false;
     const missing = tool.features.filter((feature) => !activeFeatures.has(feature));
     for (const feature of missing) withheldFeatures.add(feature);
     return missing.length === 0;

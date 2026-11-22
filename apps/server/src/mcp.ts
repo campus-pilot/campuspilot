@@ -5,6 +5,7 @@ import {
   MCP_EXPOSURES,
   MCP_MODULES,
   type McpProcedureMeta,
+  type ProcedureMeta,
 } from '@campuspilot/api/mcp-metadata';
 import {
   type CallToolResult,
@@ -28,6 +29,8 @@ import {
 } from '@campuspilot/auth/mcp-oauth-policy';
 import { assistantToolDecision } from '@campuspilot/api/assistant/tool-policy';
 import { featuresOfUserSchools } from '@campuspilot/api/feature-flags/feature-flags.service';
+import { schoolKindsOfUser, servedSchoolKinds } from '@campuspilot/api/school-access/school-kind.service';
+import type { SchoolKind } from '@campuspilot/db/school-kind';
 import { schoolFeatureGatesOf } from '@campuspilot/api/permissions/feature';
 import { schoolFeatureCatalogue, type SchoolFeatureKey } from '@campuspilot/db/feature-flags/catalogue';
 import { ASSISTANT_TOOL_META } from '@campuspilot/assistant-contract/protocol';
@@ -65,6 +68,12 @@ export type McpToolDefinition = {
    * list can never disagree with what a call is refused for.
    */
   features: readonly SchoolFeatureKey[];
+  /**
+   * The kinds of school the procedure serves (`schoolKinds` in its
+   * metadata, real schools only when it names none; docs/personal-space.md),
+   * the same rule `requireAuth` enforces on every call.
+   */
+  schoolKinds: readonly SchoolKind[];
   procedure: AnyProcedure;
 };
 
@@ -148,6 +157,11 @@ type CreateCampusPilotMcpServerOptions = McpToolCallOptions & {
    * are not listed. Undefined lists every tool (the assistant view, Cadet).
    */
   availableFeatures?: ReadonlySet<SchoolFeatureKey>;
+  /**
+   * The kinds of the user's schools (`schoolKindsOfUser`). When given, tools
+   * that serve none of them are not listed. Undefined lists every tool.
+   */
+  availableSchoolKinds?: ReadonlySet<SchoolKind>;
 };
 
 export type McpErrorPayload = {
@@ -408,6 +422,7 @@ export async function buildMcpCatalog(router: AnyRouter): Promise<McpCatalog> {
         title: summary,
         description: withFeatureNote(description, features),
         features,
+        schoolKinds: servedSchoolKinds((definition.meta as ProcedureMeta | undefined)?.schoolKinds),
         inputSchema,
         inputJsonSchema: convertMcpInputSchema(name, inputSchema),
         acceptsInput: definition.inputSchema !== undefined,
@@ -594,6 +609,8 @@ function registerAssistantTools(
           // has these; the listing itself is the same for every school, so
           // one cached catalog serves all runs.
           [ASSISTANT_TOOL_META.features]: [...tool.features],
+          // Likewise the kinds of school it serves (a personal space gets only its own tools).
+          [ASSISTANT_TOOL_META.schoolKinds]: [...tool.schoolKinds],
           ...(tool.mcp.outputChars === undefined
             ? {}
             : { [ASSISTANT_TOOL_META.outputChars]: tool.mcp.outputChars }),
@@ -611,6 +628,7 @@ export function createCampusPilotMcpServer({
   writeAccess = true,
   assistantView = false,
   availableFeatures,
+  availableSchoolKinds,
   serverName = 'campuspilot',
   ...options
 }: CreateCampusPilotMcpServerOptions): McpServer {
@@ -622,9 +640,13 @@ export function createCampusPilotMcpServer({
   const credentialView = writeAccess ? catalog : catalog.readOnly;
   // A tool gated on a feature none of the user's schools has could only ever
   // be refused, so it is not listed (nor found through the advanced tools).
-  const view = availableFeatures
+  const featureView = availableFeatures
     ? filterCatalogView(credentialView, (tool) => tool.features.every((key) => availableFeatures.has(key)))
     : credentialView;
+  // Likewise a tool that serves none of the kinds of the user's schools (docs/personal-space.md).
+  const view = availableSchoolKinds
+    ? filterCatalogView(featureView, (tool) => tool.schoolKinds.some((kind) => availableSchoolKinds.has(kind)))
+    : featureView;
 
   for (const tool of view.core) {
     server.registerTool(
@@ -679,6 +701,10 @@ export function createCampusPilotMcpHandler<TContext extends McpContext>({
         availableFeatures:
           !assistantView && 'session' in context && context.session
             ? await featuresOfUserSchools(context.db, context.session.user.id)
+            : undefined,
+        availableSchoolKinds:
+          !assistantView && 'session' in context && context.session
+            ? await schoolKindsOfUser(context.db, context.session.user.id)
             : undefined,
         serverName,
         createContext: async () => context,

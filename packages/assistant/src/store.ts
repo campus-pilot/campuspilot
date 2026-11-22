@@ -44,6 +44,18 @@ export function sharedPaperOf(row: ConversationRow): PaperKeyParts | null {
   return { sessionId: paperSessionId, examSlug: paperExamSlug, classId: paperClassId, subjectSlug: paperSubjectSlug, modeSlug: paperModeSlug };
 }
 
+/**
+ * The standalone question paper a conversation is shared with
+ * (`standalone_paper_id`, docs/personal-space.md), or null. Its own fact,
+ * never both it and an exam paper key (CHECK).
+ */
+export function sharedStandalonePaperOf(row: ConversationRow): string | null {
+  return row.standalonePaperId;
+}
+
+/** Whether a conversation is shared with a paper of either kind. */
+export const isSharedWithAPaper = (row: ConversationRow): boolean => sharedPaperOf(row) !== null || sharedStandalonePaperOf(row) !== null;
+
 /** The columns that hold a paper key, for a where clause. */
 export const paperKeyWhere = (paper: PaperKeyParts) =>
   and(
@@ -62,7 +74,7 @@ export type EmitAssistantChange = (conversationId: string, change: AssistantChan
 
 /** A conversation as clients see it. */
 export function toConversationDto(row: ConversationRow): AssistantConversationDto {
-  return assistantConversationSchema.parse({ ...row, sharedWithPaper: sharedPaperOf(row) !== null });
+  return assistantConversationSchema.parse({ ...row, sharedWithPaper: isSharedWithAPaper(row) });
 }
 
 /**
@@ -279,9 +291,11 @@ export async function createConversation(
     model: string;
     /** The question paper the conversation is shared with; none (the default) keeps it private to its user. */
     paper?: PaperKeyParts | null;
+    /** The standalone paper the conversation is shared with; never together with `paper`. */
+    standalonePaperId?: string | null;
   },
 ): Promise<ConversationRow> {
-  const { paper, ...values } = input;
+  const { paper, standalonePaperId, ...values } = input;
   const [row] = await tx
     .insert(assistantConversationTable)
     .values({
@@ -291,6 +305,7 @@ export async function createConversation(
       paperClassId: paper?.classId ?? null,
       paperSubjectSlug: paper?.subjectSlug ?? null,
       paperModeSlug: paper?.modeSlug ?? null,
+      standalonePaperId: standalonePaperId ?? null,
     })
     .returning();
   return row!;

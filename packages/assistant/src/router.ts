@@ -1,5 +1,5 @@
 import { issueAssistantRunToken } from '@campuspilot/api/assistant/token';
-import { resolvePaperScope } from '@campuspilot/api/routers/school/question-paper/question-paper.scope';
+import { resolvePaperScope, resolveStandalonePaper } from '@campuspilot/api/routers/school/question-paper/question-paper.scope';
 import type { AssistantAttachmentKind, AssistantMessageSeed } from '@campuspilot/assistant-contract/attachments';
 import { assistantContract } from '@campuspilot/assistant-contract/contract';
 import { ASSISTANT_LIST_PAGE_SIZE, type AssistantStreamEvent } from '@campuspilot/assistant-contract/dto';
@@ -7,7 +7,7 @@ import { implement, ORPCError } from '@orpc/server';
 
 import { attachmentNotReadyMessage, bindAttachments, deleteConversationAttachments, lockUnsentAttachments, toAttachmentRef, unreadableAttachmentMessage } from './attachments';
 import { assertCanChange, assertCanSee, assertCanUse, assertMember, canSee, loadAssistantAccess } from './access';
-import { assertMayManagePaper, mayReachConversation, type ConversationNeed } from './conversation-access';
+import { assertMayManagePaper, assertMayManageStandalonePaper, mayReachConversation, type ConversationNeed } from './conversation-access';
 import { listPaperConversations } from './paper-conversations';
 import { db } from './db';
 import { handOverApprovalResolution, handOverRun } from './dispatch';
@@ -24,7 +24,7 @@ import {
 import { readableMimeTypesOf } from './runtime/providers/image-types';
 import { resolveAssistantSession, type AssistantSession } from './session';
 import * as store from './store';
-import { sharedPaperOf, type PaperKeyParts } from './store';
+import { isSharedWithAPaper, type PaperKeyParts } from './store';
 import { voiceRefusal } from './voice/access';
 import { voiceSettings } from './voice/config';
 import { userMessageItemKey } from './transcript';
@@ -48,7 +48,9 @@ export type AssistantRequestContext = { headers: Headers };
  */
 async function assertSeedNamesAPaper(schoolId: string, seed: NonNullable<AssistantMessageSeed>) {
   try {
-    await resolvePaperScope(db, { schoolId, sessionId: seed.sessionId, examSlug: seed.examSlug, classId: seed.classId, subjectSlug: seed.subjectSlug, modeSlug: seed.modeSlug });
+    // A standalone paper (docs/personal-space.md) must be one of this school's standalone papers.
+    if (seed.kind === 'standalone_question_paper') await resolveStandalonePaper(db, { schoolId, paperId: seed.paperId });
+    else await resolvePaperScope(db, { schoolId, sessionId: seed.sessionId, examSlug: seed.examSlug, classId: seed.classId, subjectSlug: seed.subjectSlug, modeSlug: seed.modeSlug });
   } catch (error) {
     if (error instanceof ORPCError && (error.code === 'NOT_FOUND' || error.code === 'BAD_REQUEST')) {
       throw new ORPCError('BAD_REQUEST', { message: 'The question paper this chat was started from was not found. Start a new chat from the Question paper screen.' });
@@ -58,7 +60,7 @@ async function assertSeedNamesAPaper(schoolId: string, seed: NonNullable<Assista
 }
 
 /** The paper a question paper seed names, as the parts a shared conversation stores. */
-const paperKeyOfSeed = (seed: NonNullable<AssistantMessageSeed>): PaperKeyParts => ({
+const paperKeyOfSeed = (seed: Extract<NonNullable<AssistantMessageSeed>, { kind: 'question_paper' }>): PaperKeyParts => ({
   sessionId: seed.sessionId,
   examSlug: seed.examSlug,
   classId: seed.classId,
@@ -247,9 +249,18 @@ export const assistantRouter = os.router({
    */
   listPaperConversations: authed.listPaperConversations.handler(async ({ context, input }) => {
     await assertReadAccess(context, input.schoolId);
-    const { schoolId, page, ...paper } = input;
-    await assertMayManagePaper(context.session, schoolId, paper);
     const pageSize = ASSISTANT_LIST_PAGE_SIZE;
+    const { schoolId, page } = input;
+    let paper: PaperKeyParts | { standalonePaperId: string };
+    if ('paperId' in input) {
+      // A standalone paper's history: for whoever may change the school's standalone papers.
+      await assertMayManageStandalonePaper(context.session, schoolId);
+      paper = { standalonePaperId: input.paperId };
+    } else {
+      const { schoolId: _schoolId, page: _page, ...key } = input;
+      await assertMayManagePaper(context.session, schoolId, key);
+      paper = key;
+    }
     const { items, totalItems } = await listPaperConversations(db, { schoolId, paper, page, pageSize });
     const totalPages = Math.ceil(totalItems / pageSize);
     return {
@@ -352,8 +363,11 @@ export const assistantRouter = os.router({
     // The seed is written into the model's context: it must name a paper that exists in this school (not free text).
     if (input.seed) await assertSeedNamesAPaper(input.schoolId, input.seed);
     // A conversation shared with a paper is started by someone who may change that paper (the contract requires its seed).
-    const sharedPaper = input.shareWithPaper && input.seed ? paperKeyOfSeed(input.seed) : null;
+    const sharedPaper = input.shareWithPaper && input.seed?.kind === 'question_paper' ? paperKeyOfSeed(input.seed) : null;
     if (sharedPaper) await assertMayManagePaper(context.session, input.schoolId, sharedPaper);
+    // A standalone paper's conversation is shared with it by id, by someone who may change the school's standalone papers.
+    const sharedStandalonePaperId = input.shareWithPaper && input.seed?.kind === 'standalone_question_paper' ? input.seed.paperId : null;
+    if (sharedStandalonePaperId) await assertMayManageStandalonePaper(context.session, input.schoolId);
     const status = providerAvailability();
     if (!status.configured) {
       throw new ORPCError('PRECONDITION_FAILED', {
@@ -399,6 +413,7 @@ export const assistantRouter = os.router({
           provider: provider.id,
           model: provider.model,
           paper: sharedPaper,
+          standalonePaperId: sharedStandalonePaperId,
         });
       }
       const run = await store.insertRun(tx, emit, {
@@ -529,7 +544,7 @@ export const assistantRouter = os.router({
     const owned = await ownedConversation(context, input.schoolId, input.conversationId);
     // Deleting a conversation shared with a paper takes it from everyone working on that paper, so its starter must still
     // be one of them (may continue it); otherwise it is answered like any conversation they cannot reach.
-    if (sharedPaperOf(owned) && !(await mayReachConversation(context.session, owned, 'continue'))) {
+    if (isSharedWithAPaper(owned) && !(await mayReachConversation(context.session, owned, 'continue'))) {
       throw new ORPCError('NOT_FOUND', { message: 'Assistant conversation was not found.' });
     }
     const outcome = await store.deleteConversation(db, owned.id, context.session.user.id);
