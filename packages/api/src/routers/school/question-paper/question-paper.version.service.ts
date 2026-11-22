@@ -410,6 +410,16 @@ async function paperNamesOf(db: DatabaseExecutor, scope: ResolvedPaper): Promise
 type PrintTemplate = { kind: 'template'; revisionId: string; name: string; content: string } | { kind: 'plain' };
 
 /**
+ * The names a saved version's files carry: the details its heading printed
+ * for a quick paper's version (`printed_details`), so an old version is named
+ * as it prints; otherwise the paper's names ({@link paperNamesOf}).
+ */
+async function versionNamesOf(db: DatabaseExecutor, scope: ResolvedPaper, version: VersionRow): Promise<PaperNames> {
+  if (version.printedDetails) return { kind: 'standalone', details: version.printedDetails };
+  return paperNamesOf(db, scope);
+}
+
+/**
  * The heading details a new version of a quick paper prints and keeps
  * (`printed_details`): the ones the save states, else the paper's as stored.
  * Null for any other paper: an exam paper prints its plan's names, a plain
@@ -935,7 +945,7 @@ export async function downloadVersionPdf(
   input: { scope: ResolvedPaper; version: VersionRow; userId: string; signal?: AbortSignal },
 ): Promise<{ url: string; fileName: string }> {
   const s3Key = await storedVersionPdfKey(db, input);
-  const fileName = downloadFileName(await paperNamesOf(db, input.scope), input.version.versionNo);
+  const fileName = downloadFileName(await versionNamesOf(db, input.scope, input.version), input.version.versionNo);
   return { url: await documentDownloadUrl(s3Key, fileName), fileName: `${fileName}.pdf` };
 }
 
@@ -960,7 +970,7 @@ async function restoreVersionPdf(
   const { html } = await renderStoredVersionHtml(db, scope, version);
   const pdf = await convertDocumentPdf(html, 'question_paper', input.signal);
   const artifactId = generateId('artifact');
-  const name = artifactName(await paperNamesOf(db, scope), version.versionNo);
+  const name = artifactName(await versionNamesOf(db, scope, version), version.versionNo);
   const s3Key = `schools/${schoolId}/documents/${artifactId}.pdf`;
   await persistDocumentObject(
     db,
@@ -1053,7 +1063,7 @@ export async function downloadVersionDocx(
   input: { scope: ResolvedPaper; version: VersionRow; userId: string; signal?: AbortSignal },
 ): Promise<{ url: string; fileName: string }> {
   const s3Key = await storedVersionDocxKey(db, input);
-  const fileName = downloadFileName(await paperNamesOf(db, input.scope), input.version.versionNo);
+  const fileName = downloadFileName(await versionNamesOf(db, input.scope, input.version), input.version.versionNo);
   return { url: await documentDownloadUrl(s3Key, fileName, 'docx'), fileName: `${fileName}.docx` };
 }
 
@@ -1095,7 +1105,7 @@ async function makeVersionDocx(
       schoolId,
       kind: 'docx',
       documentType: 'question_paper',
-      name: artifactName(await paperNamesOf(db, scope), version.versionNo),
+      name: artifactName(await versionNamesOf(db, scope, version), version.versionNo),
       s3Key,
       contentType: DOCX_CONTENT_TYPE,
       pageSize: 'full',

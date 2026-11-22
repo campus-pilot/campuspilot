@@ -19,9 +19,6 @@ import {
   QUESTION_PAPER_DETAIL_MAX_MARKS,
   type QuestionPaperDetails,
 } from "@campuspilot/question-paper/details";
-
-/** The details a quick paper's version printed (`exam_question_paper_version.printed_details`). */
-export type QuestionPaperPrintedDetails = Pick<QuestionPaperDetails, "className" | "subjectName" | "examName" | "maxMarks">;
 import {
   QUESTION_PAPER_PAGE_ROTATIONS,
   type QuestionPaperPageRotation,
@@ -34,6 +31,9 @@ import { user } from "./auth";
 import { classTable } from "./class";
 import { schoolTable } from "./school";
 import { schoolSessionTable } from "./session";
+
+/** The details a quick paper's version printed (`exam_question_paper_version.printed_details`). */
+export type QuestionPaperPrintedDetails = Pick<QuestionPaperDetails, "className" | "subjectName" | "examName" | "maxMarks">;
 
 /**
  * Question papers (docs/question-papers.md, written in the last phase of the
@@ -635,6 +635,7 @@ export const examQuestionPaperVersionTable = pgTable(
       "exam_question_paper_version_printed_details_check",
       sql`(${table.printedDetails} is not null) = (${table.paperKind}::text = 'standalone' and ${table.paperPrintLayout}::text = 'school_template')`,
     ),
+    // Compared as text, as above.
     check(
       "exam_question_paper_version_template_check",
       sql`(${table.paperPrintLayout}::text = 'plain') = (${table.templateRevisionId} is null)`,

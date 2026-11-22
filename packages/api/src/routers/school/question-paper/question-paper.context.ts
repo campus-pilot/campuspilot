@@ -1,7 +1,7 @@
 import type { DatabaseExecutor } from "@campuspilot/db";
 import { schoolTable } from "@campuspilot/db/schema/school";
 import { schoolSessionTable } from "@campuspilot/db/schema/session";
-import type { QuestionPaperDetails } from "@campuspilot/question-paper/details";
+import type { QuestionPaperPrintedDetails } from "@campuspilot/db/schema/exam-question-paper";
 import { and, eq } from "drizzle-orm";
 
 import { rpcError } from "../../../errors";
@@ -112,8 +112,8 @@ async function schoolBlockOf(db: DatabaseExecutor, schoolId: string): Promise<Qu
   return buildSchoolDocumentContext(school);
 }
 
-/** The details of a quick paper its school's template prints. */
-export type QuickPaperPrintedDetails = Pick<QuestionPaperDetails, "className" | "subjectName" | "examName" | "maxMarks">;
+/** The details of a quick paper its school's template prints: the shape a version keeps (`printed_details`). */
+export type QuickPaperPrintedDetails = QuestionPaperPrintedDetails;
 
 /**
  * The template context of a quick paper (a standalone paper of a real school
