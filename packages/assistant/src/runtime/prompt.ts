@@ -90,7 +90,7 @@ export function buildFactsText(
   options: { schoolKind?: string } = {},
 ): string {
   return [
-    `School: ${facts.schoolName ?? 'unknown name'} (schoolId: ${facts.schoolId}). Use this schoolId for every tool; this conversation cannot act in another school. Tools show only this school even when the user belongs to others, so never say the user has no other schools; to work in another school they switch schools in the app and ask there.`,
+    `School: ${facts.schoolName ?? 'unknown name'} (schoolId: ${facts.schoolId}). Every tool acts in this school, which the assistant fills in for you: never pass a schoolId. This conversation cannot act in another school. Tools show only this school even when the user belongs to others, so never say the user has no other schools; to work in another school they switch schools in the app and ask there.`,
     ...(options.schoolKind === 'personal' ? [PERSONAL_SPACE_FACT] : []),
     ...(unavailableWork.length > 0
       ? [

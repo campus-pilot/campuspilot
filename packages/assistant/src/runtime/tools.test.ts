@@ -21,7 +21,7 @@ vi.mock('@modelcontextprotocol/client', () => ({
 }));
 
 import { catalogOf, mcpTool } from '../testing/turn';
-import { callTool, loadToolCatalog, requiresApproval, toolCatalogForSchool } from './tools';
+import { callTool, loadToolCatalog, modelInputSchemaOf, requiresApproval, toolCatalogForSchool, toolInputFor } from './tools';
 
 const listed = (name: string, meta: Record<string, unknown> = {}) => ({
   name,
@@ -145,5 +145,34 @@ describe('approval', () => {
     expect(requiresApproval(tools.get('school_getQuestionPaper')!)).toBe(false);
     expect(requiresApproval(tools.get('school_saveQuestionPaperVersion')!)).toBe(false);
     expect(requiresApproval(tools.get('school_updateStudent')!)).toBe(true);
+  });
+});
+
+describe("the conversation's school in a tool call", () => {
+  const schoolScoped = {
+    type: 'object',
+    properties: { schoolId: { type: 'string' }, paperId: { type: 'string' } },
+    required: ['schoolId', 'paperId'],
+    additionalProperties: false,
+  };
+
+  it('shows the model a school-scoped tool without schoolId, and records that it has one', () => {
+    expect(modelInputSchemaOf(schoolScoped)).toEqual({
+      inputSchema: { type: 'object', properties: { paperId: { type: 'string' } }, required: ['paperId'], additionalProperties: false },
+      schoolScoped: true,
+    });
+    const accountLevel = { type: 'object', properties: { query: { type: 'string' } } };
+    expect(modelInputSchemaOf(accountLevel)).toEqual({ inputSchema: accountLevel, schoolScoped: false });
+  });
+
+  it("fills in the conversation's school, so the model never copies the id (and cannot mistype it)", () => {
+    const tool = mcpTool('school.learn_standalone_question_paper', 'read', { schoolScoped: true });
+    expect(toolInputFor(tool, {}, 'sch_own')).toEqual({ schoolId: 'sch_own' });
+    expect(toolInputFor(tool, undefined, 'sch_own')).toEqual({ schoolId: 'sch_own' });
+    expect(toolInputFor(tool, { paperId: 'qp_1' }, 'sch_own')).toEqual({ paperId: 'qp_1', schoolId: 'sch_own' });
+    // A school the model named anyway is kept, so the API refuses another school instead of the call moving here.
+    expect(toolInputFor(tool, { schoolId: 'sch_other' }, 'sch_own')).toEqual({ schoolId: 'sch_other' });
+    // A tool without a school takes the input as it is.
+    expect(toolInputFor(mcpTool('school.listMySchools', 'read'), { page: 1 }, 'sch_own')).toEqual({ page: 1 });
   });
 });

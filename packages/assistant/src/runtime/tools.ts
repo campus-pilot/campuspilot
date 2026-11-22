@@ -38,7 +38,19 @@ export type AssistantTool = {
   mcpName: string;
   title: string;
   description: string;
+  /**
+   * The input schema the model sees. For a school-scoped tool
+   * ({@link AssistantTool.schoolScoped}) it has no `schoolId`: the
+   * conversation's school is filled in by the assistant ({@link toolInputFor}).
+   */
   inputSchema: Record<string, unknown>;
+  /**
+   * Whether the procedure's input has a top-level `schoolId` (from its listed
+   * schema). Its own fact, so the assistant passes the conversation's school
+   * itself instead of asking the model to copy a long random id, which models
+   * mistype (a one-character slip is refused as another school).
+   */
+  schoolScoped: boolean;
   /** From the MCP `readOnlyHint` annotation. */
   readOnly: boolean;
   /** From the MCP `destructiveHint` annotation. */
@@ -99,6 +111,7 @@ const SHOW_VIEW_TOOL: AssistantTool = {
     const { $schema: _dialect, ...schema } = z.toJSONSchema(showViewInputSchema, { io: 'input' });
     return schema as Record<string, unknown>;
   })(),
+  schoolScoped: false,
   readOnly: true,
   destructive: false,
   exposure: 'core',
@@ -130,6 +143,31 @@ async function withMcpClient<T>(token: string, work: (client: Client) => Promise
   } finally {
     await client.close();
   }
+}
+
+/**
+ * A listed input schema as the model sees it: without its top-level
+ * `schoolId` (property and requirement), and whether it had one.
+ */
+export function modelInputSchemaOf(listed: Record<string, unknown>): { inputSchema: Record<string, unknown>; schoolScoped: boolean } {
+  const properties = listed.properties as Record<string, unknown> | undefined;
+  if (!properties || !('schoolId' in properties)) return { inputSchema: listed, schoolScoped: false };
+  const { schoolId: _schoolId, ...rest } = properties;
+  const required = Array.isArray(listed.required) ? (listed.required as unknown[]).filter((name) => name !== 'schoolId') : undefined;
+  return { inputSchema: { ...listed, properties: rest, ...(required ? { required } : {}) }, schoolScoped: true };
+}
+
+/**
+ * The arguments a tool is called with: for a school-scoped tool, the model's
+ * input with the conversation's `schoolId` added. A `schoolId` the model sent
+ * anyway is kept as it is, so a call naming another school is still refused
+ * by the API (a conversation acts only in its own school) instead of being
+ * quietly moved to this one.
+ */
+export function toolInputFor(tool: AssistantTool, input: unknown, schoolId: string): Record<string, unknown> {
+  const args = (typeof input === 'object' && input !== null ? input : {}) as Record<string, unknown>;
+  if (!tool.schoolScoped || args.schoolId !== undefined) return args;
+  return { ...args, schoolId };
 }
 
 /** The description every provider shows the model for a tool. */
@@ -174,7 +212,7 @@ export async function loadToolCatalog(token: string): Promise<AssistantToolCatal
       mcpName: listedTool.name,
       title: listedTool.title ?? listedTool.name,
       description: listedTool.description ?? '',
-      inputSchema: listedTool.inputSchema as Record<string, unknown>,
+      ...modelInputSchemaOf(listedTool.inputSchema as Record<string, unknown>),
       // Fails closed: a tool that does not say it is read-only is a write.
       readOnly: listedTool.annotations?.readOnlyHint === true,
       destructive: listedTool.annotations?.destructiveHint === true,

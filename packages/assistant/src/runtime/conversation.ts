@@ -39,6 +39,7 @@ import {
   requiresApproval,
   toModelToolName,
   toolCatalogForSchool,
+  toolInputFor,
   type AssistantTool,
   type ToolOutcome,
 } from './tools';
@@ -854,7 +855,7 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
       return { ok: false, error: earlier.body.error ?? OUTCOME_UNKNOWN_ERROR };
     }
     try {
-      return await callTool(token, tool, toolUse.input ?? {});
+      return await callTool(token, tool, toolInputFor(tool, toolUse.input, run.schoolId));
     } catch (err) {
       deps.log.error(
         { err, runId: run.runId, conversationId: run.conversationId, tool: tool.mcpName },
@@ -886,7 +887,7 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
     const outcome: ToolOutcome | { recorded: ModelToolResult } | { stopped: true } = !tool
       ? { ok: false, error: { code: 'NOT_FOUND', message: `The tool ${toolUse.name} is no longer available.` } }
       : tool.readOnly
-        ? await callTool(token, tool, toolUse.input ?? {})
+        ? await callTool(token, tool, toolInputFor(tool, toolUse.input, run.schoolId))
         : await callWriteOnce(run, token, tool, toolUse, itemId);
     if ('recorded' in outcome) return outcome.recorded;
     if ('stopped' in outcome) {
