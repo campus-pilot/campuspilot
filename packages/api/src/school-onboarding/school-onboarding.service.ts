@@ -76,7 +76,7 @@ function subjectsConfig(names: readonly string[]): ClassConfig {
   const slugs = onboardingSubjectSlugs(names);
   return {
     subjects: Object.fromEntries(
-      names.map((name, index) => [slugs[index]!, { name, books: [], examModes: structuredClone(ONBOARDING_SUBJECT_EXAM_MODES) }]),
+      names.map((name, index) => [slugs[index]!, { name, books: [], examModes: structuredClone(ONBOARDING_SUBJECT_EXAM_MODES), attachment: { kind: 'school' as const } }]),
     ),
   };
 }

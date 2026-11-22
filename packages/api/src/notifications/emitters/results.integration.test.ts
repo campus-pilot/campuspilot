@@ -56,7 +56,7 @@ describe('result notifications', () => {
     for (const classId of [classA, classB]) {
       await db
         .update(classTable)
-        .set({ config: { subjects: { math: { name: 'Mathematics', books: [], examModes: { written: { name: 'Written', percentage: 100 } } } } } })
+        .set({ config: { subjects: { math: { name: 'Mathematics', attachment: { kind: 'school' as const }, books: [], examModes: { written: { name: 'Written', percentage: 100 } } } } } })
         .where(eq(classTable.id, classId));
       await includeTestExamClasses([{ schoolId, sessionId, examSlug: 'final', classId }]);
       const [plan] = await db

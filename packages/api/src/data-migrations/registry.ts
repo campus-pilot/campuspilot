@@ -1,4 +1,5 @@
 import { admissionPhoneE164Migration } from './migrations/admission-phone-e164';
+import { subjectAttachmentBackfillMigration } from './migrations/subject-attachment-backfill';
 import type { DataMigration } from './types';
 
 /**
@@ -11,6 +12,9 @@ import type { DataMigration } from './types';
 export const DATA_MIGRATIONS: readonly DataMigration[] = [
   // Plan Phase 1c (D-2b, D-32, D-34).
   admissionPhoneE164Migration,
+  // Subjects saved without `attachment` by the previous release during the
+  // rollout of exam-only subjects (follow-up of migration 0081).
+  subjectAttachmentBackfillMigration,
 ];
 
 const byId = new Map(DATA_MIGRATIONS.map((migration) => [migration.id, migration]));

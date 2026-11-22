@@ -222,6 +222,8 @@ function classConfig(item: DemoClassSeed): ClassConfig {
           name: subject.name,
           books: [{ title: `${item.label} ${subject.book}`, publication: demoSeed.classes.bookPublication }],
           examModes: demoSeed.classes.examModeSets[subject.modes]!,
+          // Seeded subjects are classroom subjects, offered in every examination.
+          attachment: { kind: 'school' as const },
         },
       ]),
     ),

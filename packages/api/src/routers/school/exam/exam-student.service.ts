@@ -22,6 +22,7 @@ import {
   validateResultMarks,
 } from './exam.service';
 import { rpcError } from '../../../errors';
+import { examContextSubjects } from './exam-context';
 
 import { examWhere, assessmentWhere, settingsWhere } from './exam.scope';
 
@@ -139,7 +140,12 @@ export async function studentWorkspace(
         {
           id: schoolClass.id,
           label: schoolClass.label,
-          subjects: schoolClass.config.subjects,
+          // The subjects taking part with their plans' modes, as getExamContext lists them.
+          subjects: examContextSubjects(
+            schoolClass.config.subjects,
+            subjects.map(({ plan }) => plan),
+            scope,
+          ),
         },
       ],
       coScholasticAreas: session.config.coScholasticAreas,

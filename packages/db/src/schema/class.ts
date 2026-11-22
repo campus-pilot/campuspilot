@@ -1,4 +1,5 @@
 import {
+  customType,
   integer,
   jsonb,
   pgTable,
@@ -9,9 +10,22 @@ import {
 } from "drizzle-orm/pg-core";
 
 import { generateId } from "../id";
-import { attributesSchema, classConfigSchema } from "./jsonb";
+import { attributesSchema, classConfigSchema, readStoredClassConfig } from "./jsonb";
 import type { Attributes, ClassConfig } from "./jsonb";
 import { schoolTable } from "./school";
+
+/**
+ * `class.config` is jsonb like any other JSON column, read through
+ * {@link readStoredClassConfig}, so subjects written without an attachment
+ * (before attachments existed, or by the previous release during a rolling
+ * deploy) read as classroom subjects everywhere the column is selected.
+ * Writes are serialised exactly as Drizzle's `jsonb` does.
+ */
+const classConfigJsonb = customType<{ data: ClassConfig; driverData: unknown }>({
+  dataType: () => "jsonb",
+  toDriver: (value) => JSON.stringify(value),
+  fromDriver: (value) => readStoredClassConfig(typeof value === "string" ? JSON.parse(value) : value),
+});
 
 export const classTable = pgTable(
   "class",
@@ -29,8 +43,7 @@ export const classTable = pgTable(
       .$type<Attributes>()
       .notNull()
       .default(attributesSchema.parse({})),
-    config: jsonb("config")
-      .$type<ClassConfig>()
+    config: classConfigJsonb("config")
       .notNull()
       .default(classConfigSchema.parse({})),
     createdAt: timestamp("created_at").defaultNow(),

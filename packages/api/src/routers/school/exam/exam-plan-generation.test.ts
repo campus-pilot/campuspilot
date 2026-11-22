@@ -4,6 +4,7 @@ import {
   assertCreatableExamPlan,
   resolveExamPlanClassIds,
   selectExamClassPlans,
+  selectSubjectPlanChanges,
   type prepareExamPlan,
 } from './exam-plan-generation';
 
@@ -33,6 +34,7 @@ function prepared(overrides: {
             {
               subjectSlug: 'mathematics',
               name: 'Mathematics',
+              planned: false,
               issue: overrides.issue ?? null,
               modes: [
                 {
@@ -61,6 +63,7 @@ function prepared(overrides: {
             {
               subjectSlug: 'science',
               name: 'Science',
+              planned: false,
               issue: 'Percentages must total 100%.',
               modes: [],
             },
@@ -251,6 +254,101 @@ describe('selectExamClassPlans', () => {
         code: 'BAD_REQUEST',
         message: 'Grade 12 · Science: Percentages must total 100%.',
       }),
+    );
+  });
+});
+
+describe('selectExamClassPlans with chosen subjects', () => {
+  /** Grade 10 offers Mathematics (valid) and Art (invalid modes, no plan). */
+  function withArt(): PreparedPlan {
+    const value = prepared();
+    value.preview.classes[0]!.subjects.push({
+      subjectSlug: 'art',
+      name: 'Art',
+      planned: false,
+      issue: 'Percentages must total 100%.',
+      modes: [],
+    });
+    return value;
+  }
+
+  it('plans only the chosen subjects, so an invalid subject left out blocks nothing', () => {
+    expect(selectExamClassPlans(withArt(), ['class-1'], { 'class-1': ['mathematics'] })).toEqual([
+      expect.objectContaining({ classId: 'class-1', subjectSlug: 'mathematics' }),
+    ]);
+  });
+
+  it('plans every offered subject of a chosen class left out of the choice', () => {
+    expect(() => selectExamClassPlans(withArt(), ['class-1'])).toThrowError(
+      expect.objectContaining({ code: 'BAD_REQUEST', message: 'Grade 10 · Art: Percentages must total 100%.' }),
+    );
+  });
+
+  it('refuses a chosen subject with invalid modes', () => {
+    expect(() => selectExamClassPlans(withArt(), ['class-1'], { 'class-1': ['art'] })).toThrowError(
+      expect.objectContaining({ code: 'BAD_REQUEST', message: 'Grade 10 · Art: Percentages must total 100%.' }),
+    );
+  });
+
+  it('refuses a subject that is not offered to the class', () => {
+    expect(() => selectExamClassPlans(prepared(), ['class-1'], { 'class-1': ['science'] })).toThrowError(
+      expect.objectContaining({
+        code: 'BAD_REQUEST',
+        message: 'Grade 10: every selected subject must be a subject offered in this examination.',
+      }),
+    );
+  });
+
+  it('refuses an empty choice for a class', () => {
+    expect(() => selectExamClassPlans(prepared(), ['class-1'], { 'class-1': [] })).toThrowError(
+      expect.objectContaining({ code: 'BAD_REQUEST', message: 'Grade 10: select at least one subject.' }),
+    );
+  });
+
+  it('refuses a choice for a class that does not join', () => {
+    expect(() => selectExamClassPlans(prepared(), ['class-1'], { 'class-3': ['science'] })).toThrowError(
+      expect.objectContaining({
+        code: 'BAD_REQUEST',
+        message: 'Subjects were chosen for a class that does not join the examination in this change.',
+      }),
+    );
+  });
+
+  it('passes the choice through assertCreatableExamPlan', () => {
+    expect(assertCreatableExamPlan(withArt(), 'version-1', ['class-1'], { 'class-1': ['mathematics'] })).toHaveLength(1);
+  });
+});
+
+describe('selectSubjectPlanChanges', () => {
+  /** Grade 10 takes part with Mathematics planned and English offered without a plan. */
+  function participating(): PreparedPlan {
+    const value = prepared();
+    const grade10 = value.preview.classes[0]!;
+    grade10.participating = true;
+    grade10.subjects[0]!.planned = true;
+    grade10.subjects.push({ subjectSlug: 'english', name: 'English', planned: false, issue: null, modes: [] });
+    value.plans.push({ ...value.plans[0]!, subjectSlug: 'english' });
+    return value;
+  }
+
+  it('adds plans for chosen unplanned subjects and removes planned subjects left out', () => {
+    expect(selectSubjectPlanChanges(participating(), { 'class-1': ['english'] })).toEqual({
+      add: [expect.objectContaining({ classId: 'class-1', subjectSlug: 'english' })],
+      remove: [{ classId: 'class-1', subjectSlug: 'mathematics', label: 'Grade 10', name: 'Mathematics' }],
+    });
+  });
+
+  it('keeps every plan of a class left out and changes nothing for an unchanged choice', () => {
+    expect(selectSubjectPlanChanges(participating(), {})).toEqual({ add: [], remove: [] });
+    expect(selectSubjectPlanChanges(participating(), { 'class-1': ['mathematics'] })).toEqual({ add: [], remove: [] });
+  });
+
+  it('refuses a subject that is not offered, and an invalid subject to add', () => {
+    expect(() => selectSubjectPlanChanges(participating(), { 'class-1': ['science'] })).toThrowError(expect.objectContaining({ code: 'BAD_REQUEST' }));
+    const invalid = participating();
+    invalid.preview.classes[0]!.subjects[1]!.issue = 'Percentages must total 100%.';
+    expect(() => selectSubjectPlanChanges(invalid, { 'class-1': ['mathematics', 'english'] })).toThrowError(
+      expect.objectContaining({ message: 'Grade 10 · English: Percentages must total 100%.' }),
     );
   });
 });

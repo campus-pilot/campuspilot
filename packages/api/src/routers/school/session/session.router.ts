@@ -4,6 +4,7 @@ import {
   financeNumberCounterTable,
 } from '@campuspilot/db/schema/finance';
 import { examClassTable } from '@campuspilot/db/schema/exam';
+import { detachExamsFromSubjects } from '../class/class-subject.service';
 import {
   findIntroducedBlankExamNames,
   findIntroducedExamNameClashes,
@@ -468,7 +469,7 @@ export const schoolSessionRouter = {
             // block a removal: they exist alongside plans (which do), except
             // for a legacy exam whose plans were deleted, where they are
             // leftovers of the selection, not recorded data.
-            if (removedExamSlugs.length)
+            if (removedExamSlugs.length) {
               await transaction
                 .delete(examClassTable)
                 .where(
@@ -477,6 +478,15 @@ export const schoolSessionRouter = {
                     inArray(examClassTable.examSlug, removedExamSlugs),
                   ),
                 );
+              // Subjects added only for a removed exam go with it, as in
+              // deleteExam (a changed slug is a removed exam too).
+              await detachExamsFromSubjects(
+                transaction,
+                schoolId,
+                sessionId,
+                removedExamSlugs,
+              );
+            }
           }
           const [session] = await transaction
             .update(schoolSessionTable)
@@ -504,7 +514,7 @@ export const schoolSessionRouter = {
     .route({
       summary: 'Delete a school session',
       description:
-        'Permanently delete an inactive academic session from a school. The active session must be replaced before it can be deleted.',
+        'Permanently delete an inactive academic session from a school, with the subjects added only for its exams. The active session must be replaced before it can be deleted.',
       tags: ['School', 'Sessions'],
     })
     .meta({
@@ -520,16 +530,28 @@ export const schoolSessionRouter = {
     .output(schoolSessionDtoSchema)
     .handler(async ({ context, input }) => {
       try {
-        const [session] = await context.db
-          .delete(schoolSessionTable)
-          .where(
-            and(
-              eq(schoolSessionTable.schoolId, input.schoolId),
-              eq(schoolSessionTable.id, input.sessionId),
-              eq(schoolSessionTable.isActive, false),
-            ),
-          )
-          .returning(schoolSessionDtoColumns);
+        const session = await context.db.transaction(async (transaction) => {
+          const [deleted] = await transaction
+            .delete(schoolSessionTable)
+            .where(
+              and(
+                eq(schoolSessionTable.schoolId, input.schoolId),
+                eq(schoolSessionTable.id, input.sessionId),
+                eq(schoolSessionTable.isActive, false),
+              ),
+            )
+            .returning(schoolSessionDtoColumns);
+          // Subjects added only for an exam of the deleted session go with
+          // it, in the same transaction (after the session row, which the
+          // delete locked, as exam removal locks the session first).
+          if (deleted)
+            await detachExamsFromSubjects(
+              transaction,
+              input.schoolId,
+              input.sessionId,
+            );
+          return deleted;
+        });
         if (!session) {
           // A failed conditional delete can mean either a missing session or
           // an active one; resolve those states explicitly for stable clients.

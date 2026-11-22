@@ -70,10 +70,10 @@ export async function createQuestionPaperWorld(options: { template?: boolean; sc
       .set({
         config: {
           subjects: {
-            science: { name: 'Science', books: [], examModes: { theory: { name: 'Theory', percentage: 100 } } },
+            science: { name: 'Science', attachment: { kind: 'school' as const }, books: [], examModes: { theory: { name: 'Theory', percentage: 100 } } },
             math: {
               name: 'Mathematics',
-              books: [],
+              attachment: { kind: 'school' as const }, books: [],
               examModes: { theory: { name: 'Theory', percentage: 80 }, practical: { name: 'Practical', percentage: 20 } },
             },
           },

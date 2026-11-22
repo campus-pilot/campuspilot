@@ -308,8 +308,10 @@ describe('catalog metadata', () => {
     // +1 school.updateExamClasses (change the classes taking part in an exam);
     // +10 standalone paper tools of a personal space (list, filter options, create,
     // get, get draft, versions, learn, validate, save, edit);
-    // +1 systemAdmin.getPersonalSpaceStats (the admin dashboard's personal space counts).
-    expect(catalog.advanced).toHaveLength(130);
+    // +1 systemAdmin.getPersonalSpaceStats (the admin dashboard's personal space counts);
+    // +4 school.addClassSubject, updateClassSubject, removeClassSubject and
+    // moveClassSubjectToClassroom (one subject at a time, subjects added from an exam).
+    expect(catalog.advanced).toHaveLength(134);
   });
 });
 

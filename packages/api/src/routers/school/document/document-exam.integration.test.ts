@@ -100,7 +100,7 @@ describe("examination document parity", () => {
             subjects: {
               math: {
                 name: "Mathematics",
-                books: [],
+                attachment: { kind: "school" as const }, books: [],
                 examModes: {
                   written: { name: "Written", percentage: 80 },
                   oral: { name: "Oral", percentage: 20 },
@@ -108,7 +108,7 @@ describe("examination document parity", () => {
               },
               english: {
                 name: "English",
-                books: [],
+                attachment: { kind: "school" as const }, books: [],
                 examModes: { written: { name: "Written", percentage: 100 } },
               },
             },
