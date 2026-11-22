@@ -14,7 +14,7 @@ import {
 import { cellStatus } from '@campuspilot/components/question-paper/question-paper-model';
 import { Badge } from '@campuspilot/ui/components/badge';
 import { Button } from '@campuspilot/ui/components/button';
-import { toast } from '@campuspilot/ui/lib/toast';
+import { cn } from '@campuspilot/ui/lib/utils';
 import { useMutation, useQuery, useSuspenseQuery } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -35,21 +35,33 @@ const updatedOn = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'sho
 /** A detail as a cell: its value, or a quiet dash when the paper does not state it. */
 const DetailCell = ({ value }: { value: string | null }) => (value ? <span>{value}</span> : <span className="text-muted-foreground">-</span>);
 
-/** Creates an empty paper and opens it on its first screen (photos, a PDF or a description). */
-function CreatePaperButton({ schoolId, variant = 'default' }: { schoolId: string; variant?: 'default' | 'outline' }) {
+/**
+ * Creates an empty paper (or reuses an unused one) and opens it on its first
+ * screen (photos, a PDF or a description). Why creating failed, such as the
+ * space's paper limit (docs/personal-space.md "Limits"), is said beside the
+ * button until the next attempt.
+ */
+function CreatePaperButton({ schoolId, placement }: { schoolId: string; placement: 'header' | 'empty' }) {
   const router = useRouter();
   const create = useMutation(
     orpc.school.createStandalonePaper.mutationOptions({
       onSuccess: ({ paperId }) => router.push(personalPaperHref(schoolId, paperId)),
-      onError: (error) => toast.error(requestErrorMessage(error, 'The paper could not be created.')),
     }),
   );
+  const failure = create.error ? requestErrorMessage(create.error, 'The paper could not be created.') : null;
   return (
     <RequirePermissions permissions={standalonePaperPermission(schoolId, 'manage')}>
-      <Button type="button" variant={variant} disabled={create.isPending} onClick={() => create.mutate({ schoolId })}>
-        <Plus data-icon="inline-start" aria-hidden />
-        {create.isPending ? 'Creating…' : 'Create question paper'}
-      </Button>
+      <div className={cn('flex flex-col gap-1.5', placement === 'header' ? 'items-end text-right' : 'items-center text-center')}>
+        <Button type="button" variant={placement === 'header' ? 'default' : 'outline'} disabled={create.isPending} onClick={() => create.mutate({ schoolId })}>
+          <Plus data-icon="inline-start" aria-hidden />
+          {create.isPending ? 'Creating…' : 'Create question paper'}
+        </Button>
+        {failure ? (
+          <p role="alert" className="max-w-sm text-sm text-destructive">
+            {failure}
+          </p>
+        ) : null}
+      </div>
     </RequirePermissions>
   );
 }
@@ -97,7 +109,7 @@ function PaperRows({ schoolId, controller }: { schoolId: string; controller: Pap
       state={controller.tableState}
       onRowClick={(paper) => router.push(personalPaperHref(schoolId, paper.paperId))}
       emptyMessage={unfiltered ? 'No question papers yet. Create one from photos of a paper, a PDF or a description.' : 'No question papers match.'}
-      emptyAction={unfiltered ? <CreatePaperButton schoolId={schoolId} variant="outline" /> : undefined}
+      emptyAction={unfiltered ? <CreatePaperButton schoolId={schoolId} placement="empty" /> : undefined}
     />
   );
 }
@@ -141,7 +153,7 @@ function PaperListContent({ schoolId }: { schoolId: string }) {
           <h1 className="text-2xl font-semibold tracking-tight">Question papers</h1>
           <p className="text-sm text-muted-foreground">Photograph a paper, attach a PDF or describe one, and the assistant types it up for you.</p>
         </div>
-        <CreatePaperButton schoolId={schoolId} />
+        <CreatePaperButton schoolId={schoolId} placement="header" />
       </div>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <TableSearchBar placeholder="Search school, class, subject or exam…" onSearchChange={controller.onSearchChange} />
