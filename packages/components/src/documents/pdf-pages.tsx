@@ -19,11 +19,18 @@ export type LoadedPdf = {
  * never show a PDF do not download it, and it parses in a worker of its own
  * (one per document, ended by `release`). The bytes are copied first: pdf.js
  * hands its input to the worker, which would empty a buffer the caller keeps.
+ *
+ * The library and its worker come from pdf.js's `legacy` build, which
+ * polyfills what browsers in use still lack. The default build assumes the
+ * newest JavaScript: its TrueType parser calls `Math.sumPrecise`, which
+ * Chrome 146 does not have, so every embedded font failed to load and pdf.js
+ * drew the text in a generic system font without shaping (Hindi came out
+ * broken while the PDF itself was fine).
  */
 export async function loadPdf(bytes: ArrayBuffer): Promise<LoadedPdf> {
-  const pdfjs = await import('pdfjs-dist');
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
   if (!pdfjs.GlobalWorkerOptions.workerSrc) {
-    pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
+    pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/legacy/build/pdf.worker.min.mjs', import.meta.url).toString();
   }
   const task = pdfjs.getDocument({ data: new Uint8Array(bytes.slice(0)) });
   try {

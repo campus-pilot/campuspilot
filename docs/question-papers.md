@@ -610,7 +610,10 @@ one the URL names, else the paper's latest shared conversation).
     is shown as its PDF (`VersionPdf`): the file stored at save, the same one *Download PDF*
     gives, streamed by `GET /api/blob/.../question-papers/{subject}/{mode}/versions/{n}/pdf`
     (the checks of `getQuestionPaperDownload`; a removed PDF is printed again first) and
-    drawn page by page with pdf.js (`PdfPages`), so the printed page breaks show. Each page
+    drawn page by page with pdf.js (`PdfPages`), so the printed page breaks show.
+    pdf.js is loaded from its `legacy` build: the default build calls JavaScript that current
+    Chrome lacks (`Math.sumPrecise`) while reading the embedded fonts, and then draws every
+    script in a generic font without shaping (broken Hindi). Each page
     is drawn at the pane's width times the screen's pixel ratio and only while it is near
     the screen. The chat's version *Preview* shows the same. An unsaved draft has no PDF
     and is not printed for the preview (that would mean a Gotenberg conversion on every
