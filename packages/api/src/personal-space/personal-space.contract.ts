@@ -15,8 +15,11 @@ import { z } from 'zod';
  *    `account` row with `provider_id = 'google'`). Read from that row, never
  *    from `user.email_verified`: a school invitation marks the email verified
  *    too, and an invited person never gets a personal space through that.
- * 3. `already_has_one`: the person already owns a personal space. One per
- *    person (a partial unique index backs it up).
+ * 3. `already_has_one`: the person has had their personal space: one over
+ *    the life of the account, decided from `user.personal_space_created_at`
+ *    (set when it was created, never cleared), so deleting the space does not
+ *    make the person eligible again. A partial unique index backs up one live
+ *    space per owner.
  * 4. `member_of_school`: the person is a member of a school, any school. A
  *    member of a school is never given a personal space, neither by the
  *    sign-up nor by the button, so it is offered only to someone who has no
@@ -33,7 +36,7 @@ export type PersonalSpaceRefusal = z.infer<typeof personalSpaceRefusalSchema>;
 export const PERSONAL_SPACE_REFUSAL_MESSAGES = {
   demo_account: 'Demo accounts cannot have a personal space.',
   no_google_account: 'Sign in with Google to create your personal space.',
-  already_has_one: 'You already have a personal space.',
+  already_has_one: 'You already have a personal space. Each person gets one.',
   member_of_school: 'You are a member of a school, so a personal space is not offered to you.',
 } as const satisfies Record<PersonalSpaceRefusal, string>;
 

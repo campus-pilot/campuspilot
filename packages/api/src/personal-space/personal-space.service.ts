@@ -10,6 +10,8 @@ import { generateId } from '@campuspilot/db/id';
 import { rpcError } from '../errors';
 import { lockUser } from '../school-creation/school-creation.service';
 import { provisionSelfServiceSchool } from '../school-creation/school-provisioning';
+import { errorFacts } from '@campuspilot/logger/error-facts';
+
 import { log } from './log';
 import {
   PERSONAL_SPACE_REFUSAL_MESSAGES,
@@ -51,7 +53,11 @@ export type PersonalSpaceStatus = {
  * {@link lockUser} so the decision holds until commit.
  */
 export async function readPersonalSpaceStatus(db: DatabaseExecutor, userId: string): Promise<PersonalSpaceStatus> {
-  const [person] = await db.select({ demoSchoolId: user.demoSchoolId }).from(user).where(eq(user.id, userId)).limit(1);
+  const [person] = await db
+    .select({ demoSchoolId: user.demoSchoolId, personalSpaceCreatedAt: user.personalSpaceCreatedAt })
+    .from(user)
+    .where(eq(user.id, userId))
+    .limit(1);
   if (!person) throw rpcError.unauthorized();
   const [[google], [personal], [membership]] = await Promise.all([
     db
@@ -71,7 +77,8 @@ export async function readPersonalSpaceStatus(db: DatabaseExecutor, userId: stri
       ? 'demo_account'
       : !google
         ? 'no_google_account'
-        : personal
+        : // Decided from the permanent fact, not from the space's row: a deleted space was still the person's one.
+          person.personalSpaceCreatedAt !== null
           ? 'already_has_one'
           : membership
             ? 'member_of_school'
@@ -118,6 +125,8 @@ export async function createPersonalSpace(
     now: input.now,
     school: { kind: 'personal', name: personalSpaceName(person?.name), location: '', registrationNo: null, slug: { exact: personalSpaceSlug() } },
   });
+  // The permanent fact that the person had their one personal space, in the same transaction; never cleared.
+  await db.update(user).set({ personalSpaceCreatedAt: input.now }).where(eq(user.id, input.userId));
   return { schoolId };
 }
 
@@ -142,6 +151,7 @@ export async function createPersonalSpaceAfterGoogleSignUp(db: Database, userId:
     });
     if (created) log.info({ userId, schoolId: created.schoolId }, 'personal-space.created');
   } catch (error) {
-    log.error({ err: error, userId }, 'personal-space.create-after-sign-up.failed');
+    // Only safe facts of the error: a database error's message carries the query's values, the person's name among them.
+    log.error({ ...errorFacts(error), userId }, 'personal-space.create-after-sign-up.failed');
   }
 }

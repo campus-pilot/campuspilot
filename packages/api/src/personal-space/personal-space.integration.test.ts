@@ -19,7 +19,7 @@ import { handleSchoolManifestBlob } from '../routers/school/manifest/manifest.bl
 import { addBillingPeriods } from '../billing/billing.contract';
 import { SELF_SERVICE_ASSISTANT_MONTHLY_LIMIT_USD } from '../school-creation/school-creation.contract';
 import { personalSpaceName, personalSpaceRefusalOf, UNNAMED_PERSONAL_SPACE_NAME } from './personal-space.contract';
-import { createPersonalSpaceAfterGoogleSignUp } from './personal-space.service';
+import { createPersonalSpaceAfterGoogleSignUp, readPersonalSpaceStatus } from './personal-space.service';
 
 /** Personal spaces (docs/personal-space.md). */
 
@@ -94,6 +94,29 @@ describe('personalSpace.create', () => {
     expect(personalSpaceName('  Ravi   Kumar ')).toBe("Ravi Kumar's personal school");
     expect(personalSpaceName('')).toBe(UNNAMED_PERSONAL_SPACE_NAME);
     expect(personalSpaceName(null)).toBe('My personal school');
+  });
+});
+
+describe('one personal space per person, for good', () => {
+  it('stays refused after the space is deleted: the fact is the person’s, not the space’s row', async () => {
+    const { client, userId, schoolId } = await personalSpaceOwner();
+    const [person] = await db.select({ createdAt: user.personalSpaceCreatedAt }).from(user).where(eq(user.id, userId));
+    expect(person!.createdAt).toBeInstanceOf(Date);
+    await createTestClient(await createAdminSession()).systemAdmin.deleteSchool({ id: schoolId });
+    expect(await db.select().from(schoolTable).where(eq(schoolTable.id, schoolId))).toEqual([]);
+    expect(await readPersonalSpaceStatus(db, userId)).toEqual({ schoolId: null, refusal: 'already_has_one' });
+    await expect(client.personalSpace.create()).rejects.toSatisfy((error: unknown) => personalSpaceRefusalOf(error) === 'already_has_one');
+  });
+});
+
+describe('a school’s kind', () => {
+  it('can never change once the school exists', async () => {
+    const { schoolId } = await personalSpaceOwner();
+    await expect(db.update(schoolTable).set({ kind: 'school' }).where(eq(schoolTable.id, schoolId))).rejects.toThrow();
+    const school = await createTestSchool();
+    await expect(db.update(schoolTable).set({ kind: 'personal' }).where(eq(schoolTable.id, school.id))).rejects.toThrow();
+    // Other changes are not affected.
+    await expect(db.update(schoolTable).set({ name: 'Renamed' }).where(eq(schoolTable.id, schoolId))).resolves.toBeDefined();
   });
 });
 

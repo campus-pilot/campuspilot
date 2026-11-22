@@ -1,3 +1,5 @@
+import { errorFacts } from '@campuspilot/logger/error-facts';
+
 import { log } from './log';
 
 /**
@@ -59,6 +61,7 @@ export async function afterUserCreated(userId: string, context: EndpointFacts): 
   try {
     await handler(userId);
   } catch (error) {
-    log.error({ err: error, userId }, 'auth.google-sign-up.handler-failed');
+    // Only safe facts of the error: a database error's message carries the query's values, the person's name among them.
+    log.error({ ...errorFacts(error), userId }, 'auth.google-sign-up.handler-failed');
   }
 }
