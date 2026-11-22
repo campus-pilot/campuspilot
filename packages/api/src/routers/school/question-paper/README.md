@@ -25,6 +25,7 @@ each) and **figures** (uploaded images printed inside a version).
 | `question-paper.lean.ts` | keeps the validate tool's result small |
 | `question-paper.records.ts` | row helpers, the paper row lock |
 | `question-paper.body.ts` / `.math.ts` / `.render.ts` | stored fragment to HTML body (sanitise again, figures, KaTeX), the document around it |
+| `question-paper.docx-html.ts` / `.docx-css.ts` / `.docx-images.ts` / `.docx-convert.ts` / `.docx-package.ts` | the Word (.docx) download: Word-friendly HTML through a CSS cascade, image facts, the Pandoc client (and SVG rasterising through Gotenberg), the reference document and the table fix-ups (docs/question-papers.md "Word download") |
 | `question-paper.storage.ts` | object keys, uploads, best-effort deletes, presigned URLs |
 | `question-paper.slot.ts` / `.context.ts` | the body slot and the template context |
 | `question-paper.template-prints.ts` | the text lines the selected template prints above and below a paper (`templatePrints`), which the job and `getQuestionPaper` show an author so heading lines are not written twice |

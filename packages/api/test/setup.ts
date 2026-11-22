@@ -24,6 +24,7 @@ process.env.GOOGLE_CLIENT_SECRET = 'test-client-secret';
 process.env.PUBLIC_APP_URL = 'http://localhost:3001';
 process.env.CORS_ORIGIN = 'http://localhost:3001';
 process.env.GOTENBERG_URL = inject('GOTENBERG_URL');
+process.env.PANDOC_URL = inject('PANDOC_URL');
 process.env.RESTATE_ADMIN_URL = 'http://localhost:9070';
 process.env.RESTATE_FABRIC_URL = 'http://localhost:8080';
 process.env.RESTATE_INGRESS_URL = 'http://localhost:8080';

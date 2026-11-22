@@ -121,10 +121,14 @@ affected papers itself.
 | `exam_question_paper` | The paper: unique key, `latest_version_no` (token of saving a version, never `max(version_no)`), `page_revision` (token of page changes) |
 | `exam_question_paper_page` | One photo: position, `upload_status` (`awaiting` while reserved, `stored` once the photo arrived, with `stored_at`; migration 0072), original and two derivatives (`model` JPEG the AI reads, `thumb`), `derivative_status` (`pending` until the worker made them, `ready`, `unsupported` when the server cannot decode it, for example HEIC, or `failed`), `rotation` and `derivative_revision` (below), displayed size, sha256 (the file facts are null while `awaiting`) |
 | `exam_question_paper_job` | One generation: `queued`, `running`, `succeeded`, `failed`; ordered `page_ids` and the `page_revision` it ran on; the teacher's `instructions` (nullable text, migration 0067: null means none, written at creation and never changed); provider, model, request count; `error_code` and the safe `error_message` (and developer-only `error_detail`); hand-over facts (`handed_over_at`, attempts, last error). A partial unique index allows one queued or running job per paper |
-| `exam_question_paper_version` | Immutable: `version_no`, the sanitised fragment `content_html` (text), its sha256, `source` (`agent`, `ai_job` or `copy`) with the job id, page ids, conversation id or `source_version_id` (the copied version), `plan_max_marks` (the header snapshot), `warnings` (sanitiser notices, below), the pinned `template_revision_id` and the `pdf_artifact_id` |
+| `exam_question_paper_version` | Immutable: `version_no`, the sanitised fragment `content_html` (text), its sha256, `source` (`agent`, `ai_job` or `copy`) with the job id, page ids, conversation id or `source_version_id` (the copied version), `plan_max_marks` (the header snapshot), `warnings` (sanitiser notices, below), the pinned `template_revision_id`, the `pdf_artifact_id` and the `docx_artifact_id` (the Word file, null until its first Word download; see "Word download") |
 | `exam_question_paper_figure` | An uploaded image a version prints (JPEG, or PNG up to 400 KB when it has transparency), owned by the paper, deduplicated by `source_attachment_id` (a chat image) or `source_figure_id` (a figure of a copied version); at most one of the two is set |
 | `assistant_attachment` | A chat attachment, an image or a PDF by its `kind` (below) |
 | `assistant_model_request` | The job's cost rows: `source = 'question_paper'`, `question_paper_job_id`, no chat run |
+
+**Migration 0081** (`question-paper-docx`) added the `docx` artifact kind and
+`docx_artifact_id` on versions (`ON DELETE SET NULL`, like `pdf_artifact_id`), and re-created the
+artifact shape check (0021) with a branch for a `docx` artifact of a question paper. See "Word download".
 
 **Migration 0071** (`question-paper-page-rotation`) added two page columns. `rotation` is the
 clockwise quarter turns (0, 90, 180, 270; default 0) a person applied on top of the photo's EXIF
@@ -626,6 +630,13 @@ one the URL names, else the paper's latest shared conversation).
     card's Save in the chat (`saveDraftMessage`); the approval that follows is given in the
     assistant like every other change. Nothing on this side is editable: versions are
     immutable, the PDF pages are pictures and the draft's frame stays sandboxed.
+  - *Download PDF* is the header's main download; the chevron beside it opens a menu with
+    *Download Word (.docx)* and the line "Edits made in Word are not saved back to CampusPilot."
+    (`VersionDownloadButtons` in `packages/components/src/question-paper/version-download.tsx`; the
+    assistant's version card and every row of *All versions* have the same control). While a file
+    is being made the button says which one (*Preparing PDF…* or *Preparing Word…*); the menu has
+    closed by then. The paper's menu has *Download latest PDF* and *Download latest as Word (.docx)*
+    (`LatestVersionDownloadItems`). See "Word download".
   - The header row also has an icon button beside *Download PDF*, named by its tooltip
     *View uploaded photos or file* (*Add photos or a file* while the paper has no photo):
     it opens the same card as the menu's *Add photos or a file*. It is shown when the paper
@@ -685,7 +696,7 @@ one the URL names, else the paper's latest shared conversation).
   screen's other changes (another version, another conversation, the photos card and back)
   until its toggle turns it off, so a reload and a shared link keep it.
 - The paper's menu holds what is not the main task: All versions (a dialog with who saved
-  each, when and how, and its PDF), Download latest PDF, Add photos or a file, Copy an
+  each, when and how, and its PDF or Word file), Download latest PDF, Download latest as Word (.docx), Add photos or a file, Copy an
   earlier paper, Delete paper.
 
 ## What the UI shows
@@ -700,6 +711,167 @@ version list and badge use; the label is generic because a notice can also be th
 version. A saved version shows its notice count; its preview lists the notices (collapsed) and
 a placeholder note. `previewOutputSchema.placeholderFigures` is
 the count (counted from the sanitised fragment; it is not a notice).
+
+## Word download
+
+A saved version (of an exam paper or a standalone paper) can be downloaded as an editable Word
+(.docx) file as well as its PDF, so a teacher can change it on their computer. **One way only**:
+nothing comes back from Word into CampusPilot, and the version stays immutable.
+
+**Who and how.** `getQuestionPaperDownload` and `getStandalonePaperDownload` take
+`format: 'pdf' | 'docx'`, `pdf` by default, so callers that send none (and MCP clients, for which
+both procedures are hidden anyway) keep getting the PDF. The output is unchanged (`url`, `fileName`
+ending in `.docx`, `expiresIn`); `documentDownloadUrl(key, name, 'docx')` serves it as an attachment
+with the Word content type. The permission order and gates are the PDF's: `readClass` and
+`requireQuestionPaperAssistantAccess` for an exam paper, the standalone rules for a standalone paper.
+There is no feature flag. A download is a read, so a suspended school or a personal space past its
+trial still downloads; making the file is part of answering it, as restoring a removed PDF is.
+
+**Storage.** The Word file is made on the version's **first** Word download and stored as an
+`artifact` of kind `docx` (`document_type: question_paper`, the PDF's class, session, exam and
+template revision) at `schools/{schoolId}/documents/{artifactId}.docx`;
+`exam_question_paper_version.docx_artifact_id` points at it, its own fact beside the PDF's. Later
+downloads only sign a URL. Two first downloads racing keep the first file and discard the second,
+and a deleted artifact (pointer null) is made again, exactly like `storedVersionPdfKey`
+(`storedVersionDocxKey` in `question-paper.version.service.ts`). Deleting a paper (or a plan's papers)
+deletes its Word artifacts and objects with its PDFs; it reads the versions `FOR UPDATE`, so a first
+Word download (or a PDF restore) storing its file at the same moment either commits first and its
+artifact is deleted with the paper, or waits, finds the version gone and rolls back with its upload
+removed (no orphaned artifact or object). The demo purge collects the key of every
+artifact of the school (`purge-workflow.ts`), so it covers the file; `systemAdmin.deleteSchool` removes
+no stored object of any kind, PDFs and Word files alike. In a **personal space** the file counts toward
+`PERSONAL_SPACE_STORAGE_QUOTA_BYTES` like the version's PDF (`personalSpaceStoredBytes` sums both): a
+full space is refused (`PERSONAL_SPACE_STORAGE_FULL`) before anything is converted, and again under
+the space's limit lock in the transaction that records the file. Bytes are stored only when a
+person asks for them, and the file is small next to the version's photos.
+
+**Inputs.** Exactly the PDF's: the stored fragment, the figures the paper owns
+(`loadFigureAssets`, nothing else) and the pinned template revision rendered with the version's own
+context and the slot in place (`renderQuestionPaperTemplate`), or the standalone shell
+(`renderStandaloneQuestionPaperShell`). So every version ever saved converts; no regeneration. A
+`legacy` row of migration 0064 converts to its one-line placeholder (development data only).
+
+**Pipeline.**
+
+1. `question-paper.docx-html.ts` (pure): the fragment is **sanitised again** with
+   `question_paper_body`, exactly as the renderer's step 1, and everything after works on that
+   output. The sanitised fragment (inside `<div class="qp-body">`, parsed with parse5 as the
+   sanitiser's tree check does) and the rendered template document are read through a CSS cascade
+   (`question-paper.docx-css.ts`: postcss for the sheets, `css-select` over parse5 for matching,
+   specificity and source order, inline style, `!important`; the renderer's own default body sheet
+   `questionPaperBodyCss` comes first, as in print). Rules at the top level of a sheet apply; a rule
+   inside an at-rule applies only when every at-rule around it is `@media` whose query names
+   `print` or `all` and does not name `screen` (so `@media screen` rules, the preview's, are left
+   out, and so is every rule inside `@supports`, `@layer`, `@container` or any other at-rule). It writes
+   **new** HTML for Pandoc: nothing authored passes through except text and a checked `lang`/`dir`.
+2. `question-paper.docx-convert.ts`: SVG diagrams are drawn to PNG by Gotenberg's Chromium (the
+   screenshot route, at up to three times their size). Not `sharp`: the API image has no fonts, so
+   `sharp` draws an SVG's text as empty boxes (verified in `node:24-slim`), and Chromium has the
+   Noto fonts the PDF uses. A WebP image (a template's logo may be one) is turned into PNG with
+   `sharp`, no larger than twice the size it is shown at. Then Pandoc converts (`from: html+tex_math_single_backslash`, `to: docx`) with this
+   conversion's reference document.
+3. `question-paper.docx-package.ts`: the reference document is built in code (not a binary asset):
+   A4 with 15 mm margins, Arial with Nirmala UI for complex scripts, tight spacing, every style the
+   HTML names (`QP Center`, `QP Right`, `QP Indent 1-3`, `QP Heading 1-6` with centred and right
+   variants) and the built-in ones Pandoc writes, and the template's footer as a real footer part.
+   Pandoc keeps its section and footer. After Pandoc, every table gets the properties its kind
+   needs (below), in schema order, and its columns scaled from Pandoc's 7920-twip assumption to the
+   space it really has (the 180 mm text width less its indent, or the cell a nested table sits in). A
+   table Pandoc sized narrower than that (a flex row whose items do not fill it) keeps its share and
+   stays packed to the left; a grid Pandoc left without columns gets as many equal columns as its
+   first row has cells; a table stays autofit exactly when Pandoc wrote no fixed layout for it.
+   The tables Pandoc wrote must be exactly the ones recorded, else the conversion fails.
+
+**Mapping rules** (Pandoc ignores CSS, so the layout is made explicit):
+
+| In the paper | In Word |
+| --- | --- |
+| A flex row | A borderless table, one row; items as wide as their text needs (or their own width), growing items share the rest; with `space-between` the first item takes the rest and the last is right-aligned (the marks). A wrapping row that does not fit becomes equal columns. A rule along its top or bottom edge stays as that table's border. |
+| A grid | A borderless table, `repeat(N, …)` or one column per track (`fr` shares and fixed lengths in proportion), filled row by row |
+| A flex column | Ordinary paragraphs |
+| An empty box with only a bottom line | Underscores as wide as the box (a blank to write on); an empty box with lines all round inline: `[    ]` |
+| A block with lines all round | A one-cell table with thin lines. A box, a layout row or a table is indented by the text around it plus its own left margin; its padding stays inside it |
+| A block with only a top or bottom line | A horizontal rule above or below it |
+| `<figure data-placeholder>` | A one-cell lined box: "Figure to be added" and the description |
+| `<img data-figure-id>` | The stored image, at its CSS size or its own pixels, never wider than its space; a missing one: *Figure unavailable*, as in the PDF |
+| Inline `<svg>` | A PNG at its own size (see the pipeline) |
+| `<span data-math>` | `\(LaTeX\)`, `\[LaTeX\]` when displayed (whenever `data-display` is there, as the PDF renderer decides): a native Word equation (OMML) |
+| An authored table | Its rows, `colspan` and `rowspan`, in equal columns (so a table nested in one of its cells has a sized cell); lined when the table or a cell draws a line (the default body sheet gives cells one) |
+| Bold, italic, underline, strike, `sup`, `sub` | Tags; alignment and indentation become the named paragraph styles |
+| `lang`, `dir`, `direction` | Kept (Word's `w:lang`, `w:bidi`, `w:rtl`); a layout table in right-to-left text is right to left |
+| An inline element holding blocks (a `<del>` around questions) | Laid out as blocks, keeping its formatting, as a browser does |
+| The template | Everything before the slot is the heading (the logo stays an image); `position:fixed` elements become the **Word footer on every page** (a flex row's items left, centre and right with tab stops, a line above when it draws one); anything else after the slot follows the body |
+
+**Formulas.** A literal `\(`, `\)`, `\[` or `\]` in a teacher's text can never become a formula:
+Pandoc finds `\( … \)` only inside one text run, so every backslash of text is written in a span of
+its own (`textHtml`; tested through Pandoc). A formula that itself holds a delimiter or ends in a
+backslash is written as text (KaTeX refuses those, so a saved paper has none). A bare operator at
+either end of a formula (`325+0=` before a blank) is valid OMML, but LibreOffice Math shows a
+placeholder for the missing operand, so it is moved out of the equation as text (`mathHtml`: a
+trailing `=`, `+`, `-`, `<`, `>`, `\times`, `\div`, `\cdot`, `\pm`, `\le`, `\ge`, `\ne`, `\approx`…; at
+the start only relations and products, since a leading sign has its operand). A sign that is the
+argument of `^` or `_` (`Na^+`, `Cl^-`, `e^-`) is a charge, not an operator, and stays.
+
+**What does not carry over.** Background colours and shading, exact font sizes and families (Word
+uses the reference styles), labels positioned over a figure (their text follows in the flow),
+multi-column CSS, CSS counters and `::before`/`::after` content, images inside the template's footer,
+and right-alignment written as `text-align` inside right-to-left text. Content, order, marks,
+equations, figures, blanks and tables do.
+
+**Limits.** The input to Pandoc (HTML and images) is held to the 25 MB document budget
+(`QUESTION_PAPER_DOCUMENT_MAX_BYTES`), counted as each image is prepared, so nothing more is
+converted once the request could not be sent. An image may have at most 25 megapixels
+(`DOCX_MAX_IMAGE_PIXELS`), read from its header before anything decodes it (a WebP is then decoded
+with `sharp`'s `limitInputPixels` at the same cap, one at a time), and a conversion carries at most
+64 distinct images. Pandoc is told to stop after 25 s and the request after 30 s; the answer is
+read up to about 54 MB and the .docx accepted up to 40 MB, and only with the zip signature; the
+package is bounded before it is inflated (64 MB a part, 128 MB in all). A diagram is rasterised at
+most 3,000 device pixels a side, two at a time, within 20 s each.
+
+**Work budget.** Everything the HTML step does is paid from one budget per conversion
+(`DocxWorkBudget`, `DOCX_WORK_BUDGET` = 4,000,000 units in `question-paper.docx-css.ts`): every node
+the converter walks, every rule tried on an element, and every tree step of the selector engine,
+charged inside its parse5 adapter (a parent, sibling, child, attribute or text looked up; text
+costs one unit per 64 characters). Selectors that explode in `css-select` (a chain of `~`
+combinators backtracks exponentially, `:has()` walks a subtree per element) therefore stop when
+the budget is spent: a paper over it is refused with BAD_REQUEST "This paper is too complex to
+convert to Word. Download the PDF instead." Each unit is a constant amount of work, so the budget
+alone bounds the time (no worker thread is needed): selectors built to explode stop in under
+100 ms on a developer machine, and the two spike papers with their templates use about 80,000
+units. The work is reported as `docxWorkUnits`. Besides it, a sheet contributes at most 5,000
+selectors, the converter follows 120 levels of nesting (deeper content is written as its text) and
+a template of more than 20,000 elements is refused.
+
+**Load.** A conversion is heavy for the shared services, so the API process runs at most two at a
+time (others wait their turn), one per version at a time (a request for a version already being
+converted waits for that conversion instead of starting another), and each within ONE deadline of
+60 s from its start, the wait for a slot included, covering diagrams, Pandoc, packaging and
+storing (`sharedDocxConversion` in `question-paper.docx-convert.ts`). Each request leaves as soon as
+its own signal aborts; the conversion itself is aborted when every request waiting for it has left.
+The dedupe is per process (the API has one replica); with several, the compare-and-set on the
+version row still keeps one file.
+
+**Security notes.** Pandoc's server mode is sandboxed: it reads no file and fetches no URL; images
+reach it only as files of the request named by our code (`qp-image-N`, `qp-svg-N`), never as URLs or
+data URIs in the HTML, so no remote image can be fetched and image bytes are not echoed into the
+document as alt text. No raw OpenXML passes from the fragment: every attribute Pandoc sees is ours,
+and every string written into Word XML by our code goes through `xmlText` (the five special
+characters escaped, characters XML cannot hold removed). The SVG sent to Chromium is serialised by
+our code from sanitiser output, with only SVG presentation properties written inline, in a page
+that carries the same Content-Security-Policy as every printed question paper
+(`documentContentSecurityPolicy('question_paper')`: no script, no network, images and fonts from
+data URIs only). That policy is what this path relies on: the dev, local-demo and test Gotenberg
+also run with JavaScript off and no network, but the production Gotenberg is not configured that
+way today. Work is bounded as listed above, and the scans over Pandoc's output are linear
+(`rewriteDocxTables` walks tags with `indexOf`).
+
+**Service.** Pandoc is its own service (`PANDOC_URL`, image `pandoc/core:3.6.4`, command `server
+--port=3030 --timeout=25 +RTS -M1024m -RTS`, read-only, unprivileged, 1280 MB of memory and bound to
+127.0.0.1 in the dev compose files; the test container is run the same way), like Gotenberg. Its
+request is JSON (`text`, `from`, `to`, `reference-doc`, `files`: file name to base64); with `Accept:
+application/json` it answers `{ output, base64: true, messages }`, or `{ error }`, both with HTTP 200.
+A reference document that leaves out settings, fonts, theme or numbering gets Pandoc's own, and its
+section and footer part are kept (checked against 3.6.4).
 
 ## The renderer contract
 
@@ -1106,6 +1278,7 @@ changed by writing it again and validating it.
 | Starting from an earlier paper (listing, key rules, figure copying) | `question-paper.copy.ts`; `copyQuestionPaperVersion` in `question-paper.version.service.ts` |
 | Generation job | `packages/api/src/workflows/question-paper`, served by `apps/worker` |
 | HTTP upload and read routes | `apps/server/src/http.ts` (page photos), `packages/assistant/src/attachments.http.ts` (chat images and PDFs; kind from bytes in `packages/api/src/files/attachment-upload.ts`) |
+| Word download (HTML mapping, cascade, images, converter client, package) | `question-paper.docx-html.ts`, `question-paper.docx-css.ts`, `question-paper.docx-images.ts`, `question-paper.docx-convert.ts`, `question-paper.docx-package.ts`; `storedVersionDocxKey` in `question-paper.version.service.ts` |
 | Template, marketplace designs, slot | `packages/api/src/routers/school/document` (`document.catalog.marketplace.ts`, `question-paper.slot.ts`) |
 | What the template prints around a paper | `question-paper.template-prints.ts` (reading), `QUESTION_PAPER_TEMPLATE_PRINTS_RULES` in `packages/question-paper/src/guide.ts` (the rule), `prompt.ts` (the job's part) |
 | Model call (providers, plain text) | `packages/assistant/src/question-paper-model.ts`, `providers/*` (`generateText`) |
@@ -1174,6 +1347,13 @@ modes to work with without further seed data.
 
 - `packages/question-paper`: `pnpm --filter @campuspilot/question-paper test` (limits, guide,
   fragment extraction, hashing, sha256).
+- Word download: `question-paper.docx-html.test.ts` and `question-paper.docx-package.test.ts` (every
+  mapping rule, the escape of a literal `\(`, Urdu right to left, both worked examples, both designs
+  and the shell, the table fix-ups and the reference document) and
+  `question-paper.docx.integration.test.ts` (needs the Pandoc container: PDF still the default, the
+  file stored once and reused, races, a removed artifact, permissions, deletes, a standalone paper's
+  storage). Not testable here: opening the files in real Word (Windows, Mac, Android); previews so
+  far are LibreOffice's.
 - API (needs the test database, S3 and Gotenberg): `pnpm --filter @campuspilot/api exec
   vitest run --project school-scoped src/routers/school/question-paper
   src/workflows/question-paper src/workflows/demo-school src/files` covers the sanitiser

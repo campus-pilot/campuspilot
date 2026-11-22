@@ -51,7 +51,8 @@ async function lockPersonalSpaceLimits(tx: DatabaseExecutor, schoolId: string): 
  * Every byte the school stores for its question papers, from the size facts
  * of the rows that own the objects: page photos with their thumbnails and
  * model copies (a page still awaiting its photo has no size yet), figure
- * images, and the PDF of every version. Nothing is estimated.
+ * images, and the PDF and the Word file (once one was downloaded) of every
+ * version. Nothing is estimated.
  */
 export async function personalSpaceStoredBytes(db: DatabaseExecutor, schoolId: string): Promise<number> {
   const page = examQuestionPaperPageTable;
@@ -62,6 +63,7 @@ export async function personalSpaceStoredBytes(db: DatabaseExecutor, schoolId: s
       coalesce((select sum(coalesce(${page.byteSize}, 0)::bigint + coalesce(${page.thumbByteSize}, 0) + coalesce(${page.modelByteSize}, 0)) from ${page} where ${page.schoolId} = ${schoolId}), 0)
       + coalesce((select sum(${figure.byteSize})::bigint from ${figure} where ${figure.schoolId} = ${schoolId}), 0)
       + coalesce((select sum(${artifactTable.byteSize})::bigint from ${version} join ${artifactTable} on ${artifactTable.id} = ${version.pdfArtifactId} where ${version.schoolId} = ${schoolId}), 0)
+      + coalesce((select sum(${artifactTable.byteSize})::bigint from ${version} join ${artifactTable} on ${artifactTable.id} = ${version.docxArtifactId} where ${version.schoolId} = ${schoolId}), 0)
     )::text as bytes
   `);
   return Number(result.rows[0]?.bytes ?? 0);

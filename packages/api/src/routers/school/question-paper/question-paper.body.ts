@@ -88,8 +88,11 @@ const LANGUAGE_FONTS: ReadonlyArray<readonly [langs: readonly string[], family: 
   [['ur', 'ar', 'fa', 'sd'], "'Noto Naskh Arabic','Noto Nastaliq Urdu','Noto Sans Arabic','Noto Sans',sans-serif"],
 ];
 
-/** The default stylesheet of the body: constants only. The model's own `<style>` rules come after it and are scoped. */
-function bodyCss(): string {
+/**
+ * The default stylesheet of the body: constants only. The model's own `<style>` rules come after it and are scoped.
+ * Exported for the Word conversion (`question-paper.docx-html.ts`), which reads the same cascade the PDF prints with.
+ */
+export function questionPaperBodyCss(): string {
   const root = `.${QUESTION_PAPER_BODY_CLASS}`;
   const fonts = LANGUAGE_FONTS.map(([langs, family]) => `${root} :is(${langs.map((lang) => `:lang(${lang})`).join(',')}){font-family:${family}}`).join('');
   return (
@@ -122,7 +125,7 @@ export const BODY_TOO_LARGE_MESSAGE = 'This paper is too large to print. Remove 
  * typeset content. The ONE place this is assembled, used by the renderer and by {@link estimatedBodyBytes}.
  */
 function composeBody(contentHtml: string, hasMath: boolean): string {
-  return `<style>${bodyCss()}${hasMath ? katexInlineCss() : ''}</style><div class="${QUESTION_PAPER_BODY_CLASS}">${contentHtml}</div>`;
+  return `<style>${questionPaperBodyCss()}${hasMath ? katexInlineCss() : ''}</style><div class="${QUESTION_PAPER_BODY_CLASS}">${contentHtml}</div>`;
 }
 
 /** Markup a figure adds on top of its data URI once placed (`<img src="" alt="">`, `<figure>`), counted per figure in the estimate. */

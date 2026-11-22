@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Camera, ChevronLeft, Download, History, MoreVertical, Trash2 } from 'lucide-react';
+import { Camera, ChevronLeft, History, MoreVertical, Trash2 } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Badge } from '@campuspilot/ui/components/badge';
 import { Button } from '@campuspilot/ui/components/button';
@@ -19,6 +19,7 @@ import { toast } from '@campuspilot/ui/lib/toast';
 import { ConfirmationDialog } from '@campuspilot/components/confirmation-dialog';
 import { cellStatus } from '@campuspilot/components/question-paper/question-paper-model';
 import { VersionList } from '@campuspilot/components/question-paper/version-list';
+import { LatestVersionDownloadItems } from '@campuspilot/components/question-paper/version-download';
 import { DirtyGuard, LoadingExam, Notice, ReadError } from '@/components/exam/exam-common';
 import { RequirePermissions } from '@/components/require-permissions';
 import { orpc } from '@/lib/orpc';
@@ -41,6 +42,7 @@ import { QuestionPaperStudio } from '@/components/question-paper/question-paper-
 import { usePageUploads, type PageUploads } from '@/components/question-paper/use-page-uploads';
 import {
   useCanManageQuestionPaper,
+  downloadFailedMessage,
   useDownloadQuestionPaper,
   useQuestionPaperDetail,
   useRefreshQuestionPaper,
@@ -145,13 +147,16 @@ function VersionsDialog({
               isLatest: version.isLatest,
             }))}
             selectedVersionNo={null}
-            downloadingVersionNo={download.isPending ? (download.variables?.versionNo ?? null) : null}
+            downloading={download.isPending && download.variables ? { versionNo: download.variables.versionNo, format: download.variables.format } : null}
             onPreview={(versionNo) => {
               onOpenChange(false);
               onShow(versionNo);
             }}
-            onDownload={(versionNo) =>
-              download.mutate({ target, versionNo }, { onError: (error) => toast.error(requestErrorMessage(error, 'The PDF could not be prepared.')) })
+            onDownload={(versionNo, format) =>
+              download.mutate(
+                { target, versionNo, format },
+                { onError: (error) => toast.error(requestErrorMessage(error, downloadFailedMessage(format))) },
+              )
             }
           />
         </div>
@@ -207,18 +212,16 @@ function PaperMenu({
               <History aria-hidden />
               All versions
             </DropdownMenuItem>
-            <DropdownMenuItem
+            <LatestVersionDownloadItems
               disabled={!hasVersion}
-              onSelect={() =>
+              pending={download.isPending ? (download.variables?.format ?? null) : null}
+              onDownload={(format) =>
                 download.mutate(
-                  { target, versionNo: detail.paper.latestVersionNo },
-                  { onError: (error) => toast.error(requestErrorMessage(error, 'The PDF could not be prepared.')) },
+                  { target, versionNo: detail.paper.latestVersionNo, format },
+                  { onError: (error) => toast.error(requestErrorMessage(error, downloadFailedMessage(format))) },
                 )
               }
-            >
-              <Download aria-hidden />
-              Download latest PDF
-            </DropdownMenuItem>
+            />
           </DropdownMenuGroup>
           {hasVersion && canManage ? (
             <>
