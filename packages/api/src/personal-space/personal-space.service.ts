@@ -3,21 +3,13 @@ import type { Database, DatabaseExecutor } from '@campuspilot/db';
 import { account, user } from '@campuspilot/db/schema/auth';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
-import { schoolUserRoleTable } from '@campuspilot/db/schema/school-user-role';
 import { and, eq } from 'drizzle-orm';
 
+import { generateId } from '@campuspilot/db/id';
+
 import { rpcError } from '../errors';
-import { setSchoolFeature } from '../feature-flags/feature-flags.service';
-import { addBillingPeriods } from '../billing/billing.contract';
-import { startTrialPeriod } from '../billing/billing.service';
 import { lockUser } from '../school-creation/school-creation.service';
-import {
-  SELF_SERVICE_ASSISTANT_MONTHLY_LIMIT_USD,
-  SELF_SERVICE_TRIAL_PERIODS,
-  SELF_SERVICE_TRIAL_TIER,
-} from '../school-creation/school-creation.contract';
-import { uniqueSlug } from '../workflows/demo-school/identity';
-import { slugifySchoolName } from '../workflows/demo-school/slug';
+import { provisionSelfServiceSchool } from '../school-creation/school-provisioning';
 import { log } from './log';
 import {
   PERSONAL_SPACE_REFUSAL_MESSAGES,
@@ -36,6 +28,14 @@ import {
  *   (`personalSpace.create`), for someone with a linked Google account and no
  *   school at all.
  */
+
+/**
+ * A personal space's slug: `personal-` and the random part of a fresh id, so
+ * it never holds the person's name and needs no search for a free one.
+ */
+export function personalSpaceSlug(): string {
+  return `personal-${generateId('school').split('_').pop()!}`;
+}
 
 /** The facts a personal space is decided from, and the decision. */
 export type PersonalSpaceStatus = {
@@ -92,15 +92,12 @@ export function personalSpaceRefusedError(refusal: PersonalSpaceRefusal) {
  *
  * 1. locks the person and checks they may get one (refused with
  *    {@link personalSpaceRefusedError});
- * 2. inserts the school of kind `personal`, named by `personalSpaceName`,
- *    with the person as owner, no standing tier and no town (`location` is
- *    empty: a personal space prints nothing of its own);
- * 3. starts the same trial a self-created school gets
- *    (`SELF_SERVICE_TRIAL_TIER` for `SELF_SERVICE_TRIAL_PERIODS` billing
- *    period), after which it is read-only like any school;
- * 4. switches the assistant on with the self-service limit, which the
- *    standalone papers need;
- * 5. makes the person a member with the principal role.
+ * 2. provisions it with `provisionSelfServiceSchool`, the start shared with
+ *    a self-created school (the same trial, the assistant with the
+ *    self-service limit, the person as owner and principal), as kind
+ *    `personal`, named by `personalSpaceName`, with a `personalSpaceSlug`
+ *    that does not carry the name and no town (`location` is empty: a
+ *    personal space prints nothing of its own).
  *
  * It writes no `school_creation` row (the space does not use the allowance)
  * and offers no guided setup (a personal space has no sessions or classes).
@@ -113,37 +110,14 @@ export async function createPersonalSpace(
   const status = await readPersonalSpaceStatus(db, input.userId);
   if (status.refusal) throw personalSpaceRefusedError(status.refusal);
   const [person] = await db.select({ name: user.name }).from(user).where(eq(user.id, input.userId)).limit(1);
-  const name = personalSpaceName(person?.name);
-
-  const created: { id?: string } = {};
-  await uniqueSlug(slugifySchoolName(name) || 'personal', async (candidate) => {
-    const [row] = await db
-      .insert(schoolTable)
-      .values({ slug: candidate, name, location: '', registrationNo: null, tier: null, ownerUserId: input.userId, kind: 'personal' })
-      .onConflictDoNothing({ target: schoolTable.slug })
-      .returning({ id: schoolTable.id });
-    created.id = row?.id;
-    return row === undefined;
+  // The shared start of every self-provisioned school (trial, assistant, owner as principal). A personal space's slug
+  // never carries the person's name (it is public in a sign-in link, docs/personal-space.md): `personal-` and a random
+  // id, unique by construction, so it is inserted once.
+  const { schoolId } = await provisionSelfServiceSchool(db, {
+    ownerUserId: input.userId,
+    now: input.now,
+    school: { kind: 'personal', name: personalSpaceName(person?.name), location: '', registrationNo: null, slug: { exact: personalSpaceSlug() } },
   });
-  if (!created.id) throw rpcError.internal();
-  const schoolId = created.id;
-
-  await startTrialPeriod(db, {
-    schoolId,
-    tier: SELF_SERVICE_TRIAL_TIER,
-    endsAt: addBillingPeriods(input.now, SELF_SERVICE_TRIAL_PERIODS),
-    createdBy: input.userId,
-  });
-  // A system write (no administrator made it), hence no `updatedBy`.
-  await setSchoolFeature(db, {
-    schoolId,
-    feature: 'assistant',
-    enabled: true,
-    config: { monthlyLimitUsd: SELF_SERVICE_ASSISTANT_MONTHLY_LIMIT_USD, voice: { enabled: false } },
-    updatedBy: null,
-  });
-  await db.insert(schoolMemberTable).values({ schoolId, userId: input.userId });
-  await db.insert(schoolUserRoleTable).values({ schoolId, userId: input.userId, role: 'principal', meta: null });
   return { schoolId };
 }
 

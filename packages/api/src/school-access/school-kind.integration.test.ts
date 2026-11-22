@@ -49,6 +49,17 @@ describe('the school kind gate', () => {
     await expectPermissionDenied(outsider.client.school.listStandalonePapers({ schoolId }));
   });
 
+  it('decides the read-only gate from the same read: a suspended personal space refuses its own changes', async () => {
+    const { client, schoolId } = await personalSpaceOwner();
+    const admin = createTestClient(await createAdminSession());
+    await admin.systemAdmin.suspendSchool({ id: schoolId, reason: 'Test' });
+    const error = await refusalOf(client.school.createStandalonePaper({ schoolId }));
+    expect(error).toMatchObject({ code: 'FORBIDDEN', data: { reason: 'SCHOOL_SUSPENDED' } });
+    // Reads keep working, and the kind refusal still comes first for a real-school procedure.
+    await expect(client.school.listStandalonePapers({ schoolId })).resolves.toMatchObject({ items: [] });
+    expect(schoolKindRefusalOf(await refusalOf(client.school.listSessions({ schoolId, limit: 1 })))).toBe('personal');
+  });
+
   it('does not hold platform administration', async () => {
     const { schoolId } = await personalSpaceOwner();
     const admin = createTestClient(await createAdminSession());

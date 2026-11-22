@@ -4,8 +4,7 @@ import type { Context } from "./context";
 import { rpcError } from "./errors";
 import type { ProcedureMeta } from "./mcp-metadata";
 import { assistantToolDecision } from "./assistant/tool-policy";
-import { assertSchoolWritableByCaller } from "./school-access/school-access.service";
-import { assertSchoolKindServedByCaller, servedSchoolKinds } from "./school-access/school-kind.service";
+import { assertSchoolGatesByCaller, servedSchoolKinds } from "./school-access/school-kind.service";
 import {
   MCP_READ_SCOPE,
   MCP_WRITE_SCOPE,
@@ -69,13 +68,20 @@ function assertAssistantToolPolicy(
 }
 
 /**
- * A suspended school, and a school without an active plan, is read-only
- * (docs/school-suspension.md, docs/school-billing.md): every procedure that
- * is not an explicit read (`mcp.access`; a procedure without metadata is
- * treated as a write, as for OAuth scopes) is refused for the school its
- * input names. Here, on every protected procedure, rather than on each one:
- * a new procedure is covered without remembering to add anything, whichever
- * way it is reached (the apps, an API key, a connected AI app, the in-app
+ * The two school gates of every protected procedure, for the school its
+ * input names, decided from one read (`assertSchoolGatesByCaller`):
+ *
+ * - The school kind gate (docs/personal-space.md): a procedure serves the
+ *   kinds of school its `schoolKinds` names (real schools only when it names
+ *   none), and a school of another kind is refused, reads included.
+ * - The read-only gate (docs/school-suspension.md, docs/school-billing.md): a
+ *   suspended school, and a school without an active plan, refuses every
+ *   procedure that is not an explicit read (`mcp.access`; a procedure without
+ *   metadata is treated as a write, as for OAuth scopes), for its members.
+ *
+ * Here, on every protected procedure, rather than on each one: a new
+ * procedure is covered without remembering to add anything, whichever way it
+ * is reached (the apps, an API key, a connected AI app, the in-app
  * assistant).
  *
  * The school is the input's `schoolId`, the name every school-scoped
@@ -85,37 +91,11 @@ function assertAssistantToolPolicy(
  * it (`z.string().trim()`): otherwise " sch_x" would name no school here and
  * the school the procedure then acts on.
  *
- * Platform administration (`systemAdmin.*`) is not held: it acts on a school
- * from outside it, even when the administrator is also a member (the
+ * Platform administration (`systemAdmin.*`) is held by neither: it acts on a
+ * school from outside it, even when the administrator is also a member (the
  * principal of a demo school they created).
  */
-async function assertSchoolWritableForWrite(
-  context: Context,
-  meta: ProcedureMeta,
-  path: readonly string[],
-  input: unknown,
-) {
-  if (meta.mcp?.access === "read") return;
-  if (path[0] === "systemAdmin") return;
-  const schoolId =
-    typeof input === "object" && input !== null
-      ? (input as Record<string, unknown>).schoolId
-      : undefined;
-  if (typeof schoolId !== "string") return;
-  await assertSchoolWritableByCaller(context, schoolId.trim());
-}
-
-/**
- * The school kind gate (docs/personal-space.md): a procedure serves the kinds
- * of school its `schoolKinds` names (real schools only when it names none),
- * and a call whose input's `schoolId` names a school of another kind is
- * refused, reads included (`school-kind.service.ts`). Here, beside the
- * read-only gate and for the same reason: a new procedure is covered without
- * anyone remembering, whichever way it is reached. The school is read from the
- * input exactly as the read-only gate reads it. Platform administration is not
- * held.
- */
-async function assertSchoolKindServed(
+async function assertSchoolGates(
   context: Context,
   meta: ProcedureMeta,
   path: readonly string[],
@@ -127,7 +107,10 @@ async function assertSchoolKindServed(
       ? (input as Record<string, unknown>).schoolId
       : undefined;
   if (typeof schoolId !== "string") return;
-  await assertSchoolKindServedByCaller(context, schoolId.trim(), servedSchoolKinds(meta.schoolKinds));
+  await assertSchoolGatesByCaller(context, schoolId.trim(), {
+    served: servedSchoolKinds(meta.schoolKinds),
+    write: meta.mcp?.access !== "read",
+  });
 }
 
 const requireAuth = o.middleware(async ({ context, next, procedure, path }, input) => {
@@ -136,8 +119,7 @@ const requireAuth = o.middleware(async ({ context, next, procedure, path }, inpu
   }
   assertOAuthScope(context, procedure["~orpc"].meta);
   assertAssistantToolPolicy(context, procedure["~orpc"].meta, input);
-  await assertSchoolKindServed(context, procedure["~orpc"].meta, path, input);
-  await assertSchoolWritableForWrite(context, procedure["~orpc"].meta, path, input);
+  await assertSchoolGates(context, procedure["~orpc"].meta, path, input);
   return next({
     context: {
       db: context.db,

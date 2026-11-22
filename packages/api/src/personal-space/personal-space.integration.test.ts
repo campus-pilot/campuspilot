@@ -10,7 +10,12 @@ import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 
 import { createRegularUserSession, createTestClient, createTestSchool, createTestSchoolMember } from '../../test/fixtures';
+import { createCadetTestClient } from '../../test/cadet';
+import { expectRpcCode } from '../../test/finance/assertions';
 import { googleNewcomer, personalSpaceOwner } from '../../test/personal-space';
+import { handleSchoolLogoBlob } from '../routers/school/logo/logo.blob';
+import { handleCadetManifestBlob } from '../routers/school/manifest/cadet-manifest.blob';
+import { handleSchoolManifestBlob } from '../routers/school/manifest/manifest.blob';
 import { addBillingPeriods } from '../billing/billing.contract';
 import { SELF_SERVICE_ASSISTANT_MONTHLY_LIMIT_USD } from '../school-creation/school-creation.contract';
 import { personalSpaceName, personalSpaceRefusalOf, UNNAMED_PERSONAL_SPACE_NAME } from './personal-space.contract';
@@ -106,5 +111,31 @@ describe('after a Google sign-up', () => {
     await createTestSchoolMember({ schoolId: school.id, userId, roles: [{ role: 'principal', meta: null }] });
     await expect(createPersonalSpaceAfterGoogleSignUp(db, userId)).resolves.toBeUndefined();
     expect(await db.select().from(schoolTable).where(and(eq(schoolTable.ownerUserId, userId), eq(schoolTable.kind, 'personal')))).toEqual([]);
+  });
+});
+
+describe('what a personal space shows in public', () => {
+  it('has a slug without the person’s name', async () => {
+    const { schoolId } = await personalSpaceOwner('Meera Iyer');
+    const [school] = await db.select({ slug: schoolTable.slug, name: schoolTable.name }).from(schoolTable).where(eq(schoolTable.id, schoolId));
+    expect(school!.name).toBe("Meera Iyer's personal school");
+    expect(school!.slug).toMatch(/^personal-[0-9a-z]+$/);
+    expect(school!.slug).not.toContain('meera');
+  });
+
+  it('is never found by the Cadet Portal’s public school search or sign-in lookup, not even by its exact code', async () => {
+    const { schoolId } = await personalSpaceOwner('Zubin Qasimzade');
+    const [school] = await db.select({ slug: schoolTable.slug }).from(schoolTable).where(eq(schoolTable.id, schoolId));
+    const anonymous = createCadetTestClient(new Headers());
+    expect((await anonymous.searchSchools({ query: 'Zubin Qasimzade' })).schools).toEqual([]);
+    expect((await anonymous.searchSchools({ query: school!.slug })).schools).toEqual([]);
+    await expectRpcCode(anonymous.getSignInSchool({ slug: school!.slug }), 'NOT_FOUND');
+  });
+
+  it('has no public manifest, logo or Cadet Portal manifest', async () => {
+    const { schoolId } = await personalSpaceOwner();
+    expect((await handleSchoolManifestBlob({ db }, { schoolId })).status).toBe(404);
+    expect((await handleCadetManifestBlob({ db }, { schoolId })).status).toBe(404);
+    expect((await handleSchoolLogoBlob({ db }, { schoolId, size: '192' }, new Request('http://localhost/logo'))).status).toBe(404);
   });
 });

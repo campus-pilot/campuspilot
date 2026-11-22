@@ -1,6 +1,9 @@
 import type { DatabaseExecutor } from '@campuspilot/db';
 import { DEFAULT_SCHOOL_KINDS, type SchoolKind } from '@campuspilot/db/school-kind';
+import { resolveSchoolPlan } from '@campuspilot/db/feature-flags/catalogue';
+import { joinActiveBillingPeriod } from '@campuspilot/db/feature-flags/store';
 import { schoolTable } from '@campuspilot/db/schema/school';
+import { schoolBillingPeriodTable } from '@campuspilot/db/schema/school-billing';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
 import { ORPCError } from '@orpc/server';
 import { and, eq, sql } from 'drizzle-orm';
@@ -12,6 +15,7 @@ import {
   SCHOOL_KIND_UNSUPPORTED_REASON,
   type SchoolKindUnsupportedData,
 } from './school-access.contract';
+import { resolveSchoolWriteRefusal, schoolWriteRefusedError, type SchoolWriteFacts } from './school-access.service';
 
 /**
  * The school kind gate (docs/personal-space.md). Every procedure says which
@@ -103,4 +107,62 @@ export async function schoolKindsOfUser(db: DatabaseExecutor, userId: string): P
     .innerJoin(schoolTable, eq(schoolTable.id, schoolMemberTable.schoolId))
     .where(eq(schoolMemberTable.userId, userId));
   return new Set(rows.map((row) => row.kind));
+}
+
+/**
+ * Everything the two school gates of `requireAuth` decide from, in one query:
+ * the school's kind, whether the caller is a member, and the two facts that
+ * make it read-only (`school-access.service.ts`). Null when the school does
+ * not exist.
+ */
+export async function readSchoolGateFacts(
+  db: DatabaseExecutor,
+  schoolId: string,
+  userId: string,
+): Promise<({ kind: SchoolKind; member: boolean } & SchoolWriteFacts) | null> {
+  const [row] = await db
+    .select({
+      kind: schoolTable.kind,
+      member: sql<boolean>`exists (select 1 from ${schoolMemberTable} where ${and(eq(schoolMemberTable.schoolId, schoolTable.id), eq(schoolMemberTable.userId, userId))})`,
+      suspendedAt: schoolTable.suspendedAt,
+      subscribedTier: schoolTable.tier,
+      periodTier: schoolBillingPeriodTable.tier,
+      periodKind: schoolBillingPeriodTable.kind,
+    })
+    .from(schoolTable)
+    .leftJoin(schoolBillingPeriodTable, joinActiveBillingPeriod())
+    .where(eq(schoolTable.id, schoolId))
+    .limit(1);
+  if (!row) return null;
+  const plan = resolveSchoolPlan({
+    subscribedTier: row.subscribedTier,
+    activePeriod: row.periodTier === null || row.periodKind === null ? null : { tier: row.periodTier, kind: row.periodKind },
+  });
+  return { kind: row.kind, member: row.member === true, suspended: row.suspendedAt !== null, hasActivePlan: plan.tier !== null };
+}
+
+/**
+ * Both school gates of a procedure for the school its input names, from one
+ * read ({@link readSchoolGateFacts}), in their order: the school kind gate
+ * (everyone, reads included; a member is told why), then, for a procedure that
+ * is not a read, the read-only gate (members only, as in
+ * `assertSchoolWritableByCaller`). A school that does not exist is left to
+ * the procedure.
+ */
+export async function assertSchoolGatesByCaller(
+  context: Pick<Context, 'db' | 'session'>,
+  schoolId: string,
+  gates: { served: readonly SchoolKind[]; write: boolean },
+): Promise<void> {
+  const userId = context.session?.user.id;
+  if (!userId) return;
+  const facts = await readSchoolGateFacts(context.db, schoolId, userId);
+  if (!facts) return;
+  if (!gates.served.includes(facts.kind)) {
+    if (facts.member) throw schoolKindUnsupportedError(facts.kind);
+    throw rpcError.forbidden();
+  }
+  if (!gates.write || !facts.member) return;
+  const refusal = resolveSchoolWriteRefusal(facts);
+  if (refusal) throw schoolWriteRefusedError(refusal);
 }
