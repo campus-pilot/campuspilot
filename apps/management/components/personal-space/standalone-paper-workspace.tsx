@@ -151,7 +151,7 @@ function VersionsDialog({
               onShow(versionNo);
             }}
             onDownload={(versionNo) =>
-              download.mutate({ target, versionNo }, { onError: (error) => toast.error(requestErrorMessage(error, 'The PDF could not be prepared.')) })
+              download.mutate({ target, versionNo, format: 'pdf' }, { onError: (error) => toast.error(requestErrorMessage(error, 'The PDF could not be prepared.')) })
             }
           />
         </div>
@@ -211,7 +211,7 @@ function PaperMenu({
               disabled={!hasVersion}
               onSelect={() =>
                 download.mutate(
-                  { target, versionNo: detail.paper.latestVersionNo },
+                  { target, versionNo: detail.paper.latestVersionNo, format: 'pdf' },
                   { onError: (error) => toast.error(requestErrorMessage(error, 'The PDF could not be prepared.')) },
                 )
               }

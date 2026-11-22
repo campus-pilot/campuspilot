@@ -27,7 +27,7 @@ import { Eye } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { RequirePermissions } from '@/components/require-permissions';
-import { useDownloadQuestionPaper } from '@/components/question-paper/use-question-paper-detail';
+import { downloadFailedMessage, useDownloadQuestionPaper } from '@/components/question-paper/use-question-paper-detail';
 import { VersionPdf } from '@/components/question-paper/version-pdf';
 import { requestErrorMessage } from '@/components/question-paper/question-paper-model';
 import { paperPreviewQueryOptions, standalonePaperLabelOf, standalonePaperPermission, type PaperTarget } from '@/components/question-paper/paper-target';
@@ -346,9 +346,9 @@ function VersionCard({
       versionNo={version.versionNo}
       removedCount={version.warningCount}
       isLatest={version.isLatest}
-      downloading={download.isPending}
-      onDownload={() =>
-        download.mutate({ target, versionNo }, { onError: (error) => toast.error(requestErrorMessage(error, 'The PDF could not be prepared.')) })
+      downloading={download.isPending ? (download.variables?.format ?? null) : null}
+      onDownload={(format) =>
+        download.mutate({ target, versionNo, format }, { onError: (error) => toast.error(requestErrorMessage(error, downloadFailedMessage(format))) })
       }
       preview={
         <PreviewDialog title={`Version ${version.versionNo}`} description="As it was saved, as it was printed.">

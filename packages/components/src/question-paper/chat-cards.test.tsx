@@ -269,7 +269,7 @@ describe('QuestionPaperVersionCard', () => {
         versionNo={3}
         removedCount={1}
         isLatest={false}
-        downloading={false}
+        downloading={null}
         preview={<button type="button">Preview</button>}
         onDownload={onDownload}
       />,
@@ -279,7 +279,9 @@ describe('QuestionPaperVersionCard', () => {
     expect(screen.getByText('Saved with 1 notice, see the preview.')).toBeTruthy();
     expect(screen.queryByText(/marks/i)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
-    expect(onDownload).toHaveBeenCalled();
+    expect(onDownload).toHaveBeenCalledWith('pdf');
+    // The Word file is offered beside it, in a menu.
+    expect(screen.getByRole('button', { name: 'More download formats' })).toBeTruthy();
   });
 });
 
