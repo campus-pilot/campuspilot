@@ -1,4 +1,5 @@
 import type { MySchoolDto } from '@campuspilot/api/routers/school/school.dto';
+import { SCHOOL_NO_PLAN_REASON, SCHOOL_SUSPENDED_REASON, schoolWriteRefusalOf } from '@campuspilot/api/school-access/school-access.contract';
 
 /**
  * Pure decisions of the personal space screens (docs/personal-space.md), kept
@@ -79,5 +80,22 @@ export function personalPlanStatusOf(
   if (school.isSuspended) return 'Suspended';
   if (!school.hasActivePlan) return 'Trial ended';
   if (school.planSource === 'trial' && school.planEndsAt !== null) return `Trial until ${endFormatter.format(new Date(school.planEndsAt))}`;
+  return null;
+}
+
+/**
+ * A refused change in a personal space because it is read-only (its trial
+ * ended, or it is suspended), as the space words it beside the action: the
+ * same words as its plan notice, with the contact link's text. Decided from
+ * the refusal's `data.reason`, never the message. Null for any other error.
+ */
+export function personalWriteRefusalOf(error: unknown): { message: string; contact: string } | null {
+  const reason = schoolWriteRefusalOf(error);
+  if (reason === SCHOOL_SUSPENDED_REASON) {
+    return { message: 'Your personal space is suspended, so nothing can be changed. You can still view and download your papers.', contact: 'Contact us to continue' };
+  }
+  if (reason === SCHOOL_NO_PLAN_REASON) {
+    return { message: 'Your free trial has ended, so nothing can be changed. You can still view and download your papers.', contact: 'Contact us to keep creating papers' };
+  }
   return null;
 }

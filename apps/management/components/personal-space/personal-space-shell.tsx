@@ -3,7 +3,6 @@
 import type { ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { notFound } from 'next/navigation';
-import { env } from '@campuspilot/env/management.client';
 import { Alert, AlertDescription } from '@campuspilot/ui/components/alert';
 import { Badge } from '@campuspilot/ui/components/badge';
 import Link from 'next/link';
@@ -14,21 +13,13 @@ import { ManagementAccountMenu } from '@/components/management-account-menu';
 import { SchoolDocumentHead } from '@/components/school-document-head';
 import { SchoolSwitcher } from '@/components/school-switcher';
 import { orpc } from '@/lib/orpc';
-import { contactHrefOf, personalPapersHref, personalPlanNoticeOf, personalPlanStatusOf } from './personal-space-model';
+import { ContactLink } from './contact-link';
+import { personalPapersHref, personalPlanNoticeOf, personalPlanStatusOf } from './personal-space-model';
 
 /** The user's entry for this school, from the cached school list the switcher also reads. */
 function useMySchool(schoolId: string) {
   const schoolsQuery = useQuery(orpc.school.listMySchools.queryOptions());
   return { school: schoolsQuery.data?.find((school) => school.id === schoolId), isPending: schoolsQuery.isPending };
-}
-
-/** The website's contact page, in a new tab. */
-function ContactLink({ children }: { children: ReactNode }) {
-  return (
-    <a href={contactHrefOf(env.NEXT_PUBLIC_WEBSITE_URL)} target="_blank" rel="noopener noreferrer" className="font-medium underline underline-offset-4">
-      {children}
-    </a>
-  );
 }
 
 /**

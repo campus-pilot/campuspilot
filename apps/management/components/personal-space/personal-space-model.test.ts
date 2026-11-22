@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { contactHrefOf, landingSchoolOf, personalPaperHref, personalPapersHref, personalPlanNoticeOf, personalPlanStatusOf, personalSpaceOf, schoolEntryHrefOf } from './personal-space-model';
+import { contactHrefOf, personalWriteRefusalOf, landingSchoolOf, personalPaperHref, personalPapersHref, personalPlanNoticeOf, personalPlanStatusOf, personalSpaceOf, schoolEntryHrefOf } from './personal-space-model';
 
 const school = (id: string, kind: 'school' | 'personal') => ({ id, kind });
 
@@ -48,4 +48,19 @@ test('a trial is announced only in its last days, and shown as a status until th
   assert.equal(personalPlanNoticeOf(ends(3), now)?.kind, 'ending');
   assert.match(personalPlanStatusOf(ends(20)) ?? '', /^Trial until /);
   assert.equal(personalPlanStatusOf({ isSuspended: false, hasActivePlan: true, planSource: 'standing', planEndsAt: null }), null);
+});
+
+test('a read-only refusal is worded as the space’s trial or suspension, from its reason; anything else is not', () => {
+  const refusal = (reason: string) => Object.assign(new Error('server words'), { code: 'FORBIDDEN', data: { reason } });
+  assert.deepEqual(personalWriteRefusalOf(refusal('SCHOOL_NO_PLAN')), {
+    message: 'Your free trial has ended, so nothing can be changed. You can still view and download your papers.',
+    contact: 'Contact us to keep creating papers',
+  });
+  assert.equal(personalWriteRefusalOf(refusal('SCHOOL_SUSPENDED'))?.contact, 'Contact us to continue');
+  assert.equal(personalWriteRefusalOf(Object.assign(new Error('no'), { code: 'FORBIDDEN' })), null);
+  assert.equal(personalWriteRefusalOf(refusal('PERSONAL_SPACE_PAPER_LIMIT')), null);
+  for (const reason of ['SCHOOL_NO_PLAN', 'SCHOOL_SUSPENDED']) {
+    const text = JSON.stringify(personalWriteRefusalOf(refusal(reason)));
+    assert.ok(!/school|billing/i.test(text), text);
+  }
 });

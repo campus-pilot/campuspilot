@@ -21,9 +21,9 @@ import { useRouter } from 'next/navigation';
 
 import { RequirePermissions } from '@/components/require-permissions';
 import { standalonePaperPermission } from '@/components/question-paper/paper-target';
-import { requestErrorMessage } from '@/components/question-paper/question-paper-model';
 import { QuestionPaperAssistantGate } from '@/components/question-paper/question-paper-assistant-gate';
 import { orpc } from '@/lib/orpc';
+import { PersonalSpaceErrorText } from './contact-link';
 import { personalPaperHref } from './personal-space-model';
 
 /** The list's filters: one per detail, each matched exactly against the values the school's papers state. */
@@ -31,6 +31,23 @@ type PaperFilters = { schoolName?: string; className?: string; subjectName?: str
 type PaperController = DataTableListController<'updatedAt', PaperFilters>;
 
 const updatedOn = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+
+/** A column a phone leaves out (below `sm`); its value is shown under the subject there instead. */
+const PHONE_HIDDEN = 'hidden sm:table-cell';
+
+/**
+ * The paper's subject and, on a phone only, its class, exam and school under
+ * it (the columns that show them there are left out), the ones it states.
+ */
+function SubjectCell({ details }: { details: StandalonePaperListItemDto['details'] }) {
+  const others = [details.className, details.examName, details.schoolName].filter((value): value is string => value !== null);
+  return (
+    <span className="flex min-w-0 flex-col gap-0.5">
+      <span className="font-medium">{details.subjectName ?? 'Untitled paper'}</span>
+      {others.length > 0 ? <span className="text-xs text-muted-foreground sm:hidden">{others.join(' · ')}</span> : null}
+    </span>
+  );
+}
 
 /** A detail as a cell: its value, or a quiet dash when the paper does not state it. */
 const DetailCell = ({ value }: { value: string | null }) => (value ? <span>{value}</span> : <span className="text-muted-foreground">-</span>);
@@ -48,7 +65,7 @@ function CreatePaperButton({ schoolId, placement }: { schoolId: string; placemen
       onSuccess: ({ paperId }) => router.push(personalPaperHref(schoolId, paperId)),
     }),
   );
-  const failure = create.error ? requestErrorMessage(create.error, 'The paper could not be created.') : null;
+
   return (
     <RequirePermissions permissions={standalonePaperPermission(schoolId, 'manage')}>
       <div className={cn('flex flex-col gap-1.5', placement === 'header' ? 'items-end text-right' : 'items-center text-center')}>
@@ -56,9 +73,9 @@ function CreatePaperButton({ schoolId, placement }: { schoolId: string; placemen
           <Plus data-icon="inline-start" aria-hidden />
           {create.isPending ? 'Creating…' : 'Create question paper'}
         </Button>
-        {failure ? (
+        {create.error ? (
           <p role="alert" className="max-w-sm text-sm text-destructive">
-            {failure}
+            <PersonalSpaceErrorText error={create.error} fallback="The paper could not be created." />
           </p>
         ) : null}
       </div>
@@ -80,18 +97,21 @@ function PaperRows({ schoolId, controller }: { schoolId: string; controller: Pap
       id: 'subject',
       header: 'Subject',
       enableSorting: false,
-      cell: ({ row }) => <span className="font-medium">{row.original.details.subjectName ?? 'Untitled paper'}</span>,
+      // On a phone the subject and the details under it wrap instead of widening the table.
+      meta: { className: 'max-sm:whitespace-normal' },
+      cell: ({ row }) => <SubjectCell details={row.original.details} />,
     },
-    { id: 'class', header: 'Class', enableSorting: false, cell: ({ row }) => <DetailCell value={row.original.details.className} /> },
-    { id: 'exam', header: 'Exam', enableSorting: false, cell: ({ row }) => <DetailCell value={row.original.details.examName} /> },
-    { id: 'school', header: 'School', enableSorting: false, cell: ({ row }) => <DetailCell value={row.original.details.schoolName} /> },
+    // On a phone only Subject (with the other details under it) and Status stay, so the list reads without sideways scrolling.
+    { id: 'class', header: 'Class', enableSorting: false, meta: { className: PHONE_HIDDEN }, cell: ({ row }) => <DetailCell value={row.original.details.className} /> },
+    { id: 'exam', header: 'Exam', enableSorting: false, meta: { className: PHONE_HIDDEN }, cell: ({ row }) => <DetailCell value={row.original.details.examName} /> },
+    { id: 'school', header: 'School', enableSorting: false, meta: { className: PHONE_HIDDEN }, cell: ({ row }) => <DetailCell value={row.original.details.schoolName} /> },
     {
       id: 'status',
       header: 'Status',
       enableSorting: false,
       cell: ({ row }) => <Badge variant="outline">{cellStatus(row.original).label}</Badge>,
     },
-    { id: 'updatedAt', header: 'Updated', enableSorting: false, cell: ({ row }) => updatedOn.format(row.original.updatedAt) },
+    { id: 'updatedAt', header: 'Updated', enableSorting: false, meta: { className: PHONE_HIDDEN }, cell: ({ row }) => updatedOn.format(row.original.updatedAt) },
   ];
   return (
     <DataTable

@@ -7,6 +7,7 @@ import {
   useReactTable,
   type ColumnDef,
   type Row,
+  type RowData,
   type TableOptions,
 } from '@tanstack/react-table';
 import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
@@ -21,6 +22,18 @@ import {
   TableHeader,
   TableRow,
 } from '@campuspilot/ui/components/table';
+
+declare module '@tanstack/react-table' {
+  interface ColumnMeta<TData extends RowData, TValue> {
+    /**
+     * Classes for the column's header and every cell of it. For a column a
+     * phone can do without, `hidden sm:table-cell` leaves it out below `sm`
+     * with CSS alone, so the table reads without sideways scrolling; show its
+     * value in a column that stays (as a second line) when it matters.
+     */
+    className?: string;
+  }
+}
 
 export type DataTableColumnDef<TData, TValue = unknown> = ColumnDef<
   TData,
@@ -83,7 +96,7 @@ export function DataTable<TData>({
           {table.getHeaderGroups().map((headerGroup) => (
             <TableRow key={headerGroup.id}>
               {headerGroup.headers.map((header) => (
-                <TableHead key={header.id} colSpan={header.colSpan}>
+                <TableHead key={header.id} colSpan={header.colSpan} className={header.column.columnDef.meta?.className}>
                   {header.isPlaceholder ? null : header.column.getCanSort() ? (
                     <Button
                       type="button"
@@ -136,7 +149,7 @@ export function DataTable<TData>({
                 >
 
                   {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id}>
+                    <TableCell key={cell.id} className={cell.column.columnDef.meta?.className}>
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </TableCell>
                   ))}

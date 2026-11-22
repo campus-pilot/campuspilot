@@ -56,6 +56,8 @@ export function SchoolSwitcher() {
   const schoolsQuery = useQuery(orpc.school.listMySchools.queryOptions());
   const offersSchoolCreation = useOffersSchoolCreation();
   const personalSpace = personalSpaceOf(schoolsQuery.data ?? []);
+  // The user's real schools; their group is left out when there are none (only a personal space), never shown empty.
+  const realSchools = (schoolsQuery.data ?? []).filter((school) => school.kind === 'school');
   const selectedSchoolId = schoolIdFromPath(pathname);
   const selectedSchool = schoolsQuery.data?.find(
     (school) => school.id === selectedSchoolId,
@@ -118,29 +120,31 @@ export function SchoolSwitcher() {
           </searchForm.Field>
           <CommandList>
             <CommandEmpty>No schools match your search.</CommandEmpty>
-            <CommandGroup heading="Your schools">
-              {schoolsQuery.data?.filter((school) => school.kind === 'school').map((school) => (
-                <CommandItem
-                  key={school.id}
-                  value={`${school.name} ${school.location}`}
-                  data-checked={school.id === selectedSchoolId}
-                  onSelect={async () => {
-                    if (!(await confirmNavigation())) return;
-                    handleOpenChange(false);
-                    storeSchoolId(school.id);
-                    router.push(schoolEntryHrefOf(school));
-                  }}
-                >
-                  <SchoolAvatar school={school} size="sm" />
-                  <span className="min-w-0">
-                    <span className="block truncate">{school.name}</span>
-                    <span className="block truncate text-[10px] text-muted-foreground">
-                      {school.location}
+            {realSchools.length > 0 ? (
+              <CommandGroup heading="Your schools">
+                {realSchools.map((school) => (
+                  <CommandItem
+                    key={school.id}
+                    value={`${school.name} ${school.location}`}
+                    data-checked={school.id === selectedSchoolId}
+                    onSelect={async () => {
+                      if (!(await confirmNavigation())) return;
+                      handleOpenChange(false);
+                      storeSchoolId(school.id);
+                      router.push(schoolEntryHrefOf(school));
+                    }}
+                  >
+                    <SchoolAvatar school={school} size="sm" />
+                    <span className="min-w-0">
+                      <span className="block truncate">{school.name}</span>
+                      <span className="block truncate text-[10px] text-muted-foreground">
+                        {school.location}
+                      </span>
                     </span>
-                  </span>
-                </CommandItem>
-              ))}
-            </CommandGroup>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            ) : null}
             {personalSpace ? (
               // The user's own personal space (docs/personal-space.md): its papers, apart from their schools.
               <CommandGroup heading="Personal">

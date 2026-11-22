@@ -24,7 +24,8 @@ export function CreatePersonalSpace() {
   const create = useMutation(
     orpc.personalSpace.create.mutationOptions({
       onSuccess: async ({ schoolId }) => {
-        await queryClient.invalidateQueries({ queryKey: orpc.school.listMySchools.key() });
+        // `all`: the cached list is read again whether or not a screen shows it, so the space's access check finds it.
+        await queryClient.invalidateQueries({ queryKey: orpc.school.listMySchools.key(), refetchType: 'all' });
         storeSchoolId(schoolId);
         router.push(personalPapersHref(schoolId));
       },
