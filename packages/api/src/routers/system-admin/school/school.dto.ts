@@ -1,6 +1,7 @@
 import { billingPeriodKindSchema, resolveSchoolPlan, schoolPlanSourceSchema, schoolTierSchema } from "@campuspilot/db/feature-flags/catalogue";
 import type { ActiveBillingPeriod } from "@campuspilot/db/feature-flags/store";
 import type { schoolTable } from "@campuspilot/db/schema/school";
+import { SCHOOL_KINDS } from "@campuspilot/db/school-kind";
 import { z } from "zod";
 
 import { createListInputSchema, createPaginatedOutputSchema } from "../../../paginations";
@@ -26,6 +27,8 @@ export const schoolDtoSchema = z.object({
   hasCompletedOnboarding: z.boolean(),
   /** Explicit demo fact (`school.is_demo`); never inferred from slug or email. */
   isDemo: z.boolean(),
+  /** A real school or a person's personal space (`school.kind`, docs/personal-space.md). */
+  kind: z.enum(SCHOOL_KINDS),
   /** `school.tier`: the school's standing tier, which never lapses; null without one (docs/school-billing.md). */
   subscribedTier: schoolTierSchema.nullable(),
   /**
@@ -71,6 +74,8 @@ export const listSchoolsInputSchema = createListInputSchema({
        * active period).
        */
       plan: z.enum(["trial", "paid", "complimentary", "none"]).optional(),
+      /** Real schools (`school`) or personal spaces (`personal`) only. */
+      kind: z.enum(SCHOOL_KINDS).optional(),
     })
     .optional(),
   orderBy: z

@@ -1,14 +1,15 @@
 'use client';
 
-import type { AssistantAttachmentRef, QuestionPaperSeed } from '@campuspilot/assistant-contract/attachments';
+import type { AssistantAttachmentRef } from '@campuspilot/assistant-contract/attachments';
 import { draftSaveSpent, saveDraftMessage, saveEventsOf, unsavedDraftOf, type UnsavedDraft } from '@campuspilot/components/question-paper/chat-cards-model';
 
-import { paperLabelOf, type PaperNames } from '@/components/assistant/assistant-question-paper-model';
 import { useDraftVerdicts } from '@/components/assistant/assistant-question-paper';
 import { refusalMessage } from '@/components/assistant/assistant-stream';
 import { useAssistantTimeline, useSendAssistantMessage } from '@/components/assistant/use-assistant';
 
-import type { QuestionPaperScope } from './question-paper-model';
+import { isStandaloneTarget, paperSeedOf, type PaperTarget } from './paper-target';
+
+export { paperSeedOf } from './paper-target';
 
 /**
  * The paper's own assistant: the same assistant as everywhere else, in a
@@ -18,15 +19,6 @@ import type { QuestionPaperScope } from './question-paper-model';
  */
 export const PAPER_ASSISTANT_SURFACE = 'panel' as const;
 
-/** The paper as a conversation's seed: its natural key, nothing else. */
-export const paperSeedOf = (scope: QuestionPaperScope): QuestionPaperSeed => ({
-  kind: 'question_paper',
-  sessionId: scope.sessionId,
-  examSlug: scope.examSlug,
-  classId: scope.classId,
-  subjectSlug: scope.subjectSlug,
-  modeSlug: scope.modeSlug,
-});
 
 /**
  * Starts the paper's conversation with a first message (a description, a PDF
@@ -36,7 +28,7 @@ export const paperSeedOf = (scope: QuestionPaperScope): QuestionPaperSeed => ({
  * at once, like any other sent message. A refusal (the school's limit, a role
  * switched off) rejects with the service's own sentence.
  */
-export function useStartPaperConversation(scope: QuestionPaperScope) {
+export function useStartPaperConversation(scope: PaperTarget) {
   const { send, isPending } = useSendAssistantMessage(scope.schoolId, PAPER_ASSISTANT_SURFACE);
   const start = async (text: string, attachments: AssistantAttachmentRef[] = []): Promise<string> => {
     try {
@@ -64,11 +56,11 @@ export type PaperDraft = UnsavedDraft & {
  * stream, so this adds no request). Null without a conversation, before its
  * first snapshot, and once the draft was saved.
  */
-export function usePaperDraft(scope: QuestionPaperScope, chatId: string | null, paper: PaperNames): PaperDraft | null {
+export function usePaperDraft(scope: PaperTarget, chatId: string | null, paperLabel: string): PaperDraft | null {
   const rows = useAssistantTimeline(scope.schoolId, chatId) ?? [];
   const verdicts = useDraftVerdicts(rows, chatId);
-  const draft = unsavedDraftOf(rows, scope, verdicts);
+  const draft = unsavedDraftOf(rows, isStandaloneTarget(scope) ? { paperId: scope.paperId } : scope, verdicts);
   if (!draft) return null;
-  const saveRequest = saveDraftMessage(draft.draftId, paperLabelOf(paper));
+  const saveRequest = saveDraftMessage(draft.draftId, paperLabel);
   return { ...draft, saveRequest, saveRequested: draftSaveSpent(saveEventsOf(rows), saveRequest) };
 }

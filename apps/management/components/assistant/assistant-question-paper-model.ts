@@ -1,7 +1,7 @@
 import type { ApprovalFacts } from '@campuspilot/components/assistant/approval-summaries';
 import { approvalDraftId } from '@campuspilot/components/assistant/approval-summaries';
 import type { AssistantTimelineRow } from '@campuspilot/components/assistant/timeline-model';
-import { draftOrdinalOf, type DraftCallInput, type DraftResult } from '@campuspilot/components/question-paper/chat-cards-model';
+import { draftOrdinalOf, type DraftCallInput, type DraftResult, type ExamDraftCallInput } from '@campuspilot/components/question-paper/chat-cards-model';
 
 /**
  * Pure decisions behind the question paper cards in the chat
@@ -20,7 +20,7 @@ export const paperLabelOf = (paper: PaperNames) => `${paper.subjectName} (${pape
  * they cannot be read: the slugs the draft was written for. It is still the
  * paper's own key, so the request names the right paper; only the words are plainer.
  */
-export const paperLabelFromKey = (input: Pick<DraftCallInput, 'subjectSlug' | 'modeSlug' | 'examSlug'>) =>
+export const paperLabelFromKey = (input: Pick<ExamDraftCallInput, 'subjectSlug' | 'modeSlug' | 'examSlug'>) =>
   `${input.subjectSlug} (${input.modeSlug}), ${input.examSlug}`;
 
 /** What a draft card can show. */

@@ -18,6 +18,7 @@ import {
   useStoredSchoolSessionId,
 } from '@/components/session-selection';
 import { SchoolDocumentHead } from '@/components/school-document-head';
+import { RealSchoolOnly } from '@/components/personal-space/school-kind-gates';
 import { SessionSwitcher } from '@/components/session-switcher';
 import { orpc } from '@/lib/orpc';
 import { useSchoolFeatureCheck } from '@/components/require-feature';
@@ -58,7 +59,18 @@ const pages: ManagementPageDescriptor<SettingsRouteParams>[] = [
   questionPaperTemplatePage,
 ];
 
-export default function SchoolSettingsLayout({
+/** A school's settings; a personal space has none, so its addresses here open its papers (docs/personal-space.md). */
+export default function SchoolSettingsLayout({ children }: { children: ReactNode }) {
+  const routeParams = useParams();
+  const schoolId = String(routeParams.schoolId ?? '');
+  return (
+    <RealSchoolOnly schoolId={schoolId}>
+      <SchoolSettingsShell>{children}</SchoolSettingsShell>
+    </RealSchoolOnly>
+  );
+}
+
+function SchoolSettingsShell({
   children,
 }: {
   children: ReactNode;

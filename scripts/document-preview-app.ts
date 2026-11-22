@@ -235,6 +235,7 @@ const next = spawn(
         ...env,
         NEXT_PUBLIC_SERVER_URL: env.BETTER_AUTH_URL,
         NEXT_PUBLIC_MCP_URL: new URL("/mcp", env.BETTER_AUTH_URL).toString(),
+        NEXT_PUBLIC_WEBSITE_URL: "https://campuspilot.in",
       })
         .filter(([, value]) => value !== undefined)
         .map(([key, value]) => [key, String(value)]),

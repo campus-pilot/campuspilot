@@ -1,6 +1,6 @@
 'use client';
 
-import type { AssistantAttachmentRef, QuestionPaperSeed } from '@campuspilot/assistant-contract/attachments';
+import type { AssistantAttachmentRef, AssistantMessageSeed } from '@campuspilot/assistant-contract/attachments';
 import {
   assistantConversationAttention,
   type AssistantConversationListItemDto,
@@ -540,7 +540,7 @@ export function useSendAssistantMessage(schoolId: string, surface: AssistantSurf
   const send = (
     text: string,
     conversationId: string | null,
-    extras: { attachments?: AssistantAttachmentRef[]; seed?: QuestionPaperSeed | null; shareWithPaper?: boolean; screen?: boolean; tier?: AssistantModelTier } = {},
+    extras: { attachments?: AssistantAttachmentRef[]; seed?: AssistantMessageSeed | null; shareWithPaper?: boolean; screen?: boolean; tier?: AssistantModelTier } = {},
   ) => {
     const clientRequestId = crypto.randomUUID();
     return mutation

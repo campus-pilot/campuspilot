@@ -11,7 +11,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@campuspilot/ui/compone
 import { cn } from '@campuspilot/ui/lib/utils';
 import { Notice, ReadError } from '@/components/exam/exam-common';
 import { questionPaperModelUrl, questionPaperOriginalUrl } from '@/lib/question-paper-pages';
-import { comparePageIndex, inFlightJob, pagePreviewFallback, PHOTO_ZOOM, scrollAfterZoom, uploadsInFlight, type QuestionPaperScope } from './question-paper-model';
+import { comparePageIndex, inFlightJob, pagePreviewFallback, PHOTO_ZOOM, scrollAfterZoom, uploadsInFlight } from './question-paper-model';
+import type { PaperTarget } from './paper-target';
 import { PageTurnButtons, type PageTurning, type PageView } from './source-preview-dialogs';
 import type { PageUploads } from './use-page-uploads';
 import { pageTurningOf, useRefreshQuestionPaper, useRotatePage, type QuestionPaperDetail } from './use-question-paper-detail';
@@ -86,7 +87,7 @@ function PhotoImage({
   onPress,
   onLoadError,
 }: {
-  scope: QuestionPaperScope;
+  scope: PaperTarget;
   page: ComparePage;
   count: number;
   zoomed: boolean;
@@ -213,7 +214,7 @@ function PhotoBar({ zoom, stepper, turn }: { zoom: ReactNode; stepper: ReactNode
  *   arrows instead of stepping. Zoom stays on from page to page: someone
  *   reading handwriting reads the next page the same way.
  */
-function PhotoPane({ scope, pages, turning }: { scope: QuestionPaperScope; pages: readonly ComparePage[]; turning?: PageTurning }) {
+function PhotoPane({ scope, pages, turning }: { scope: PaperTarget; pages: readonly ComparePage[]; turning?: PageTurning }) {
   const [pageId, setPageId] = useState<string | null>(null);
   const [zoomed, setZoomed] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
@@ -285,7 +286,7 @@ function PhotoPane({ scope, pages, turning }: { scope: QuestionPaperScope; pages
  * removing pages happen on the photos card, which is not on screen with the
  * paper; the server's revision check still covers a change made elsewhere.
  */
-export function PaperPhotoCompare({ scope, detail, canManage, uploads }: { scope: QuestionPaperScope; detail: QuestionPaperDetail; canManage: boolean; uploads: PageUploads }) {
+export function PaperPhotoCompare({ scope, detail, canManage, uploads }: { scope: PaperTarget; detail: QuestionPaperDetail; canManage: boolean; uploads: PageUploads }) {
   const rotate = useRotatePage(scope);
   const { paper } = detail;
   const closed =
@@ -297,7 +298,7 @@ export function PaperPhotoCompare({ scope, detail, canManage, uploads }: { scope
     }) !== null;
   return (
     <uploads.form.Subscribe selector={(state) => uploadsInFlight(state.values.items) > 0}>
-      {(uploading) => <PhotoPane scope={scope} pages={detail.pages} turning={closed ? undefined : pageTurningOf(rotate, scope, paper.pageRevision, uploading)} />}
+      {(uploading) => <PhotoPane scope={scope} pages={detail.pages} turning={closed ? undefined : pageTurningOf(rotate, paper.pageRevision, uploading)} />}
     </uploads.form.Subscribe>
   );
 }

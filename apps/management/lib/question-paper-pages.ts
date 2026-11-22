@@ -5,8 +5,8 @@ import { env } from '@campuspilot/env/management.client';
 import { ORPCError } from '@orpc/client';
 import { z } from 'zod';
 
-/** The natural key of one paper, as the API and the upload routes take it. */
-export type QuestionPaperPageKey = {
+/** The natural key of one exam paper, as the API and the upload routes take it. */
+export type ExamQuestionPaperPageKey = {
   schoolId: string;
   sessionId: string;
   examSlug: string;
@@ -15,13 +15,20 @@ export type QuestionPaperPageKey = {
   modeSlug: string;
 };
 
+/**
+ * One paper as the upload routes name it: an exam paper by its natural key,
+ * or a standalone paper of a personal space by its id (docs/personal-space.md).
+ */
+export type QuestionPaperPageKey = ExamQuestionPaperPageKey | { schoolId: string; paperId: string };
+
 /** A route of the API's `/api/blob` routes for one paper; `path` starts with `/`. */
 function paperBlobUrl(key: QuestionPaperPageKey, path: string) {
   const segment = (value: string) => encodeURIComponent(value);
-  return new URL(
-    `/api/blob/schools/${segment(key.schoolId)}/sessions/${segment(key.sessionId)}/exams/${segment(key.examSlug)}/classes/${segment(key.classId)}/question-papers/${segment(key.subjectSlug)}/${segment(key.modeSlug)}${path}`,
-    env.NEXT_PUBLIC_SERVER_URL,
-  ).toString();
+  const paperPath =
+    'paperId' in key
+      ? `/api/blob/schools/${segment(key.schoolId)}/standalone-papers/${segment(key.paperId)}`
+      : `/api/blob/schools/${segment(key.schoolId)}/sessions/${segment(key.sessionId)}/exams/${segment(key.examSlug)}/classes/${segment(key.classId)}/question-papers/${segment(key.subjectSlug)}/${segment(key.modeSlug)}`;
+  return new URL(`${paperPath}${path}`, env.NEXT_PUBLIC_SERVER_URL).toString();
 }
 
 function pagesUrl(key: QuestionPaperPageKey, suffix = '') {

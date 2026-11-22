@@ -19,13 +19,13 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@campuspilot/ui/components/popover';
-import { Building2, ChevronsUpDown, Plus } from 'lucide-react';
+import { Building2, ChevronsUpDown, NotebookPen, Plus } from 'lucide-react';
 import { orpc } from '@/lib/orpc';
 import { SchoolAvatar } from './school-avatar';
-import { schoolHref } from './school-route';
 import { confirmNavigation } from '@/lib/navigation-guard';
 import { useOffersSchoolCreation } from './school-creation/school-creation-panel';
 import { storeSchoolId } from './school-selection';
+import { personalSpaceOf, schoolEntryHrefOf } from './personal-space/personal-space-model';
 
 const switcherSearchSchema = z.object({ searchQuery: z.string().max(200) });
 
@@ -55,6 +55,7 @@ export function SchoolSwitcher() {
   const router = useRouter();
   const schoolsQuery = useQuery(orpc.school.listMySchools.queryOptions());
   const offersSchoolCreation = useOffersSchoolCreation();
+  const personalSpace = personalSpaceOf(schoolsQuery.data ?? []);
   const selectedSchoolId = schoolIdFromPath(pathname);
   const selectedSchool = schoolsQuery.data?.find(
     (school) => school.id === selectedSchoolId,
@@ -92,7 +93,7 @@ export function SchoolSwitcher() {
           <span className="min-w-0 text-left">
             <span className="block truncate text-sm font-semibold">{label}</span>
             <span className="block truncate text-[10px] text-muted-foreground">
-              {selectedSchool?.location ?? 'School workspace'}
+              {selectedSchool?.kind === 'personal' ? 'Personal space' : (selectedSchool?.location ?? 'School workspace')}
             </span>
           </span>
           <ChevronsUpDown className="ml-auto size-4" />
@@ -118,7 +119,7 @@ export function SchoolSwitcher() {
           <CommandList>
             <CommandEmpty>No schools match your search.</CommandEmpty>
             <CommandGroup heading="Your schools">
-              {schoolsQuery.data?.map((school) => (
+              {schoolsQuery.data?.filter((school) => school.kind === 'school').map((school) => (
                 <CommandItem
                   key={school.id}
                   value={`${school.name} ${school.location}`}
@@ -127,7 +128,7 @@ export function SchoolSwitcher() {
                     if (!(await confirmNavigation())) return;
                     handleOpenChange(false);
                     storeSchoolId(school.id);
-                    router.push(schoolHref(school.id));
+                    router.push(schoolEntryHrefOf(school));
                   }}
                 >
                   <SchoolAvatar school={school} size="sm" />
@@ -140,6 +141,24 @@ export function SchoolSwitcher() {
                 </CommandItem>
               ))}
             </CommandGroup>
+            {personalSpace ? (
+              // The user's own personal space (docs/personal-space.md): its papers, apart from their schools.
+              <CommandGroup heading="Personal">
+                <CommandItem
+                  value="Personal space"
+                  data-checked={personalSpace.id === selectedSchoolId}
+                  onSelect={async () => {
+                    if (!(await confirmNavigation())) return;
+                    handleOpenChange(false);
+                    storeSchoolId(personalSpace.id);
+                    router.push(schoolEntryHrefOf(personalSpace));
+                  }}
+                >
+                  <NotebookPen aria-hidden />
+                  Personal space
+                </CommandItem>
+              </CommandGroup>
+            ) : null}
             {offersSchoolCreation ? (
               <CommandGroup>
                 <CommandItem

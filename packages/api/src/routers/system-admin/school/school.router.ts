@@ -89,7 +89,8 @@ export const schoolRouter = {
             : input.filters.plan === "none"
               ? and(isNull(schoolTable.tier), isNull(schoolBillingPeriodTable.id))
               : eq(schoolBillingPeriodTable.kind, input.filters.plan);
-        const where = and(searchCondition, onboardingCondition, tierCondition, suspendedCondition, planCondition);
+        const kindCondition = input.filters?.kind === undefined ? undefined : eq(schoolTable.kind, input.filters.kind);
+        const where = and(searchCondition, onboardingCondition, tierCondition, suspendedCondition, planCondition, kindCondition);
         const orderByColumn = {
           name: schoolTable.name,
           location: schoolTable.location,

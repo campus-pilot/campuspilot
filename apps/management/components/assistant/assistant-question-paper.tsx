@@ -9,6 +9,7 @@ import { DocumentPreview } from '@campuspilot/components/documents/document-cont
 import {
   draftCallsNeedingRecheck,
   draftFactsOf,
+  isStandaloneDraft,
   parseDraftCallInput,
   parseStoredDraftResult,
   saveDraftMessage,
@@ -29,6 +30,7 @@ import { RequirePermissions } from '@/components/require-permissions';
 import { useDownloadQuestionPaper } from '@/components/question-paper/use-question-paper-detail';
 import { VersionPdf } from '@/components/question-paper/version-pdf';
 import { requestErrorMessage } from '@/components/question-paper/question-paper-model';
+import { standalonePaperLabelOf } from '@/components/question-paper/paper-target';
 import { client, orpc } from '@/lib/orpc';
 
 import { draftCheckOf, paperLabelFromKey, paperLabelOf } from './assistant-question-paper-model';
@@ -90,15 +92,15 @@ export function DraftPreviewBody({
       'assistant',
       'question-paper-draft-preview',
       schoolId,
-      input.sessionId,
-      input.examSlug,
-      input.classId,
-      input.subjectSlug,
-      input.modeSlug,
+      // A standalone paper's draft (docs/personal-space.md) is named by its paper's id, an exam paper's by its key.
+      ...(isStandaloneDraft(input) ? ['standalone', input.paperId] : [input.sessionId, input.examSlug, input.classId, input.subjectSlug, input.modeSlug]),
       draftId,
       conversationId,
     ],
-    queryFn: () => client.school.previewQuestionPaperDraft({ ...input, conversationId }),
+    queryFn: () =>
+      isStandaloneDraft(input)
+        ? client.school.previewStandalonePaperDraft({ ...input, conversationId })
+        : client.school.previewQuestionPaperDraft({ ...input, conversationId }),
     staleTime: DRAFT_PREVIEW_STALE_MS,
     retry: retryUnlessRefused,
   });
@@ -122,7 +124,10 @@ const DRAFT_PREVIEW_STALE_MS = 60_000;
 function draftRecheckOptions(call: { id: string; conversationId: string }, input: DraftInput | null, stored: DraftResult | null) {
   return {
     queryKey: ['assistant', 'question-paper-draft-check', call.id],
-    queryFn: () => client.school.validateQuestionPaperDraft({ ...input!, conversationId: call.conversationId }),
+    queryFn: () =>
+      isStandaloneDraft(input!)
+        ? client.school.validateStandalonePaperDraft({ ...input!, conversationId: call.conversationId })
+        : client.school.validateQuestionPaperDraft({ ...input!, conversationId: call.conversationId }),
     enabled: !stored && Boolean(input),
     staleTime: Number.POSITIVE_INFINITY,
     gcTime: Number.POSITIVE_INFINITY,
@@ -164,23 +169,35 @@ export function useDraftVerdicts(rows: readonly AssistantTimelineRow[], conversa
  * (`paperLabelFromKey`), so Save is never blocked by a failed read.
  */
 function useDraftPaperLabel(schoolId: string, input: DraftInput | null) {
+  const exam = input && !isStandaloneDraft(input) ? input : null;
+  const standalone = input && isStandaloneDraft(input) ? input : null;
   const detail = useQuery({
     ...orpc.school.getQuestionPaperDetail.queryOptions({
       input: {
         schoolId,
-        sessionId: input?.sessionId ?? '',
-        examSlug: input?.examSlug ?? '',
-        classId: input?.classId ?? '',
-        subjectSlug: input?.subjectSlug ?? '',
-        modeSlug: input?.modeSlug ?? '',
+        sessionId: exam?.sessionId ?? '',
+        examSlug: exam?.examSlug ?? '',
+        classId: exam?.classId ?? '',
+        subjectSlug: exam?.subjectSlug ?? '',
+        modeSlug: exam?.modeSlug ?? '',
       },
     }),
-    enabled: Boolean(input),
+    enabled: exam !== null,
     retry: retryUnlessRefused,
   });
-  if (!input) return null;
+  // A standalone paper is named by its details (the same words its own screen's save request uses).
+  const standaloneDetail = useQuery({
+    ...orpc.school.getStandalonePaperDetail.queryOptions({ input: { schoolId, paperId: standalone?.paperId ?? '' } }),
+    enabled: standalone !== null,
+    retry: retryUnlessRefused,
+  });
+  if (standalone) {
+    if (standaloneDetail.data) return standalonePaperLabelOf(standaloneDetail.data.paper.details);
+    return standaloneDetail.isError ? standalonePaperLabelOf(null) : null;
+  }
+  if (!exam) return null;
   if (detail.data) return paperLabelOf(detail.data.paper);
-  return detail.isError ? paperLabelFromKey(input) : null;
+  return detail.isError ? paperLabelFromKey(exam) : null;
 }
 
 function DraftUnavailable({ ordinal, children }: { ordinal: number; children: ReactNode }) {
@@ -254,7 +271,10 @@ export function AssistantDraftCard({
       supersededBy={supersededBy}
       preview={
         facts.valid && input ? (
-          <PreviewDialog title={`Draft ${ordinal}`} description="How this draft prints with your school’s template. Nothing is saved.">
+          <PreviewDialog
+            title={`Draft ${ordinal}`}
+            description={input && isStandaloneDraft(input) ? 'How this draft prints. Nothing is saved.' : 'How this draft prints with your school’s template. Nothing is saved.'}
+          >
             <DraftPreviewBody schoolId={schoolId} conversationId={call.conversationId} input={input} draftId={facts.draftId} fill />
           </PreviewDialog>
         ) : null
@@ -268,9 +288,9 @@ export function AssistantDraftCard({
 
 /** A saved version in the Preview dialog: its PDF, under what was removed from its HTML and its figure placeholders (as in the studio). */
 function VersionPreviewBody({ view, schoolId }: { view: AssistantQuestionPaperView; schoolId: string }) {
-  const scope = { ...view, schoolId };
+  const scope = { schoolId, sessionId: view.sessionId, examSlug: view.examSlug, classId: view.classId, subjectSlug: view.subjectSlug, modeSlug: view.modeSlug };
   const notes = useQuery({
-    ...orpc.school.getQuestionPaperPreview.queryOptions({ input: scope }),
+    ...orpc.school.getQuestionPaperPreview.queryOptions({ input: { ...scope, versionNo: view.versionNo } }),
     retry: retryUnlessRefused,
   });
   return (
@@ -321,7 +341,10 @@ function VersionCard({ schoolId, view }: { schoolId: string; view: AssistantQues
       downloading={download.isPending}
       onDownload={() =>
         download.mutate(
-          { ...view, schoolId, versionNo: view.versionNo },
+          {
+            target: { schoolId, sessionId: view.sessionId, examSlug: view.examSlug, classId: view.classId, subjectSlug: view.subjectSlug, modeSlug: view.modeSlug },
+            versionNo: view.versionNo,
+          },
           { onError: (error) => toast.error(requestErrorMessage(error, 'The PDF could not be prepared.')) },
         )
       }

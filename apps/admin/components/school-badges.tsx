@@ -41,18 +41,20 @@ export function SchoolSuspendedBadge({ suspendedAt }: Pick<SchoolDto, 'suspended
 
 /**
  * The facts about a school an administrator should see wherever the school
- * is named: demo, its standing tier, its active billing period, no plan, and
+ * is named: demo, a personal space, its standing tier, its active billing period, no plan, and
  * suspended. Each is its own fact on the school and its own badge; none is
  * derived from another.
  */
 export function SchoolBadges({
   school,
 }: {
-  school: Pick<SchoolDto, 'isDemo' | 'subscribedTier' | 'planTier' | 'period' | 'suspendedAt'>;
+  school: Pick<SchoolDto, 'isDemo' | 'kind' | 'subscribedTier' | 'planTier' | 'period' | 'suspendedAt'>;
 }) {
   return (
     <>
       {school.isDemo ? <Badge variant="outline">Demo</Badge> : null}
+      {/* A person's personal space (docs/personal-space.md): its own fact, `kind`. */}
+      {school.kind === 'personal' ? <Badge variant="outline">Personal</Badge> : null}
       <SchoolSubscriptionBadge subscribedTier={school.subscribedTier} />
       <SchoolPeriodBadge period={school.period} />
       <SchoolNoPlanBadge planTier={school.planTier} />
