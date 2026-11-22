@@ -9,7 +9,7 @@ import { db } from '@campuspilot/db';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
 
 import { appRouter } from '../routers/index';
-import { SCHOOL_KIND_UNSUPPORTED_REASON, schoolKindRefusalOf } from './school-access.contract';
+import { PERSONAL_SPACE_WRITE_REFUSAL_MESSAGES, SCHOOL_KIND_UNSUPPORTED_REASON, schoolKindRefusalOf } from './school-access.contract';
 import { listingSchoolKindsOf, readSchoolKind } from './school-kind.service';
 
 /** The school kind gate (docs/personal-space.md). */
@@ -58,7 +58,8 @@ describe('the school kind gate', () => {
     const admin = createTestClient(await createAdminSession());
     await admin.systemAdmin.suspendSchool({ id: schoolId, reason: 'Test' });
     const error = await refusalOf(client.school.createStandalonePaper({ schoolId }));
-    expect(error).toMatchObject({ code: 'FORBIDDEN', data: { reason: 'SCHOOL_SUSPENDED' } });
+    // Worded for a personal space: about the person's space, never a school.
+    expect(error).toMatchObject({ code: 'FORBIDDEN', data: { reason: 'SCHOOL_SUSPENDED' }, message: PERSONAL_SPACE_WRITE_REFUSAL_MESSAGES.SCHOOL_SUSPENDED });
     // Reads keep working, and the kind refusal still comes first for a real-school procedure.
     await expect(client.school.listStandalonePapers({ schoolId })).resolves.toMatchObject({ items: [] });
     expect(schoolKindRefusalOf(await refusalOf(client.school.listSessions({ schoolId, limit: 1 })))).toBe('personal');

@@ -31,11 +31,28 @@ export const SCHOOL_SUSPENDED_MESSAGE =
 export const SCHOOL_NO_PLAN_MESSAGE =
   'This school has no active plan, so it is blocked: nothing can be changed and the features of a plan are off. Contact CampusPilot to continue.';
 
-/** The message of each refusal, as the server sends it. */
+/** The message of each refusal, as the server sends it for a real school. */
 export const SCHOOL_WRITE_REFUSAL_MESSAGES = {
   SCHOOL_SUSPENDED: SCHOOL_SUSPENDED_MESSAGE,
   SCHOOL_NO_PLAN: SCHOOL_NO_PLAN_MESSAGE,
 } as const satisfies Record<SchoolWriteRefusalReason, string>;
+
+/**
+ * The same refusals as a personal space's owner reads them
+ * (docs/personal-space.md): in the words of the space's plan notice (the
+ * trial ended, the papers can still be viewed and downloaded, contact us),
+ * never about a school or billing. The reason is the same; only the words
+ * differ, so clients still decide from `data.reason`.
+ */
+export const PERSONAL_SPACE_WRITE_REFUSAL_MESSAGES = {
+  SCHOOL_SUSPENDED: 'Your personal space is suspended, so nothing can be changed. You can still view and download your papers. Contact us to continue.',
+  SCHOOL_NO_PLAN: 'Your free trial has ended, so nothing can be changed. You can still view and download your papers. Contact us to keep creating papers.',
+} as const satisfies Record<SchoolWriteRefusalReason, string>;
+
+/** The message of a read-only refusal for a school of `kind`. */
+export function schoolWriteRefusalMessageOf(reason: SchoolWriteRefusalReason, kind: SchoolKind): string {
+  return kind === 'personal' ? PERSONAL_SPACE_WRITE_REFUSAL_MESSAGES[reason] : SCHOOL_WRITE_REFUSAL_MESSAGES[reason];
+}
 
 /** `data` of the read-only school FORBIDDEN error. */
 export const schoolWriteRefusedDataSchema = z.object({

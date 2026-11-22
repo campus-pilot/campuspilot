@@ -9,8 +9,8 @@ import { extractQuestionPaperFragment, hasPaperContent, questionPaperFragmentSha
 import { and, eq, inArray, sql } from 'drizzle-orm';
 
 import { resolveAssistantAccess } from '../../assistant/access';
-import { SCHOOL_SUSPENDED_REASON } from '../../school-access/school-access.contract';
-import { readSchoolWriteFacts, resolveSchoolWriteRefusal } from '../../school-access/school-access.service';
+import { SCHOOL_SUSPENDED_REASON, schoolWriteRefusalMessageOf } from '../../school-access/school-access.contract';
+import { readSchoolWriteFacts, resolveSchoolWriteRefusal, schoolKindForRefusal } from '../../school-access/school-access.service';
 import type { PaperKey, TemplatePrints } from '../../routers/school/question-paper/question-paper.dto';
 import { hasSelectedQuestionPaperTemplate } from '../../routers/school/question-paper/question-paper.render';
 import { readTemplatePrints } from '../../routers/school/question-paper/question-paper.template-prints';
@@ -201,7 +201,11 @@ function accessFailure(code: string): QuestionPaperJobErrorCode {
 async function assertSchoolStillWritable(db: Database, schoolId: string): Promise<void> {
   const facts = await readSchoolWriteFacts(db, schoolId);
   const refusal = facts ? resolveSchoolWriteRefusal(facts) : null;
-  if (refusal) throw new QuestionPaperJobFailure(refusal === SCHOOL_SUSPENDED_REASON ? 'school_suspended' : 'no_plan');
+  if (!refusal) return;
+  const code = refusal === SCHOOL_SUSPENDED_REASON ? 'school_suspended' : 'no_plan';
+  // A personal space's owner reads the refusal in their space's words (docs/personal-space.md), never about a school.
+  const kind = await schoolKindForRefusal(db, schoolId);
+  throw new QuestionPaperJobFailure(code, kind === 'personal' ? schoolWriteRefusalMessageOf(refusal, kind) : QUESTION_PAPER_JOB_FAILURES[code]);
 }
 
 /** The failure for a model request that failed for good, by what the provider said about it. */

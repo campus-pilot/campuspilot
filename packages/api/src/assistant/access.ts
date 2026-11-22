@@ -7,8 +7,15 @@ import { ORPCError } from '@orpc/server';
 import { and, eq } from 'drizzle-orm';
 
 import { isSchoolFeatureEnabled, schoolFeatureDisabledError } from '../feature-flags/feature-flags.service';
-import { readSchoolWriteFacts, resolveSchoolWriteRefusal, schoolNoPlanError, schoolSuspendedError } from '../school-access/school-access.service';
-import { SCHOOL_NO_PLAN_MESSAGE, SCHOOL_SUSPENDED_MESSAGE } from '../school-access/school-access.contract';
+import { readSchoolWriteFacts, resolveSchoolWriteRefusal, schoolKindForRefusal } from '../school-access/school-access.service';
+import {
+  SCHOOL_NO_PLAN_MESSAGE,
+  SCHOOL_NO_PLAN_REASON,
+  SCHOOL_SUSPENDED_MESSAGE,
+  SCHOOL_SUSPENDED_REASON,
+  schoolWriteRefusalMessageOf,
+  type SchoolWriteRefusedData,
+} from '../school-access/school-access.contract';
 import { spendReachedLimit } from './money';
 import { readAssistantEnabledRoles } from './roles';
 import { schoolWindowSpendUsd } from './spend';
@@ -94,11 +101,13 @@ const MESSAGES: Record<AssistantAccessRefusalCode, string> = {
   limit_reached: 'This school has reached its AI assistant spending limit for the current period.',
 };
 
+/** A refused decision; `message` replaces the code's own words where the school's kind words it differently. */
 function refused(
   facts: Omit<AssistantAccessDecision, 'allowed' | 'refusal'>,
   code: AssistantAccessRefusalCode,
+  message: string = MESSAGES[code],
 ): AssistantAccessDecision {
-  return { ...facts, allowed: false, refusal: { code, message: MESSAGES[code] } };
+  return { ...facts, allowed: false, refusal: { code, message } };
 }
 
 /**
@@ -180,8 +189,11 @@ export async function resolveAssistantAccess(
     noPlan: writeFacts !== null && !writeFacts.hasActivePlan,
   };
   const writeRefusal = writeFacts && resolveSchoolWriteRefusal(writeFacts);
-  if (writeRefusal === 'SCHOOL_SUSPENDED') return refused(withSuspension, 'school_suspended');
-  if (writeRefusal === 'SCHOOL_NO_PLAN') return refused(withSuspension, 'no_plan');
+  if (writeRefusal) {
+    // Worded for the school's kind: a personal space's owner is told about their trial, not a school's plan.
+    const message = schoolWriteRefusalMessageOf(writeRefusal, await schoolKindForRefusal(db, schoolId));
+    return refused(withSuspension, writeRefusal === 'SCHOOL_SUSPENDED' ? 'school_suspended' : 'no_plan', message);
+  }
 
   const limitReached =
     monthlyLimitUsd !== null && spendReachedLimit(await schoolWindowSpendUsd(db, schoolId, input.now), monthlyLimitUsd);
@@ -202,8 +214,11 @@ export async function resolveAssistantAccess(
  */
 export function assistantAccessError(refusal: AssistantAccessRefusal): ORPCError<string, unknown> {
   if (refusal.code === 'feature_disabled') return schoolFeatureDisabledError('assistant');
-  if (refusal.code === 'school_suspended') return schoolSuspendedError();
-  if (refusal.code === 'no_plan') return schoolNoPlanError();
+  // The platform's read-only refusal, with the message the decision worded for the school's kind.
+  if (refusal.code === 'school_suspended' || refusal.code === 'no_plan') {
+    const reason = refusal.code === 'school_suspended' ? SCHOOL_SUSPENDED_REASON : SCHOOL_NO_PLAN_REASON;
+    return new ORPCError('FORBIDDEN', { message: refusal.message, data: { reason } satisfies SchoolWriteRefusedData });
+  }
   if (refusal.code === 'limit_reached') {
     return new ORPCError('PRECONDITION_FAILED', { message: refusal.message, data: { reason: refusal.code } });
   }

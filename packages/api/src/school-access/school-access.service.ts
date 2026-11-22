@@ -4,6 +4,7 @@ import { joinActiveBillingPeriod, type ActiveBillingPeriod } from '@campuspilot/
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
 import { schoolBillingPeriodTable } from '@campuspilot/db/schema/school-billing';
+import type { SchoolKind } from '@campuspilot/db/school-kind';
 import { ORPCError } from '@orpc/server';
 import { and, eq } from 'drizzle-orm';
 
@@ -11,7 +12,7 @@ import type { Context } from '../context';
 import {
   SCHOOL_NO_PLAN_REASON,
   SCHOOL_SUSPENDED_REASON,
-  SCHOOL_WRITE_REFUSAL_MESSAGES,
+  schoolWriteRefusalMessageOf,
   type SchoolWriteRefusalReason,
   type SchoolWriteRefusedData,
 } from './school-access.contract';
@@ -62,23 +63,35 @@ export function resolveSchoolWriteRefusal(facts: SchoolWriteFacts): SchoolWriteR
  * The one error every surface throws for a change asked of a read-only
  * school: FORBIDDEN with `data: { reason }`. A plain permission denial is
  * FORBIDDEN without that data, so clients tell them apart
- * (`schoolWriteRefusalOf`) without parsing the message.
+ * (`schoolWriteRefusalOf`) without parsing the message. The message is the
+ * school kind's (`schoolWriteRefusalMessageOf`): a personal space's owner is
+ * told about their trial, not about a school.
  */
-export function schoolWriteRefusedError(reason: SchoolWriteRefusalReason) {
+export function schoolWriteRefusedError(reason: SchoolWriteRefusalReason, kind: SchoolKind) {
   return new ORPCError('FORBIDDEN', {
-    message: SCHOOL_WRITE_REFUSAL_MESSAGES[reason],
+    message: schoolWriteRefusalMessageOf(reason, kind),
     data: { reason } satisfies SchoolWriteRefusedData,
   });
 }
 
-/** The refusal for a suspended school. */
-export function schoolSuspendedError() {
-  return schoolWriteRefusedError(SCHOOL_SUSPENDED_REASON);
+/** The refusal for a suspended school of `kind`. */
+export function schoolSuspendedError(kind: SchoolKind) {
+  return schoolWriteRefusedError(SCHOOL_SUSPENDED_REASON, kind);
 }
 
-/** The refusal for a school without an active plan. */
-export function schoolNoPlanError() {
-  return schoolWriteRefusedError(SCHOOL_NO_PLAN_REASON);
+/** The refusal for a school of `kind` without an active plan. */
+export function schoolNoPlanError(kind: SchoolKind) {
+  return schoolWriteRefusedError(SCHOOL_NO_PLAN_REASON, kind);
+}
+
+/**
+ * The school's kind, read only to word a refusal (an existing school's kind;
+ * `school` for one that is gone). A direct read rather than the cached
+ * `readSchoolKind`, which lives with the gate that calls this file.
+ */
+export async function schoolKindForRefusal(db: DatabaseExecutor, schoolId: string): Promise<SchoolKind> {
+  const [row] = await db.select({ kind: schoolTable.kind }).from(schoolTable).where(eq(schoolTable.id, schoolId)).limit(1);
+  return row?.kind ?? 'school';
 }
 
 /**
@@ -131,7 +144,7 @@ export async function isSchoolSuspended(db: DatabaseExecutor, schoolId: string):
 export async function assertSchoolWritable(db: DatabaseExecutor, schoolId: string): Promise<void> {
   const facts = await readSchoolWriteFacts(db, schoolId);
   const refusal = facts && resolveSchoolWriteRefusal(facts);
-  if (refusal) throw schoolWriteRefusedError(refusal);
+  if (refusal) throw schoolWriteRefusedError(refusal, await schoolKindForRefusal(db, schoolId));
 }
 
 /**
@@ -155,7 +168,7 @@ export async function assertSchoolWritableByCaller(context: Pick<Context, 'db' |
   if (!userId) return;
   const facts = await readSchoolWriteFacts(context.db, schoolId, { memberUserId: userId });
   const refusal = facts && resolveSchoolWriteRefusal(facts);
-  if (refusal) throw schoolWriteRefusedError(refusal);
+  if (refusal) throw schoolWriteRefusedError(refusal, await schoolKindForRefusal(context.db, schoolId));
 }
 
 /** What the school's own apps show about its plan ({@link schoolPlanFactsOf}). */
