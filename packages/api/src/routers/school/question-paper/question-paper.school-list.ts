@@ -19,8 +19,8 @@ import type {
 
 /**
  * A school's Question papers page (docs/question-papers.md "The Question
- * papers page"): the session's exam papers and quick papers in one list, read
- * in one query so search, filters, order and pages are the database's.
+ * papers page"): the session's exam papers and the school's quick papers (which
+ * belong to no session) in one list, read in one query so search, filters, order and pages are the database's.
  *
  * What the caller sees is two separate grants, each decided by the procedure
  * and passed in: `exam`, the classes whose exam papers they may read

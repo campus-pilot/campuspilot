@@ -118,7 +118,7 @@ export function createManagementCommandRegistry(
     {
       id: 'question-papers',
       label: 'Question papers',
-      description: 'Open quick papers and exam papers of the session',
+      description: "Open quick papers and the session's exam papers",
       icon: NotebookPen,
       keywords: ['question paper', 'papers', 'quick paper', 'exam paper', 'ai'],
       defaultSuggestion: false,

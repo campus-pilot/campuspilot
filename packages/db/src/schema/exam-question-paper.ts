@@ -226,7 +226,7 @@ export const examQuestionPaperTable = pgTable(
     ),
     index("exam_question_paper_class_idx").on(table.classId),
     index("exam_question_paper_created_by_idx").on(table.createdBy),
-    /** A personal space's papers, most recently changed first. */
+    /** A school's standalone papers (a personal space's papers, a school's quick papers), most recently changed first. */
     index("exam_question_paper_standalone_idx")
       .on(table.schoolId, table.updatedAt)
       .where(sql`${table.kind} = 'standalone'`),

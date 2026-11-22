@@ -2,6 +2,7 @@ import { QUESTION_PAPER_EXAMPLES } from '@campuspilot/question-paper/examples';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { expectPermissionDenied } from '../../../../test/feature-flags';
+import { createTestClient, createTestSession } from '../../../../test/fixtures';
 import { createQuestionPaperWorld, type QuestionPaperWorld } from '../../../../test/question-paper';
 
 /** The Question papers page of a school (docs/question-papers.md "The Question papers page"). */
@@ -80,6 +81,20 @@ describe('the Question papers page', () => {
     expect(new Set(await list('teacher'))).toEqual(new Set([generatedExam, generatedQuick, draftQuick]));
     // The other teacher's class has no exam paper; they see their own quick paper only.
     expect(await list('otherTeacher')).toEqual([otherTeachersQuick]);
+  });
+
+  it("lists quick papers on every session's page, and exam papers only on their own session's", async () => {
+    const other = await createTestSession({ schoolId: world.schoolId, sessionStartYear: 2025, sessionEndYear: 2026, isActive: false });
+    const page = await world.people.principal.client.school.listSchoolQuestionPapers({ schoolId: world.schoolId, sessionId: other.id });
+    expect(page.items.map((item) => item.paperId)).toEqual(expect.arrayContaining([generatedQuick, draftQuick, otherTeachersQuick]));
+    expect(page.items.map((item) => item.type)).not.toContain('exam');
+    expect(page.pagination.totalItems).toBe(3);
+    const options = await world.people.principal.client.school.listSchoolQuestionPaperFilterOptions({ schoolId: world.schoolId, sessionId: other.id });
+    expect(options.examNames).not.toContain('Term I Examination');
+  });
+
+  it('refuses an anonymous caller', async () => {
+    await expect(createTestClient(null).school.listSchoolQuestionPapers({ schoolId: world.schoolId, sessionId: world.sessionId })).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
   });
 
   it('refuses someone who may read neither kind of paper', async () => {

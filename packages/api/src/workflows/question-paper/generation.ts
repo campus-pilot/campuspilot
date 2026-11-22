@@ -13,6 +13,7 @@ import { SCHOOL_SUSPENDED_REASON, schoolWriteRefusalMessageOf } from '../../scho
 import { readSchoolWriteFacts, resolveSchoolWriteRefusal, schoolKindForRefusal } from '../../school-access/school-access.service';
 import type { PaperKey, TemplatePrints } from '../../routers/school/question-paper/question-paper.dto';
 import { hasSelectedQuestionPaperTemplate } from '../../routers/school/question-paper/question-paper.render';
+import { currentQuickPaperPrintedDetails, isQuickPaperNoActiveSessionError } from '../../routers/school/question-paper/question-paper.print-context';
 import { readTemplatePrints } from '../../routers/school/question-paper/question-paper.template-prints';
 import {
   assertPaperWritable,
@@ -450,6 +451,16 @@ async function planInputs(deps: GenerationDeps, begun: BegunJob, model: Question
   // A plain paper (a personal space's) prints in the built-in shell: no template is needed, and it prints nothing around
   // the body. Every other paper, a school's quick paper included, prints with the school's selected template.
   if (printLayoutOf(scope) !== 'plain' && !(await hasSelectedQuestionPaperTemplate(db, begun.schoolId))) throw new QuestionPaperJobFailure('template_missing');
+  // A quick paper's heading prints the school's active session: without one the version could not be saved, so the
+  // job ends here, before any model cost (the start procedure refused it too; this covers a school that lost it since).
+  if (isStandalonePaper(scope) && printLayoutOf(scope) === 'school_template') {
+    try {
+      await currentQuickPaperPrintedDetails(db, scope);
+    } catch (error) {
+      if (isQuickPaperNoActiveSessionError(error)) throw new QuestionPaperJobFailure('no_active_session', undefined, (error as Error).message);
+      throw error;
+    }
+  }
 
   const rows = await db
     .select()
@@ -737,6 +748,8 @@ async function savePaper(deps: GenerationDeps, input: QuestionPaperJobInput, beg
     const limit = personalSpaceLimitOf(error);
     if (limit === 'storage') throw new QuestionPaperJobFailure('storage_full', undefined, (error as Error).message);
     if (limit === 'versions') throw new QuestionPaperJobFailure('version_limit', undefined, (error as Error).message);
+    // A quick paper prints the school's active session: the school has none any more (checked when the job started).
+    if (isQuickPaperNoActiveSessionError(error)) throw new QuestionPaperJobFailure('no_active_session', undefined, (error as Error).message);
     if (error instanceof ORPCError && error.code === 'BAD_REQUEST') {
       // Four different BAD_REQUESTs reach here: the paper was locked meanwhile (session or exam ended), the plan lost the
       // paper's mode meanwhile, the document failed the shared check, or the render refused it (too large or too complex).

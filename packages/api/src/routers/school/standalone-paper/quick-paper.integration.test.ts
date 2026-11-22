@@ -10,10 +10,24 @@ import { setTestSchoolFeature } from '../../../../test/fixtures';
 import { createQuestionPaperWorld, type QuestionPaperWorld } from '../../../../test/question-paper';
 import { QUICK_PAPER_NO_ACTIVE_SESSION_REASON } from '../question-paper/question-paper.print-context';
 import { STANDALONE_PAPER_MAX_VERSIONS, STANDALONE_PAPERS_PER_SPACE_LIMIT } from '../../../personal-space/personal-space.limits';
+import { configureQuestionPaperModel, type QuestionPaperModel } from '../../../workflows/question-paper/model';
 
 /** Quick papers: standalone papers of a real school (docs/question-papers.md "Quick papers in a school"). */
 
 const { 'english-science': ENGLISH_SCIENCE } = QUESTION_PAPER_EXAMPLES;
+
+/** A configured model that the refusals under test must never reach. */
+const UNCALLED_MODEL: QuestionPaperModel = {
+  provider: 'gemini',
+  model: 'fake-configured-model',
+  prices: { inputUsdPerMtok: '2', outputUsdPerMtok: '10', cacheReadUsdPerMtok: '0.2', cacheWriteUsdPerMtok: '2.5' },
+  imageMimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
+  generate: async () => {
+    throw new Error('Starting a generation calls no model.');
+  },
+  failureKind: () => 'unknown',
+  billedUsageOf: () => null,
+};
 
 const DETAILS = { schoolName: 'Question Paper School', className: 'Class 8', subjectName: 'Science', examName: 'Unit Test 1', maxMarks: 25 };
 
@@ -23,7 +37,7 @@ describe('quick papers in a school', () => {
     world = await createQuestionPaperWorld();
   });
 
-  it('creates a quick paper in a session that prints with the school template, its details in the heading', async () => {
+  it('creates a quick paper in no session that prints with the school template, its details in the heading', async () => {
     const { teacher } = world.people;
     const { schoolId } = world;
     const { paperId, reused } = await teacher.client.school.createStandalonePaper({ schoolId });
@@ -145,6 +159,20 @@ describe('quick papers need an active session to print', () => {
     await expect(
       teacher.client.school.saveStandalonePaperVersion({ schoolId, paperId, expectedVersionNo: 0, html: ENGLISH_SCIENCE, details: DETAILS }),
     ).rejects.toMatchObject({ code: 'BAD_REQUEST', data: { reason: QUICK_PAPER_NO_ACTIVE_SESSION_REASON } });
+    await expect(teacher.client.school.previewStandalonePaperDraft({ schoolId, paperId, html: ENGLISH_SCIENCE })).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      data: { reason: QUICK_PAPER_NO_ACTIVE_SESSION_REASON },
+    });
+    // A generation is refused up front, before its job is queued and before any model cost.
+    configureQuestionPaperModel(UNCALLED_MODEL);
+    try {
+      await expect(teacher.client.school.startStandalonePaperGeneration({ schoolId, paperId, expectedPageRevision: 0 })).rejects.toMatchObject({
+        code: 'BAD_REQUEST',
+        data: { reason: QUICK_PAPER_NO_ACTIVE_SESSION_REASON },
+      });
+    } finally {
+      configureQuestionPaperModel(undefined);
+    }
   });
 });
 
