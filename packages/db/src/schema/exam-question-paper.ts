@@ -275,6 +275,14 @@ export const examQuestionPaperPageTable = pgTable(
      */
     derivativeRevision: integer("derivative_revision").notNull().default(0),
     thumbS3Key: text("thumb_s3_key"),
+    /**
+     * The stored thumbnail's size in bytes, written with `thumb_s3_key`. A
+     * fact of its own so a personal space's storage quota adds what is
+     * stored instead of estimating it (docs/personal-space.md). Null while
+     * there is no thumbnail, and for thumbnails made before this column
+     * existed (exam papers only: no personal space predates it).
+     */
+    thumbByteSize: integer("thumb_byte_size"),
     modelS3Key: text("model_s3_key"),
     modelContentType: text("model_content_type"),
     modelByteSize: integer("model_byte_size"),
@@ -295,6 +303,10 @@ export const examQuestionPaperPageTable = pgTable(
     check(
       "exam_question_paper_page_derivative_check",
       sql`(${table.derivativeStatus} = 'ready') = (${table.thumbS3Key} is not null and ${table.modelS3Key} is not null)`,
+    ),
+    check(
+      "exam_question_paper_page_thumb_size_check",
+      sql`${table.thumbByteSize} is null or (${table.thumbS3Key} is not null and ${table.thumbByteSize} >= 1)`,
     ),
     check(
       "exam_question_paper_page_rotation_check",

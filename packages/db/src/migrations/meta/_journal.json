@@ -561,6 +561,13 @@
       "when": 1795308718119,
       "tag": "0079_personal-space",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1795315666077,
+      "tag": "0080_personal-space-limits",
+      "breakpoints": true
     }
   ]
 }

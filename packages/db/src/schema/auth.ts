@@ -71,6 +71,15 @@ export const user = pgTable("user", {
    * `school_creation_request`.
    */
   schoolCreationLimit: integer("school_creation_limit").notNull().default(1),
+  /**
+   * When this person's personal space was created (docs/personal-space.md);
+   * null while they never had one. Set in the transaction that provisions
+   * it and never cleared, not even when the space is deleted: a person gets
+   * one personal space over the life of the account, and the refusal
+   * `already_has_one` is decided from this fact, not from the school rows
+   * that exist today.
+   */
+  personalSpaceCreatedAt: timestamp("personal_space_created_at", { withTimezone: true }),
 }, (table) => [
   // A placeholder email can never sign in, so such a user must keep a phone
   // number; otherwise the account would have no sign-in identifier at all.
