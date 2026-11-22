@@ -15,6 +15,10 @@ describe('normalizeQuestionPaperDetail', () => {
   it('collapses whitespace, drops control characters and trims', () => {
     expect(normalizeQuestionPaperDetail('  Class\n  5 \u0007 ')).toBe('Class 5');
   });
+  it('removes angle brackets, so a name never carries markup into a template', () => {
+    expect(normalizeQuestionPaperDetail('<div class="qp-body" id="qp-body-slot"></div>Class 5')).toBe('div class="qp-body" id="qp-body-slot"/divClass 5');
+    expect(normalizeQuestionPaperDetail('<>')).toBeNull();
+  });
   it('treats empty and non-string values as not stated', () => {
     expect(normalizeQuestionPaperDetail('   ')).toBeNull();
     expect(normalizeQuestionPaperDetail(5)).toBeNull();

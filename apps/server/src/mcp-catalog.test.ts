@@ -197,6 +197,9 @@ const HIDDEN_TOOLS = [
   'school.getStandalonePaperPreview',
   'school.previewStandalonePaperDraft',
   'school.getStandalonePaperDownload',
+  // The school's Question papers page (a screen read; agents use the per-kind paper tools).
+  'school.listSchoolQuestionPapers',
+  'school.listSchoolQuestionPaperFilterOptions',
 ];
 
 /**
@@ -306,7 +309,7 @@ describe('catalog metadata', () => {
     // +3 exam timetable publication tools (publish preview, publish, withdraw);
     // +8 question paper tools (list, get, versions, learn, validate, save, get draft, edit);
     // +1 school.updateExamClasses (change the classes taking part in an exam);
-    // +10 standalone paper tools of a personal space (list, filter options, create,
+    // +10 standalone paper tools of a personal space and a school's quick papers (list, filter options, create,
     // get, get draft, versions, learn, validate, save, edit);
     // +1 systemAdmin.getPersonalSpaceStats (the admin dashboard's personal space counts);
     // +4 school.addClassSubject, updateClassSubject, removeClassSubject and
@@ -806,10 +809,11 @@ describe('assistant service view', () => {
       expect(typeof tool._meta?.[ASSISTANT_TOOL_META.module]).toBe('string');
       // Every school sees the same listing; the worker drops the tools of features its school lacks.
       expect(tool._meta?.[ASSISTANT_TOOL_META.features], tool.name).toEqual([...definitions.get(tool.name)!.features]);
-      // And the kinds of school it serves, so a personal space is offered only its own tools.
+      // And the kinds of school it serves, so a personal space is offered only the tools that serve it.
       expect(tool._meta?.[ASSISTANT_TOOL_META.schoolKinds], tool.name).toEqual([...definitions.get(tool.name)!.schoolKinds]);
     }
-    expect(tools.find(({ name }) => name === 'school.listStandalonePapers')?._meta?.[ASSISTANT_TOOL_META.schoolKinds]).toEqual(['personal']);
+    // A school's quick papers and a personal space's papers share the standalone paper tools.
+    expect(tools.find(({ name }) => name === 'school.listStandalonePapers')?._meta?.[ASSISTANT_TOOL_META.schoolKinds]).toEqual(['school', 'personal']);
     expect(tools.find(({ name }) => name === 'school.listStudents')?._meta?.[ASSISTANT_TOOL_META.schoolKinds]).toEqual(['school']);
     // Account-level tools name no school, so every kind of school is offered them.
     expect(tools.find(({ name }) => name === 'school.listMySchools')?._meta?.[ASSISTANT_TOOL_META.schoolKinds]).toEqual(['school', 'personal']);

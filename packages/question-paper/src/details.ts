@@ -42,15 +42,22 @@ export const EMPTY_QUESTION_PAPER_DETAILS: QuestionPaperDetails = { schoolName: 
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
 
+// Angle brackets: a detail is a plain name, never markup.
+const ANGLE_BRACKETS = /[<>]/g;
+
 /**
  * One detail as stored: a string with its whitespace collapsed, control
- * characters removed, trimmed and cut to {@link QUESTION_PAPER_DETAIL_MAX_CHARS}
- * (by code point, so a surrogate pair is never split); null for anything else
- * or nothing left.
+ * characters and angle brackets removed, trimmed and cut to
+ * {@link QUESTION_PAPER_DETAIL_MAX_CHARS} (by code point, so a surrogate pair
+ * is never split); null for anything else or nothing left. Angle brackets go
+ * because a school's quick paper prints its details through the school's
+ * template, which may output a value raw (`{{{exam.name}}}`): a name holding
+ * markup, the body slot's own above all (`QUESTION_PAPER_SLOT`, which a print
+ * refuses to find twice), could otherwise reach the page as elements.
  */
 export function normalizeQuestionPaperDetail(value: unknown): string | null {
   if (typeof value !== 'string') return null;
-  const cleaned = value.replace(/\s+/g, ' ').replace(CONTROL, '').trim();
+  const cleaned = value.replace(/\s+/g, ' ').replace(CONTROL, '').replace(ANGLE_BRACKETS, '').trim();
   if (cleaned === '') return null;
   const points = Array.from(cleaned);
   return points.length > QUESTION_PAPER_DETAIL_MAX_CHARS ? points.slice(0, QUESTION_PAPER_DETAIL_MAX_CHARS).join('').trim() : cleaned;

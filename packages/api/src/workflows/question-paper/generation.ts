@@ -710,7 +710,7 @@ async function validateAnswer(deps: GenerationDeps, plan: Plan, text: string, op
 
 /** The repair problem of a standalone paper's answer without a readable details block. */
 export const DETAILS_MISSING_PROBLEM =
-  'The answer has no readable paper-details block. After the fragment, add the fenced block labelled paper-details with one JSON object: schoolName, className, subjectName and examName as the paper prints them, each null when the paper does not state it.';
+  'The answer has no readable paper-details block. After the fragment, add the fenced block labelled paper-details with one JSON object: schoolName, className, subjectName and examName as the paper prints them, and maxMarks as a whole number, each null when the paper does not state it.';
 
 /** Saves the version through the one function chat uses; idempotent per job id. */
 async function savePaper(deps: GenerationDeps, input: QuestionPaperJobInput, begun: BegunJob, plan: Plan, html: string, details: QuestionPaperDetails | 'keep' | undefined) {
