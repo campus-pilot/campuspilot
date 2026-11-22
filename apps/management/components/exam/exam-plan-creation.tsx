@@ -5,7 +5,14 @@ import { z } from 'zod';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import type { ExamPlanPreviewDto } from '@campuspilot/api/routers/school/exam/exam.dto';
 import { ExamClassSelection } from '@campuspilot/components/exam/exam-class-selection';
-import { allSelectableClassIds } from '@campuspilot/components/exam/exam-class-selection-model';
+import {
+  NO_PLAN_SELECTION_CHANGES,
+  applyPlanSelectionChanges,
+  changesAfterSubjectAdded,
+  planSelectionChanges,
+  type PlanSelectionChanges,
+  type SubjectChoice,
+} from '@campuspilot/components/exam/exam-class-selection-model';
 import {
   Dialog,
   DialogContent,
@@ -27,10 +34,15 @@ import {
 import { errorMessage, schoolPermission, type ExamScope } from './exam-model';
 import {
   classSelectionFormOptions,
+  createPlanBase,
   fieldError,
   selectedPlanCount,
   selectionIssue,
+  subjectsForClasses,
+  type ClassSelectionValues,
 } from './exam-class-model';
+import { ExamAddClassButton, ExamAddClassDialog } from './exam-add-class';
+import { ExamAddSubjectButton, ExamAddSubjectDialog } from './exam-add-subject';
 
 export function ExamPlanCreation({
   scope,
@@ -73,9 +85,11 @@ export function ExamPlanCreation({
                     <DialogHeader>
                       <DialogTitle>Review exam plan</DialogTitle>
                       <DialogDescription>
-                        Choose the classes taking part. Their plans are
-                        generated from class settings. Start the examination
-                        when you are ready to enter results.
+                        Choose the classes taking part and, per class, the
+                        subjects that get a plan. Subjects missing here can be
+                        added for this examination only or to the classroom,
+                        and a missing class can be added to the school. Start
+                        the examination when you are ready to enter results.
                       </DialogDescription>
                     </DialogHeader>
                     {reviewing && (
@@ -96,11 +110,25 @@ export function ExamPlanCreation({
   );
 }
 /**
+ * What the review keeps outside its keyed form: the person's changes to
+ * carry, the class whose Add subject dialog is open and whether the Add
+ * classroom dialog is open (both dialogs outlive the remount their save causes).
+ */
+type CarryValues = { changes: PlanSelectionChanges; addingTo: string | null; addingClass: boolean };
+const carrySchema = z.object({ changes: z.custom<PlanSelectionChanges>(), addingTo: z.string().nullable(), addingClass: z.boolean() });
+
+/**
  * Loads the review and renders a fresh form per `configurationVersion`. The
  * server's refusal is held here, outside the keyed form, until the next
  * attempt or until the dialog closes: a changed configuration remounts the
  * form, and keeping the refusal out of the form's error map keeps Create exam
  * plan available for a retry (see `classSelectionFormOptions`).
+ *
+ * The person's changes are held here too (`carry`): adding a subject changes
+ * the review, which remounts the form, and the new form starts from the new
+ * review's defaults with those changes applied (`applyPlanSelectionChanges`).
+ * A class that gets its first subject is selected. A class added with Add
+ * classroom has no subjects yet, so it joins the review unselected.
  */
 function GenerationPreview({
   scope,
@@ -118,52 +146,98 @@ function GenerationPreview({
     defaultValues: { message: null as string | null },
     validators: { onChange: z.object({ message: z.string().nullable() }) },
   });
+  const carry = useForm({
+    defaultValues: { changes: NO_PLAN_SELECTION_CHANGES, addingTo: null, addingClass: false } as CarryValues,
+    validators: { onChange: carrySchema },
+  });
   if (query.isPending) return <LoadingExam />;
   if (!query.data || query.isError)
     return <ReadError error={query.error} retry={query.refetch} />;
+  const preview = query.data;
+  const base = createPlanBase(preview);
+  const remember = (value: ClassSelectionValues) => carry.setFieldValue('changes', planSelectionChanges(base, value));
+  const added = (classId: string, subjectSlug: string) =>
+    carry.setFieldValue('changes', changesAfterSubjectAdded(preview.classes, carry.state.values.changes, classId, subjectSlug));
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <refusal.Subscribe selector={(state) => state.values.message}>
         {(message) => message && <Notice error>{message}</Notice>}
       </refusal.Subscribe>
       <GenerationForm
-        key={query.data.configurationVersion}
+        key={preview.configurationVersion}
         scope={scope}
-        preview={query.data}
+        preview={preview}
+        initial={applyPlanSelectionChanges(preview.classes, base, carry.state.values.changes)}
         active={active && !query.isFetching}
         onCancel={onCancel}
         onRefusal={(message) => refusal.setFieldValue('message', message)}
+        onSelectionChange={remember}
+        onAddSubject={(classId) => carry.setFieldValue('addingTo', classId)}
+        onAddClass={() => carry.setFieldValue('addingClass', true)}
       />
+      <carry.Subscribe selector={(state) => state.values.addingTo}>
+        {(addingTo) => {
+          const schoolClass = preview.classes.find((entry) => entry.classId === addingTo);
+          return schoolClass ? (
+            <ExamAddSubjectDialog
+              scope={scope}
+              schoolClass={schoolClass}
+              onAdded={(subjectSlug) => added(schoolClass.classId, subjectSlug)}
+              onClose={() => carry.setFieldValue('addingTo', null)}
+            />
+          ) : null;
+        }}
+      </carry.Subscribe>
+      <carry.Subscribe selector={(state) => state.values.addingClass}>
+        {(addingClass) =>
+          addingClass ? <ExamAddClassDialog scope={scope} onClose={() => carry.setFieldValue('addingClass', false)} /> : null
+        }
+      </carry.Subscribe>
     </div>
   );
 }
 
-/** Every class that can take part starts selected, which creates the same plans as generating for the whole school. */
+/**
+ * The review form. A fresh review starts with no class selected and every
+ * subject of every class chosen; Select all / Deselect all choose classes,
+ * and each class's breakdown chooses its subjects. The API still treats a
+ * request without `classIds` as every class with subjects; this dialog
+ * always sends the classes and their subjects.
+ */
 function GenerationForm({
   scope,
   preview,
+  initial,
   active,
   onCancel,
   onRefusal,
+  onSelectionChange,
+  onAddSubject,
+  onAddClass,
 }: {
   scope: ExamScope;
   preview: ExamPlanPreviewDto;
+  initial: { classIds: string[]; subjects: SubjectChoice };
   active: boolean;
   onCancel: () => void;
   /** Shows (or, with null, clears) the server's refusal outside this keyed form. */
   onRefusal: (message: string | null) => void;
+  onSelectionChange: (value: ClassSelectionValues) => void;
+  onAddSubject: (classId: string) => void;
+  onAddClass: () => void;
 }) {
   const queries = useExamCache();
   const exists = preview.existingPlanCount > 0;
   const form = useForm(
     classSelectionFormOptions({
-      classIds: allSelectableClassIds(preview.classes),
-      save: async (classIds) => {
-        if (!active || exists || selectionIssue(preview, classIds)) return;
+      ...initial,
+      save: async ({ classIds, subjects }) => {
+        if (!active || exists || selectionIssue(preview, classIds, subjects)) return;
         const result = await client.school.generateExamPlan({
           ...scope,
           configurationVersion: preview.configurationVersion,
           classIds,
+          subjects: subjectsForClasses(classIds, subjects),
         });
         toast.success(
           `Exam plan created for ${result.createdCount} class subjects.`,
@@ -189,8 +263,10 @@ function GenerationForm({
           queries.plans(scope),
         ]);
       },
+      onSelectionChange,
     }),
   );
+  const editable = active && !exists;
   return (
     <form
       className="flex min-w-0 flex-col gap-4"
@@ -199,40 +275,63 @@ function GenerationForm({
         void form.handleSubmit();
       }}
     >
-      <form.Field name="classIds">
-        {(field) => (
-          <ExamClassSelection
-            classes={preview.classes}
-            selected={field.state.value}
-            disabled={!active || exists}
-            error={fieldError(field.state.meta.errors)}
-            onChange={(classIds) => field.handleChange(classIds)}
-          />
+      <form.Field name="subjects">
+        {(subjectsField) => (
+          <form.Field name="classIds">
+            {(field) => (
+              <ExamClassSelection
+                classes={preview.classes}
+                selected={field.state.value}
+                disabled={!editable}
+                error={fieldError(field.state.meta.errors)}
+                onChange={(classIds) => field.handleChange(classIds)}
+                subjects={{
+                  chosen: subjectsField.state.value,
+                  onChange: (subjects) => subjectsField.handleChange(subjects),
+                }}
+                renderAddSubject={
+                  editable
+                    ? (schoolClass) => (
+                        <ExamAddSubjectButton
+                          scope={scope}
+                          label={schoolClass.label}
+                          onAdd={() => onAddSubject(schoolClass.classId)}
+                        />
+                      )
+                    : undefined
+                }
+                actions={editable ? <ExamAddClassButton scope={scope} onAdd={onAddClass} /> : undefined}
+              />
+            )}
+          </form.Field>
         )}
       </form.Field>
       {exists ? (
         <Notice error>An exam plan already exists. Return to the saved plans.</Notice>
       ) : preview.planCount === 0 ? (
         <Notice error>
-          Configure subjects and valid assessment modes in class settings
-          before creating this plan.
+          No class has subjects with valid assessment modes yet. Add a subject
+          to a class here or in class settings, or add a classroom, before
+          creating this plan.
         </Notice>
       ) : null}
       <form.Subscribe
         selector={(state) => ({
           classIds: state.values.classIds,
+          subjects: state.values.subjects,
           canSubmit: state.canSubmit,
           isSubmitting: state.isSubmitting,
           errors: state.errors,
         })}
       >
-        {({ classIds, canSubmit, isSubmitting, errors }) => (
+        {({ classIds, subjects, canSubmit, isSubmitting, errors }) => (
           <GenerationFooter
             preview={preview}
             classIds={classIds}
+            subjects={subjects}
             errors={errors}
             submitting={isSubmitting}
-            submittable={active && !exists && canSubmit}
+            submittable={editable && canSubmit}
             onCancel={onCancel}
           />
         )}
@@ -244,6 +343,7 @@ function GenerationForm({
 function GenerationFooter({
   preview,
   classIds,
+  subjects,
   errors,
   submitting,
   submittable,
@@ -251,24 +351,25 @@ function GenerationFooter({
 }: {
   preview: ExamPlanPreviewDto;
   classIds: string[];
+  subjects: SubjectChoice;
   errors: readonly unknown[];
   submitting: boolean;
   submittable: boolean;
   onCancel: () => void;
 }) {
-  const issue = selectionIssue(preview, classIds);
+  const issue = selectionIssue(preview, classIds, subjects);
   return (
     <div className="sticky bottom-0 flex flex-col gap-3 border-t bg-popover py-3">
       {issue && (
         <Notice error>
-          {issue} Fix it in class settings or leave the class out.
+          {issue} Fix it in class settings or leave it out.
         </Notice>
       )}
       <Issues errors={errors} />
       <p className="text-sm text-muted-foreground">
-        {selectedPlanCount(preview, classIds)} subject plans ·{' '}
-        {preview.totalMarks} marks per subject. Classes left out take no part
-        in this examination.
+        {selectedPlanCount(preview, classIds, subjects)} subject plans ·{' '}
+        {preview.totalMarks} marks per subject. Classes and subjects left out
+        take no part in this examination.
       </p>
       <div className="flex flex-wrap justify-end gap-3">
         <ExamButton

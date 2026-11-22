@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useId, useMemo } from 'react';
+import { createContext, useCallback, useContext, useId, useMemo, type ReactNode } from 'react';
 import { useForm } from '@tanstack/react-form';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { z } from 'zod';
@@ -41,19 +41,48 @@ export type ReviewSelection = {
   onToggle: (classId: string, checked: boolean) => void;
 };
 
-/** Read by the cells, so the column definitions stay stable while the selection changes. */
-const SelectionContext = createContext<ReviewSelection | null>(null);
+/**
+ * Which subjects of each class get a plan. `chosen(classId)` is the class's
+ * chosen subject slugs, or `undefined` when that class's subjects are not
+ * chosen here (they are then listed without checkboxes, for example a class
+ * already taking part when editing the classes of an existing plan).
+ */
+export type ReviewSubjectSelection = {
+  chosen: (classId: string) => readonly string[] | undefined;
+  disabled?: boolean;
+  onToggle: (classId: string, subjectSlug: string, checked: boolean) => void;
+};
 
-/** Keeps each class's read-only breakdown next to its summary. Classes expand
+/**
+ * What the cells read, so the column definitions stay stable while the
+ * selection changes. `renderAddSubject` is the caller's gated Add subject
+ * control for a class (this package makes no API calls); without it no such
+ * control is shown.
+ */
+type ReviewContextValue = {
+  selection: ReviewSelection | null;
+  subjects: ReviewSubjectSelection | null;
+  renderAddSubject: ((schoolClass: ReviewClass) => ReactNode) | null;
+};
+const SelectionContext = createContext<ReviewContextValue>({ selection: null, subjects: null, renderAddSubject: null });
+
+/** Keeps each class's breakdown next to its summary. Classes expand
  * independently so reviewing one never closes another or submits the plan form.
- * With `selection`, each class has a checkbox choosing whether it takes part.
+ * With `selection`, each class has a checkbox choosing whether it takes part;
+ * with `subjectSelection`, each subject in a breakdown has one choosing
+ * whether it gets a plan. `renderAddSubject` adds the caller's Add subject
+ * control to the row of a class without subjects and to every breakdown.
  */
 export function ExamPlanReviewTable({
   classes,
   selection,
+  subjectSelection,
+  renderAddSubject,
 }: {
   classes: ReviewClass[];
   selection?: ReviewSelection;
+  subjectSelection?: ReviewSubjectSelection;
+  renderAddSubject?: (schoolClass: ReviewClass) => ReactNode;
 }) {
   const id = useId();
   const form = useForm({
@@ -108,18 +137,20 @@ export function ExamPlanReviewTable({
     {
       id: 'subjects',
       header: 'Subjects',
-      cell: ({ row }) => row.original.subjects.length,
+      cell: ({ row }) => <SubjectCount schoolClass={row.original} />,
     },
     {
       id: 'modes',
       header: 'Modes',
-      cell: ({ row }) => row.original.subjects.reduce(
-        (sum, subject) => sum + subject.modes.length, 0,
-      ),
+      cell: ({ row }) => <ModeCount schoolClass={row.original} />,
     },
   ], [id, toggleClass, selectable]);
+  const context = useMemo<ReviewContextValue>(
+    () => ({ selection: selection ?? null, subjects: subjectSelection ?? null, renderAddSubject: renderAddSubject ?? null }),
+    [selection, subjectSelection, renderAddSubject],
+  );
   return (
-    <SelectionContext.Provider value={selection ?? null}>
+    <SelectionContext.Provider value={context}>
       <form.Subscribe selector={(state) => state.values.expanded}>
         {(expanded) => (
           <DataTable
@@ -141,7 +172,7 @@ export function ExamPlanReviewTable({
 }
 
 function ClassCheckbox({ schoolClass }: { schoolClass: ReviewClass }) {
-  const selection = useContext(SelectionContext);
+  const { selection } = useContext(SelectionContext);
   if (!selection) return null;
   return (
     <Checkbox
@@ -157,7 +188,7 @@ function ClassCheckbox({ schoolClass }: { schoolClass: ReviewClass }) {
 
 /** "Added" / "Removed" beside a class whose participation saving would change. */
 function ClassChange({ classId }: { classId: string }) {
-  const selection = useContext(SelectionContext);
+  const { selection } = useContext(SelectionContext);
   if (!selection?.baseline) return null;
   const before = selection.baseline.includes(classId);
   const after = selection.selected.includes(classId);
@@ -169,17 +200,63 @@ function ClassChange({ classId }: { classId: string }) {
   );
 }
 
+/** The subjects of the class that get a plan: those chosen, or all when they are not chosen here. */
+function useChosenSubjects(schoolClass: ReviewClass): ReviewSubject[] {
+  const { subjects } = useContext(SelectionContext);
+  const chosen = subjects?.chosen(schoolClass.classId);
+  return chosen ? schoolClass.subjects.filter((subject) => chosen.includes(subject.subjectSlug)) : schoolClass.subjects;
+}
+
+/** "2 of 3" while subjects are chosen; a class without subjects shows the Add subject control instead. */
+function SubjectCount({ schoolClass }: { schoolClass: ReviewClass }) {
+  const { subjects, renderAddSubject } = useContext(SelectionContext);
+  const chosen = useChosenSubjects(schoolClass);
+  if (!schoolClass.subjects.length && renderAddSubject) return renderAddSubject(schoolClass);
+  return subjects?.chosen(schoolClass.classId)
+    ? `${chosen.length} of ${schoolClass.subjects.length}`
+    : schoolClass.subjects.length;
+}
+
+function ModeCount({ schoolClass }: { schoolClass: ReviewClass }) {
+  return useChosenSubjects(schoolClass).reduce((sum, subject) => sum + subject.modes.length, 0);
+}
+
+function SubjectCheckbox({ classId, subject }: { classId: string; subject: ReviewSubject }) {
+  const { subjects } = useContext(SelectionContext);
+  const chosen = subjects?.chosen(classId);
+  if (!subjects || !chosen) return null;
+  return (
+    <Checkbox
+      aria-label={`Plan ${subject.name}`}
+      checked={chosen.includes(subject.subjectSlug)}
+      disabled={subjects.disabled}
+      onCheckedChange={(checked) => subjects.onToggle(classId, subject.subjectSlug, checked === true)}
+    />
+  );
+}
+
 function ClassSubjects({
   schoolClass, id,
 }: { schoolClass: ReviewClass; id: string }) {
+  const { subjects, renderAddSubject } = useContext(SelectionContext);
+  const choosing = subjects?.chosen(schoolClass.classId) !== undefined;
+  const add = renderAddSubject?.(schoolClass);
   return (
-    <div id={id} role="region" aria-label={`${schoolClass.label} subjects`}>
+    <div id={id} role="region" aria-label={`${schoolClass.label} subjects`} className="flex flex-col gap-2">
       <DataTable
         ariaLabel={`${schoolClass.label} subjects and marks breakdown`}
         data={schoolClass.subjects}
         getRowId={(subject) => subject.subjectSlug}
         emptyMessage="No subjects configured · cannot take part"
+        emptyAction={add}
         columns={[
+          ...(choosing
+            ? [{
+                id: 'plan',
+                header: () => <span className="sr-only">Gets a plan</span>,
+                cell: ({ row }) => <SubjectCheckbox classId={schoolClass.classId} subject={row.original} />,
+              } satisfies DataTableColumnDef<ReviewSubject>]
+            : []),
           {
             id: 'subject',
             header: 'Subject',
@@ -192,6 +269,7 @@ function ClassSubjects({
           },
         ]}
       />
+      {schoolClass.subjects.length > 0 && add && <div className="flex">{add}</div>}
     </div>
   );
 }

@@ -31,6 +31,8 @@ const PLATFORM_WIDE_TEST_FILES = [
   'src/routers/system-admin/stats/stats.router.integration.test.ts',
   // Runs the real admission phone backfill over every admission.
   'src/data-migrations/migrations/admission-phone-e164.integration.test.ts',
+  // Runs the subject attachment backfill over every class.
+  'src/data-migrations/migrations/subject-attachment-backfill.integration.test.ts',
   // Runs the data statements of migration 0073 (tiers, adjustments and the
   // assistant's role list) over every school, inside a rolled-back transaction.
   'src/feature-flags/subscription-tiers-migration.integration.test.ts',

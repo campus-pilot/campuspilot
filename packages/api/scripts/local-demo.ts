@@ -106,7 +106,7 @@ for (const [classIndex, definition] of classDefinitions.entries()) {
   const examModes: ClassConfig['subjects'][string]['examModes'] = preschool
     ? { oral: { name: 'Oral', percentage: 60 }, activity: { name: 'Activity', percentage: 40 } }
     : { written: { name: 'Written', percentage: 80 }, oral: { name: 'Oral', percentage: 20 } };
-  const config: ClassConfig = { subjects: Object.fromEntries(subjectDefinitions.map(([slug, name]) => [slug!, { name: name!, books: [{ title: `${definition.label} ${name} Workbook`, publication: 'Maple Grove sample curriculum' }], examModes }])) };
+  const config: ClassConfig = { subjects: Object.fromEntries(subjectDefinitions.map(([slug, name]) => [slug!, { name: name!, attachment: { kind: 'school' as const }, books: [{ title: `${definition.label} ${name} Workbook`, publication: 'Maple Grove sample curriculum' }], examModes }])) };
   let classroom: Awaited<ReturnType<typeof rpc.school.getClass>> | undefined = (await rpc.school.listClasses(scope)).find((item) => item.slug === definition.slug);
   if (!classroom) classroom = await rpc.school.createClass({ schoolId, slug: definition.slug, label: definition.label, config, sections: [{ slug: 'a', label: 'A' }] });
   const section = (await rpc.school.listSections({ schoolId, classId: classroom.id }))[0]!;

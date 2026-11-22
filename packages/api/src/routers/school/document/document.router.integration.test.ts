@@ -103,7 +103,7 @@ describe('document templates, generation, and artifact lifecycle', () => {
           subjects: {
             math: {
               name: 'Mathematics',
-              books: [],
+              attachment: { kind: 'school' as const }, books: [],
               examModes: { written: { name: 'Written', percentage: 100 } },
             },
           },

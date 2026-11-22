@@ -255,13 +255,19 @@ export const examContextDtoSchema = z.object({
     z.object({
       id: z.string(),
       label: z.string(),
+      /**
+       * The subjects taking part in the exam (with their plan), each with its
+       * plan's modes: the slugs, percentages and maximum marks of
+       * `modeConfig`, named from the class subject where it still has the
+       * mode (otherwise the slug). The timetable accepts exactly these.
+       */
       subjects: z.record(
         z.string(),
         z.object({
           name: z.string(),
           examModes: z.record(
             z.string(),
-            z.object({ name: z.string(), percentage: z.number() }),
+            z.object({ name: z.string(), percentage: z.number(), maxMarks: z.number() }),
           ),
         }),
       ),
@@ -290,6 +296,8 @@ export const examPlanPreviewSchema = z.object({
         z.object({
           subjectSlug: z.string(),
           name: z.string(),
+          /** Whether the subject has its plan in this exam (an `exam_plan` row): it takes part. */
+          planned: z.boolean(),
           issue: z.string().nullable(),
           modes: z.array(
             z.object({
@@ -318,6 +326,29 @@ export const examClassSelectionSchema = z
     'IDs of the classes taking part in the examination, from getExamPlanPreview; at least one.',
   );
 /**
+ * Which subjects of a class joining the examination get a plan, per class ID:
+ * slugs of subjects offered in this examination (`getExamPlanPreview`), at
+ * least one per class, each once. A joining class left out of the map plans
+ * every subject offered to it, as before subjects could be chosen. Keys must
+ * name classes that join in this request. The configuration version guards
+ * the choice: it covers every class's offered subjects, so a slug chosen
+ * from a stale review is refused as a changed review.
+ */
+export const examSubjectSelectionSchema = z
+  .record(
+    z.string().min(1).max(100),
+    z
+      .array(z.string().min(1).max(100))
+      .min(1, 'Select at least one subject.')
+      .max(200, 'Select at most 200 subjects of a class.')
+      .refine((slugs) => new Set(slugs).size === slugs.length, 'Select each subject only once.'),
+  )
+  // As many classes as `examClassSelectionSchema` allows.
+  .refine((subjects) => Object.keys(subjects).length <= 500, 'Choose subjects for at most 500 classes.')
+  .describe(
+    'Optional. Per class ID, the subject slugs (from getExamPlanPreview) that get a plan; at least one each. A joining class left out plans every subject offered to it.',
+  );
+/**
  * `classIds` is optional so existing API and MCP callers keep working: left
  * out, every class that can take part (`selectableExamClassIds`) is included,
  * which creates the same plans as before classes could be excluded. When it is
@@ -331,6 +362,7 @@ export const generateExamPlanInputSchema = examScopeSchema.extend({
     .describe(
       'IDs of the classes taking part, from getExamPlanPreview. Omit to include every class that has subjects; when sent, at least one.',
     ),
+  subjects: examSubjectSelectionSchema.optional(),
 });
 export const generateExamPlanOutputSchema = z.object({
   createdCount: z.number().int().positive(),
@@ -340,6 +372,11 @@ export const updateExamClassesInputSchema = examScopeSchema.extend({
   classIds: examClassSelectionSchema.describe(
     'The complete set of classes that should take part after the change, from getExamPlanPreview; at least one. Classes missing from it are removed, new ones added.',
   ),
+  subjects: examSubjectSelectionSchema
+    .optional()
+    .describe(
+      'Optional. Per class ID, the subject slugs that have a plan after the change; at least one each. An added class left out plans every subject offered to it; a class already taking part that is left out keeps its plans unchanged. For a class already taking part, a chosen subject without a plan gets one and a planned subject left out loses its plan (refused while it has results, question papers or timetable entries).',
+    ),
 });
 export const updateExamClassesOutputSchema = z.object({
   addedClassIds: z.array(z.string()),

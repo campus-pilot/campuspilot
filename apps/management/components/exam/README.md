@@ -21,12 +21,23 @@ before `handleSubmit`, `startCreateExamAttempt`). It is offered
 with `CREATE_EXAM` while the session is known to be active, and refreshes the list,
 the session (settings) and the sessions list on success. A dashed empty state opens a concise plan-review
 dialog with classes, student counts, subjects and modes, and a checkbox per class
-choosing whether it takes part (all classes with subjects selected by default,
-Select all / Deselect all, at least one required; a class without subjects is
-shown but cannot be chosen). Settings has a "Classes taking part" section whose
+choosing whether it takes part (no class selected when it opens, Select all /
+Deselect all, at least one required; a class without subjects is shown but
+cannot be chosen until a subject is added) and a checkbox per subject in each
+breakdown (all checked; only checked subjects get a plan, sent as
+`generateExamPlan({ subjects })`). Add subject (`exam-add-subject.tsx`, gated on
+`CREATE_EXAM_PLAN` and `UPDATE_CLASS_CONFIGURATION`) sits in the row of a class
+without subjects and in every breakdown; it adds a subject only for this
+examination unless "Also add to the classroom" is ticked
+(`school.addClassSubject`). The review remounts per configuration version, so
+the dialog carries the person's changes into the new form
+(`applyPlanSelectionChanges`), and the first subject of a class selects it. Settings has a "Classes taking part" section whose
 Edit classes dialog (exam plan update permission, until the exam is completed or
 released) reuses the same table, marks each change as Added or Removed and saves
-the complete list with `updateExamClasses`; the server's refusal reasons
+the complete list with `updateExamClasses` (each class's subject checkboxes show
+its planned subjects; ticking or unticking adds or removes a plan on save, sent
+only for classes whose subjects change; Add subject there gives a class taking
+part the subject's plan at once); the server's refusal reasons
 (results, timetable, question papers, stale review) are shown in the dialog. Each class row expands
 its subject/mode breakdown in a sub-table; there is no separate accordion. Automatic generation
 creates draft snapshots and a Not started examination; no per-subject approval step

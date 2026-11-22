@@ -23,7 +23,7 @@ describe('automatic exam plan generation', () => {
     subjects: {
       maths: {
         name: 'Mathematics',
-        books: [],
+        attachment: { kind: 'school' as const }, books: [],
         examModes: {
           written: { name: 'Written', percentage: 80 },
           practical: { name: 'Practical', percentage: 20 },
@@ -31,7 +31,7 @@ describe('automatic exam plan generation', () => {
       },
       english: {
         name: 'English',
-        books: [],
+        attachment: { kind: 'school' as const }, books: [],
         examModes: { written: { name: 'Written', percentage: 100 } },
       },
     },
@@ -150,7 +150,7 @@ describe('automatic exam plan generation', () => {
         config: {
           subjects: {
             ...config.subjects,
-            science: { name: 'Science', books: [], examModes: {} },
+            science: { name: 'Science', attachment: { kind: 'school' as const }, books: [], examModes: {} },
           },
         },
       })

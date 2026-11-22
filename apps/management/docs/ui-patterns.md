@@ -137,10 +137,36 @@ container with “No plans yet”, a short muted explanation, and Create plan.
 
 Create plan opens a concise review dialog. Summarize classes, enrolled student
 counts, subjects and modes, with a checkbox per class choosing whether it takes
-part in the examination (every class with subjects selected by default, Select
-all / Deselect all, at least one class required before Create is enabled). The
-same table edits the classes later from Settings ("Classes taking part"). Clicking a class row expands its subject/mode breakdown
+part in the examination (no class selected when the dialog opens, Select all /
+Deselect all, at least one class required: submitting none shows the field
+error). Each class's breakdown has a checkbox per subject, all checked by
+default; only checked subjects get a plan and the footer counts follow the
+choice. The same table edits the classes later from Settings ("Classes taking
+part"): there a class taking part shows which subjects have plans, so ticking
+or unticking a subject adds or removes its plan on save. A review remounted
+after a refetch carries only the person's own changes (classes added or
+removed, subjects ticked or unticked), applied to what is saved now, never a
+snapshot of their whole selection. Clicking a class row expands its subject/mode breakdown
 as a sub-table directly underneath it; do not add a separate all-classes accordion.
+
+Subjects can be added from the examination without leaving it. A class without
+subjects shows Add subject in its row, and every breakdown has Add subject
+(gated on `CREATE_EXAM_PLAN` and `UPDATE_CLASS_CONFIGURATION`). The dialog
+reuses the classroom subject fields (`SubjectFormFields`: name, slug generated
+from the name, exam modes) plus "Also add to the classroom", unchecked by
+default: the subject is then offered only in this examination. Adding the first
+subject of a class selects it; the review refetches and remounts its form, so
+the dialog carries the person's other changes into the new form
+(`applyPlanSelectionChanges`) instead of resetting them. In Settings, a subject added
+to a class taking part gets its plan at once. Classroom → Subjects marks an
+exam-only subject with "Only for <exam>" and offers Move to classroom.
+
+Create plan also offers Add classroom beside Select all / Deselect all (gated on
+`CREATE_CLASS`). It opens the same Add classroom dialog as Classrooms
+(`AddClassDialog`) and creates a school-wide class, never one that belongs to
+the examination. The review then refetches; the new class has no subjects, so it
+joins unselected with its Add subject control. Settings ("Classes taking part")
+does not offer it.
 Do not ask users to re-enter facts that already exist in session/class configuration.
 The server validates the reviewed configuration and creates the plans atomically.
 Reject a stale or invalid review without leaving partial plans behind.

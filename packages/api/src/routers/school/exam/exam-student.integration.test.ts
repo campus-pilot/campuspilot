@@ -59,7 +59,7 @@ describe('student-first examination lifecycle', () => {
           subjects: {
             maths: {
               name: 'Mathematics',
-              books: [],
+              attachment: { kind: 'school' as const }, books: [],
               examModes: {
                 written: { name: 'Written', percentage: 80 },
                 practical: { name: 'Practical', percentage: 20 },
@@ -67,7 +67,7 @@ describe('student-first examination lifecycle', () => {
             },
             english: {
               name: 'English',
-              books: [],
+              attachment: { kind: 'school' as const }, books: [],
               examModes: { written: { name: 'Written', percentage: 100 } },
             },
           },
@@ -464,18 +464,24 @@ describe('student-first examination lifecycle', () => {
           subjects: {
             'a:b': {
               name: 'First',
-              books: [],
+              attachment: { kind: 'school' as const }, books: [],
               examModes: { c: { name: 'C', percentage: 100 } },
             },
             a: {
               name: 'Second',
-              books: [],
+              attachment: { kind: 'school' as const }, books: [],
               examModes: { 'b:c': { name: 'BC', percentage: 100 } },
             },
           },
         },
       })
       .where(eq(classTable.id, scope.classId));
+    // A timetable cell needs the subject's plan in the exam, with that mode.
+    const [plan] = await db.select().from(examPlanTable).where(eq(examPlanTable.sessionId, scope.sessionId));
+    await db.insert(examPlanTable).values([
+      { ...plan!, id: undefined, subjectSlug: 'a:b', modeConfig: { c: { percentage: 100, maxMarks: 100 } } },
+      { ...plan!, id: undefined, subjectSlug: 'a', modeConfig: { 'b:c': { percentage: 100, maxMarks: 100 } } },
+    ]);
     const pairs = [
       { subjectSlug: 'a:b', modeSlug: 'c' },
       { subjectSlug: 'a', modeSlug: 'b:c' },

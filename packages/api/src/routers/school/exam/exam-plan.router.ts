@@ -8,6 +8,7 @@ import {
   examResultTable,
   examLifecycleTable,
 } from '@campuspilot/db/schema/exam';
+import { isSubjectOfferedInExam } from '@campuspilot/db/schema/jsonb/class-config';
 import { resolvePaginationInput } from '../../../paginations';
 import { pageResult, route } from './exam.pagination';
 import {
@@ -18,7 +19,8 @@ import {
   resolveModeConfig,
 } from './exam.service';
 import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
-import { protectedProcedure } from '../../../index';
+import { o, protectedProcedure } from '../../../index';
+import { checkPermissions } from '../../../permissions/authorization';
 import { isSchoolFeatureEnabled } from '../../../feature-flags/feature-flags.service';
 import { requireSchoolPermission } from '../../../permissions/school';
 import { rpcError, toRpcError } from '../../../errors';
@@ -36,7 +38,9 @@ import {
 import {
   includeExamClass,
   recordGeneratedExamClasses,
+  refuseScheduledSubjects,
   updateExamClasses,
+  type ExamPlanChangePermission,
 } from './exam-class.service';
 
 /**
@@ -44,7 +48,8 @@ import {
  * `school.generateExamPlan` does after its permission check (the school's
  * guided setup calls it too, after the same check): it records the chosen
  * classes as taking part, creates a plan for each of their subjects and opens
- * the examination's lifecycle as `ready`. A stale `configurationVersion` or
+ * the examination's lifecycle as `ready`. With `subjects`, only the chosen
+ * subjects of a class get a plan (see `selectExamClassPlans`). A stale `configurationVersion` or
  * existing plans are refused. A caller that already prepared the plan under
  * its locks in this transaction passes it as `prepared`, so it is not read
  * twice.
@@ -59,6 +64,7 @@ export async function generateExamPlanRecords(
     prepared,
     input.configurationVersion,
     input.classIds,
+    input.subjects,
   );
   // Participation is recorded first: every plan references its class's row.
   await recordGeneratedExamClasses(
@@ -88,6 +94,27 @@ export async function generateExamPlanRecords(
     });
   return { createdCount: plans.length };
 }
+
+/**
+ * Resolves, for the input's school, whether the caller may also create and
+ * delete exam plans: what `updateExamClasses` needs besides the update
+ * permission when the change adds or removes plans.
+ */
+const resolveExamPlanChangePermissions = o.middleware<
+  { examPlanChange: ExamPlanChangePermission },
+  { schoolId: string }
+>(async ({ context, next, signal }, input) => {
+  const resource = { kind: 'school' as const, schoolId: input.schoolId };
+  const [canCreate, canDelete] = await checkPermissions(
+    context,
+    [
+      { action: SCHOOL_ACTIONS.CREATE_EXAM_PLAN, resource },
+      { action: SCHOOL_ACTIONS.DELETE_EXAM_PLAN, resource },
+    ],
+    signal,
+  );
+  return next({ context: { examPlanChange: { canCreate: canCreate === true, canDelete: canDelete === true } } });
+});
 
 export const schoolExamPlanRouter = {
   getExamPlanPreview: protectedProcedure
@@ -119,7 +146,7 @@ export const schoolExamPlanRouter = {
     .route(
       route(
         'Generate an exam plan from class configuration',
-        'Atomically record the selected classes as taking part and create a ready-to-start plan for each of their configured subjects using its assessment modes and 100 total marks. Omit classIds to include every class that has subjects; when sent, at least one class is required. A selected class needs subjects with valid modes. Reject existing plans or a changed preview. Timetable creation is a separate step.',
+        'Atomically record the selected classes as taking part and create a ready-to-start plan for each of their subjects offered in this exam (classroom subjects and subjects added only for this exam) using its assessment modes and 100 total marks. Omit classIds to include every class that has subjects; when sent, at least one class is required. Optionally choose per class which subjects get a plan (subjects); a class left out plans all of them. Each selected subject needs valid modes. Reject existing plans or a changed preview. Timetable creation is a separate step.',
       ),
     )
     .meta({
@@ -146,7 +173,7 @@ export const schoolExamPlanRouter = {
     .route(
       route(
         'Change the classes taking part in an exam',
-        'Set the complete list of classes taking part in an exam whose plan exists. Added classes get plans from their class settings; removed classes lose their plans. Refused once the exam has ended or is released to the Cadet Portal, for a stale preview, and for a removed class with saved results, attendance, activities, remarks, question papers, a published timetable including it or a draft timetable scheduling it.',
+        'Set the complete list of classes taking part in an exam whose plan exists, and optionally which subjects of each class have plans. Added classes get plans for their subjects offered in this exam (optionally only the chosen ones); a class already taking part with chosen subjects gains plans for chosen subjects and loses the plans of subjects left out (refused while such a subject has results, question papers or timetable entries); removed classes lose their plans. Refused once the exam has ended or is released to the Cadet Portal, for a stale preview, and for a removed class with saved results, attendance, activities, remarks, question papers, a published timetable including it or a draft timetable scheduling it.',
       ),
     )
     .meta({
@@ -159,19 +186,22 @@ export const schoolExamPlanRouter = {
     })
     .input(dto.updateExamClassesInputSchema)
     /**
-     * Deliberately the plan **update** permission alone, although adding a
-     * class creates plans and removing one deletes them: changing the classes
-     * is one edit of an existing plan, reviewed as a whole. Every role holding
-     * it also holds plan create and delete (`grants.rego`, exam
-     * administration); if those grants ever diverge, require them here for
-     * added and removed classes.
+     * The plan **update** permission for any change, and, decided in the
+     * service once it knows what the change does, `CREATE_EXAM_PLAN` when it
+     * creates any plan (an added class or a ticked subject) and
+     * `DELETE_EXAM_PLAN` when it deletes any (a removed class with plans or
+     * an unticked subject). Today every role with update also holds create
+     * and delete (`grants.rego`, exam administration); they are checked
+     * explicitly so the procedure never creates or deletes plans for a role
+     * those grants leave out if they diverge.
      */
     .use(requireSchoolPermission(SCHOOL_ACTIONS.UPDATE_EXAM_PLAN))
+    .use(resolveExamPlanChangePermissions)
     .output(dto.updateExamClassesOutputSchema)
     .handler(async ({ context, input }) => {
       try {
         const { result, questionPaperObjects } = await context.db.transaction(
-          (tx) => updateExamClasses(tx, input),
+          (tx) => updateExamClasses(tx, input, context.examPlanChange),
         );
         // Storage is outside the transaction: removed once it has committed.
         await deleteObjectsBestEffort(questionPaperObjects);
@@ -272,7 +302,7 @@ export const schoolExamPlanRouter = {
     .route(
       route(
         'Create an exam plan',
-        'Create a draft plan with assessment modes derived from the class subject or explicitly customized percentages. Creating it makes the class take part in the exam if it did not already.',
+        'Create a draft plan with assessment modes derived from the class subject or explicitly customized percentages. The subject must be offered in this exam (a classroom subject or one added only for this exam). Creating it makes the class take part in the exam if it did not already.',
       ),
     )
     .meta({
@@ -310,6 +340,12 @@ export const schoolExamPlanRouter = {
           if (!subject)
             throw rpcError.badRequest(
               'The subject is not configured for this class.',
+            );
+          // A subject added only for another examination is not a subject of
+          // this one, so it never gets a plan here.
+          if (!isSubjectOfferedInExam(subject, input))
+            throw rpcError.badRequest(
+              'This subject was added only for another examination, so it cannot have a plan in this one.',
             );
           if (
             input.totalWorkingDays !== null &&
@@ -432,7 +468,7 @@ export const schoolExamPlanRouter = {
     .route(
       route(
         'Delete an exam plan',
-        'Delete a draft or approved exam plan; active and completed plans, and plans of an exam released to the Cadet Portal, cannot be deleted.',
+        'Delete a draft or approved exam plan; active and completed plans, plans of an exam released to the Cadet Portal, and plans whose subject the exam timetable schedules for the class cannot be deleted.',
       ),
     )
     .meta({
@@ -455,6 +491,15 @@ export const schoolExamPlanRouter = {
             throw rpcError.badRequest(
               'Active and completed exam plans cannot be deleted.',
             );
+          // A timetable cell needs its subject's plan (saveExamTimetable), so a
+          // scheduled subject's plan cannot go: the same guard as unticking it.
+          const schoolClass = await getExamClass(tx, plan.schoolId, plan.classId);
+          const subject = Object.hasOwn(schoolClass.config.subjects, plan.subjectSlug)
+            ? schoolClass.config.subjects[plan.subjectSlug]
+            : undefined;
+          await refuseScheduledSubjects(tx, plan, [
+            { classId: plan.classId, subjectSlug: plan.subjectSlug, label: schoolClass.label, name: subject?.name ?? plan.subjectSlug },
+          ]);
           // Question papers are keyed by the plan's class and subject, not
           // linked to the plan row (plans are deleted and regenerated), so
           // they are removed here, in the same transaction.

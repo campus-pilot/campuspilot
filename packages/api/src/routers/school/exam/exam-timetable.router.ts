@@ -1,6 +1,7 @@
 import type { z } from "zod";
 import type { DatabaseTransaction } from "@campuspilot/db";
 import { and, eq, inArray } from "drizzle-orm";
+import { isSubjectOfferedInExam } from "@campuspilot/db/schema/jsonb/class-config";
 import { classTable } from "@campuspilot/db/schema/class";
 import { examClassTable, examPlanTable, examTimetableTable } from "@campuspilot/db/schema/exam";
 import { route } from "./exam.pagination";
@@ -111,6 +112,24 @@ export const schoolExamTimetableRouter = {
               "Every timetable column must be a class taking part in this examination.",
             );
           const byId = new Map(classes.map((entry) => [entry.id, entry]));
+          // A cell must name a subject that takes part in this exam (has its
+          // plan) with a mode of that plan: an offered subject left out of
+          // the plan has nothing to sit, and a cell for it would outlive the
+          // subject (removing or renaming a subject without plans is allowed).
+          // The session lock above keeps the plans as read until commit.
+          const plans = input.config.columns.length
+            ? await tx
+                .select({ classId: examPlanTable.classId, subjectSlug: examPlanTable.subjectSlug, modeConfig: examPlanTable.modeConfig })
+                .from(examPlanTable)
+                .where(
+                  and(
+                    eq(examPlanTable.schoolId, input.schoolId),
+                    eq(examPlanTable.sessionId, input.sessionId),
+                    eq(examPlanTable.examSlug, input.examSlug),
+                    inArray(examPlanTable.classId, input.config.columns),
+                  ),
+                )
+            : [];
           for (const row of input.config.rows)
             for (const [classId, cell] of Object.entries(row.cells)) {
               for (const entry of cell === null
@@ -123,12 +142,19 @@ export const schoolExamTimetableRouter = {
                   subjects && Object.hasOwn(subjects, entry.subjectSlug)
                     ? subjects[entry.subjectSlug]
                     : undefined;
+                // A subject added only for another examination is not
+                // offered here, so it cannot be scheduled.
+                const plan = plans.find(
+                  (item) => item.classId === classId && item.subjectSlug === entry.subjectSlug,
+                );
                 if (
                   !subject ||
-                  !Object.hasOwn(subject.examModes, entry.modeSlug)
+                  !isSubjectOfferedInExam(subject, input) ||
+                  !plan ||
+                  !Object.hasOwn(plan.modeConfig, entry.modeSlug)
                 )
                   throw rpcError.badRequest(
-                    "Each timetable cell must use a subject and mode configured for its class.",
+                    "Each timetable cell must use a subject that has its plan in this examination and a mode of that plan.",
                   );
               }
             }

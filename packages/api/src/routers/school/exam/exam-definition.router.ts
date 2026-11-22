@@ -7,12 +7,14 @@ import {
   findExamNameClash,
   nextExamOrder,
 } from '@campuspilot/db/schema/jsonb/session-config';
-import { examClassTable } from '@campuspilot/db/schema/exam';
+import { examClassTable, examPlanTable } from '@campuspilot/db/schema/exam';
 import { assertExamsHaveNoData } from '../session/session-exam-removal';
+import { detachExamsFromSubjects } from '../class/class-subject.service';
 import { resolvePaginationInput } from '../../../paginations';
 import { pageResult, route } from './exam.pagination';
 import { examNameTakenError, getExam, getExamSession } from './exam.service';
-import { examClassWhere } from './exam.scope';
+import { examClassWhere, examWhere } from './exam.scope';
+import { examContextSubjects } from './exam-context';
 import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
 import { protectedProcedure } from '../../../index';
 import { requireSchoolPermission } from '../../../permissions/school';
@@ -130,7 +132,7 @@ export const schoolExamDefinitionRouter = {
     .route(
       route(
         'Get exam configuration context',
-        'Read the subjects and assessment modes of the classes taking part in the exam, attendance settings and co-scholastic areas for the exam workspace. Classes excluded from the exam are not listed; before the plan exists no class is.',
+        'Read the subjects taking part in the exam (those with a plan in it) and the assessment modes of their plans (slug, display name, percentage and maximum marks) for the classes taking part, attendance settings and co-scholastic areas for the exam workspace. Classes excluded from the exam are not listed; before the plan exists no class is.',
       ),
     )
     .meta({
@@ -162,12 +164,22 @@ export const schoolExamDefinitionRouter = {
           .where(eq(classTable.schoolId, input.schoolId))
           .orderBy(asc(classTable.displayOrder), asc(classTable.id))
           .then((rows) => rows.map((row) => row.class));
+        const plans = await context.db
+          .select({ classId: examPlanTable.classId, subjectSlug: examPlanTable.subjectSlug, modeConfig: examPlanTable.modeConfig })
+          .from(examPlanTable)
+          .where(examWhere(input));
         return {
           exam,
           classes: classes.map((entry) => ({
             id: entry.id,
             label: entry.label,
-            subjects: entry.config.subjects,
+            // Subjects taking part, with their plans' modes (`examContextSubjects`):
+            // the timetable editor and other exam screens build their choices from this.
+            subjects: examContextSubjects(
+              entry.config.subjects,
+              plans.filter((plan) => plan.classId === entry.id),
+              input,
+            ),
           })),
           coScholasticAreas: session.config.coScholasticAreas,
           attendanceTracking: session.config.attendanceTracking,
@@ -300,7 +312,7 @@ export const schoolExamDefinitionRouter = {
     .route(
       route(
         'Delete a session exam',
-        'Remove an exam definition that has no recorded data: refused (CONFLICT) while it has plans, results, a timetable, a working-day limit, student assessments or remarks, a started or completed lifecycle, a results notification record or question papers. Its record of the classes taking part is removed with it.',
+        'Remove an exam definition that has no recorded data: refused (CONFLICT) while it has plans, results, a timetable, a working-day limit, student assessments or remarks, a started or completed lifecycle, a results notification record or question papers. Its record of the classes taking part and the subjects added only for it are removed with it.',
       ),
     )
     .meta({
@@ -333,6 +345,9 @@ export const schoolExamDefinitionRouter = {
           // Classes may still take part without plans (after deleting every
           // legacy plan); that selection belongs to the exam and goes with it.
           await tx.delete(examClassTable).where(examClassWhere(input));
+          // Subjects added only for this exam go with it (it can have no
+          // plans here, so none of them has one).
+          await detachExamsFromSubjects(tx, input.schoolId, input.sessionId, [input.examSlug]);
           const examConfig = { ...session.config.examConfig };
           delete examConfig[input.examSlug];
           await tx

@@ -39,13 +39,13 @@ function workspace(): StudentExamWorkspaceDto {
             maths: {
               name: 'Maths',
               examModes: {
-                written: { name: 'Written', percentage: 80 },
-                oral: { name: 'Oral', percentage: 20 },
+                written: { name: 'Written', percentage: 80, maxMarks: 80 },
+                oral: { name: 'Oral', percentage: 20, maxMarks: 20 },
               },
             },
             english: {
               name: 'English',
-              examModes: { written: { name: 'Written', percentage: 100 } },
+              examModes: { written: { name: 'Written', percentage: 100, maxMarks: 100 } },
             },
           },
         },

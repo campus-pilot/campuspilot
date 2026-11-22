@@ -4,10 +4,15 @@ import { FieldApi, FormApi } from '@tanstack/react-form';
 import type { ExamPlanPreviewDto } from '@campuspilot/api/routers/school/exam/exam.dto';
 
 import {
+  changedKeptClasses,
   classSelectionFormOptions,
+  editClassesBase,
+  editClassesSubjects,
+  editSelectionIssue,
   participatingClassIds,
   selectedPlanCount,
   selectionIssue,
+  subjectsForClasses,
 } from './exam-class-model';
 
 const mode = { slug: 'written', name: 'Written', percentage: 100, maxMarks: 100 };
@@ -22,7 +27,10 @@ const preview: ExamPlanPreviewDto = {
       label: 'Class 6',
       studentCount: 10,
       participating: true,
-      subjects: [{ subjectSlug: 'maths', name: 'Maths', issue: null, modes: [mode] }],
+      subjects: [
+        { subjectSlug: 'maths', name: 'Maths', planned: true, issue: null, modes: [mode] },
+        { subjectSlug: 'art', name: 'Art', planned: false, issue: null, modes: [mode] },
+      ],
     },
     {
       classId: 'seven',
@@ -30,8 +38,8 @@ const preview: ExamPlanPreviewDto = {
       studentCount: 12,
       participating: false,
       subjects: [
-        { subjectSlug: 'maths', name: 'Maths', issue: null, modes: [mode] },
-        { subjectSlug: 'science', name: 'Science', issue: 'Percentages must total 100%.', modes: [] },
+        { subjectSlug: 'maths', name: 'Maths', planned: false, issue: null, modes: [mode] },
+        { subjectSlug: 'science', name: 'Science', planned: false, issue: 'Percentages must total 100%.', modes: [] },
       ],
     },
   ],
@@ -44,9 +52,28 @@ describe('exam class selection', () => {
   });
 
   it('counts the plans of the chosen classes', () => {
-    assert.equal(selectedPlanCount(preview, ['six']), 1);
-    assert.equal(selectedPlanCount(preview, ['six', 'seven']), 3);
+    assert.equal(selectedPlanCount(preview, ['six']), 2);
+    assert.equal(selectedPlanCount(preview, ['six', 'seven']), 4);
     assert.equal(selectedPlanCount(preview, []), 0);
+  });
+
+  it('follows the chosen subjects: counts, an empty choice and an invalid subject left out', () => {
+    assert.equal(selectedPlanCount(preview, ['six', 'seven'], { seven: ['maths'] }), 3);
+    assert.equal(selectionIssue(preview, ['six', 'seven'], { seven: ['maths'] }), null);
+    assert.equal(selectionIssue(preview, ['six', 'seven'], { seven: [] }), 'Class 7: select at least one subject.');
+    assert.deepEqual(subjectsForClasses(['seven'], { six: ['maths'], seven: ['maths'] }), { seven: ['maths'] });
+  });
+
+  it('starts Edit classes from the planned subjects and sends only kept classes whose subjects change', () => {
+    const base = editClassesBase(preview);
+    assert.deepEqual(base, { classIds: ['six'], subjects: { six: ['maths'], seven: ['maths', 'science'] } });
+    assert.deepEqual(editClassesSubjects(preview, base), {});
+    const ticked = { classIds: ['six'], subjects: { ...base.subjects, six: ['maths', 'art'] } };
+    assert.deepEqual(changedKeptClasses(preview, ticked), ['six']);
+    assert.deepEqual(editClassesSubjects(preview, ticked), { six: ['maths', 'art'] });
+    assert.equal(editSelectionIssue(preview, { classIds: ['six'], subjects: { ...base.subjects, six: [] } }), 'Class 6: select at least one subject.');
+    assert.equal(editSelectionIssue(preview, { classIds: ['six', 'seven'], subjects: base.subjects }), 'Class 7 · Science: Percentages must total 100%.');
+    assert.deepEqual(editClassesSubjects(preview, { classIds: ['six', 'seven'], subjects: { ...base.subjects, seven: ['maths'] } }), { seven: ['maths'] });
   });
 
   it('lists the classes taking part now', () => {
@@ -62,7 +89,7 @@ describe('saving a class selection', () => {
     const form = new FormApi(
       classSelectionFormOptions({
         classIds: ['six'],
-        save: async (classIds) => {
+        save: async ({ classIds }) => {
           saved.push(classIds);
           if (refuse) throw new Error('Class 7 has saved results.');
         },

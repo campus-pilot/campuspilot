@@ -47,7 +47,7 @@ describe("school exam lifecycle integration", () => {
           subjects: {
             maths: {
               name: "Mathematics",
-              books: [],
+              attachment: { kind: "school" as const }, books: [],
               examModes: {
                 written: { name: "Written", percentage: 80 },
                 practical: { name: "Practical", percentage: 20 },

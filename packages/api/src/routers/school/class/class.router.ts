@@ -11,13 +11,27 @@ import type { z } from "zod";
 import { rpcError, toRpcError } from "../../../errors";
 import { isSchoolFeatureEnabled } from "../../../feature-flags/feature-flags.service";
 import { o, protectedProcedure } from "../../../index";
-import { assertPermission } from "../../../permissions/authorization";
+import { assertPermission, checkPermissions } from "../../../permissions/authorization";
 import { studentTable } from "@campuspilot/db/schema/student";
 import { admissionTable } from "@campuspilot/db/schema/admission";
 import { requireSchoolPermission } from "../../../permissions/school";
+import { isClassroomSubject } from "@campuspilot/db/schema/jsonb/class-config";
 import {
+  addClassSubject,
+  moveClassSubjectToClassroom,
+  newClassConfig,
+  removeClassSubject,
+  updateClassConfiguration,
+  updateClassSubject,
+} from "./class-subject.service";
+import {
+  addClassSubjectInputSchema,
   classDtoSchema,
   classIdInputSchema,
+  classSubjectChangeOutputSchema,
+  classSubjectInputSchema,
+  classSubjectOutputSchema,
+  updateClassSubjectInputSchema,
   createClassInputSchema,
   listClassesInputSchema,
   listClassesOutputSchema,
@@ -46,7 +60,7 @@ export async function createClassRecord(
     .limit(1);
   if (!school) throw rpcError.notFound("School");
 
-  const { sections, schoolId, ...values } = input;
+  const { sections, schoolId, config, ...values } = input;
   const [lastClass] = await transaction
     .select({ displayOrder: max(classTable.displayOrder) })
     .from(classTable)
@@ -56,6 +70,8 @@ export async function createClassRecord(
     .values({
       schoolId,
       ...values,
+      // Every subject of a new class is a classroom subject, stored as one.
+      config: newClassConfig(config),
       displayOrder: (lastClass?.displayOrder ?? 0) + 1,
     })
     .returning();
@@ -85,6 +101,51 @@ const requireCountSessionPermission = o.middleware<
       context,
       {
         action: SCHOOL_ACTIONS.READ_SESSION,
+        resource: { kind: "school", schoolId: input.schoolId },
+      },
+      signal,
+    );
+  return next();
+});
+
+/**
+ * Resolves whether the caller also holds `CREATE_EXAM_PLAN` for the school,
+ * as its own fact for the subject procedures: a subject joining a class may
+ * create plans in the examinations the class takes part in, which the class
+ * configuration grant alone never allows (`class-subject.service.ts`).
+ */
+const resolveCanCreateExamPlan = o.middleware<
+  { canCreateExamPlan: boolean },
+  { schoolId: string }
+>(async ({ context, next, signal }, input) => {
+  const [allowed] = await checkPermissions(
+    context,
+    [
+      {
+        action: SCHOOL_ACTIONS.CREATE_EXAM_PLAN,
+        resource: { kind: "school", schoolId: input.schoolId },
+      },
+    ],
+    signal,
+  );
+  return next({ context: { canCreateExamPlan: allowed === true } });
+});
+
+/**
+ * An exam-only subject is added from an examination, so it needs
+ * `CREATE_EXAM_PLAN` in every case (as well as the class configuration
+ * grant). A classroom subject needs it only when it would create plans,
+ * which the service decides.
+ */
+const requireExamPlanPermissionForExamOnlySubject = o.middleware<
+  Record<never, never>,
+  { schoolId: string; attachment: { kind: "school" | "exam" } }
+>(async ({ context, next, signal }, input) => {
+  if (input.attachment.kind === "exam")
+    await assertPermission(
+      context,
+      {
+        action: SCHOOL_ACTIONS.CREATE_EXAM_PLAN,
         resource: { kind: "school", schoolId: input.schoolId },
       },
       signal,
@@ -198,7 +259,11 @@ export const schoolClassRouter = {
           studentCount: countStudents
             ? (studentCounts.get(schoolClass.id) ?? 0)
             : null,
-          subjectCount: Object.keys(schoolClass.config.subjects).length,
+          // Classroom subjects only: an exam-only subject belongs to one
+          // examination, not to the classroom's own set of subjects.
+          subjectCount: Object.values(schoolClass.config.subjects).filter(
+            isClassroomSubject,
+          ).length,
         }));
       } catch (error) {
         throw toRpcError(error);
@@ -427,7 +492,7 @@ export const schoolClassRouter = {
     .route({
       summary: "Update class attributes or configuration",
       description:
-        "Replace explicitly supplied class attributes or subject configuration. Any role in the school may perform this mutation.",
+        "Replace explicitly supplied class attributes or the whole subject configuration. Where an existing subject is offered (classroom or one examination) is kept; a new subject is a classroom subject and also gets a plan in every examination the class takes part in that can still change (active session, not completed, not released to the Cadet Portal), which then needs permission to create exam plans too. Leaving out a subject that has exam plans is refused (a changed slug counts as leaving it out). Prefer addClassSubject, updateClassSubject and removeClassSubject to change one subject.",
       tags: ["School", "Classes"],
     })
     .meta({
@@ -440,19 +505,129 @@ export const schoolClassRouter = {
     })
     .input(updateClassConfigurationInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.UPDATE_CLASS_CONFIGURATION))
+    .use(resolveCanCreateExamPlan)
     .output(classDtoSchema)
     .handler(async ({ context, input }) => {
       try {
-        const { schoolId, classId, ...changes } = input;
-        const [schoolClass] = await context.db
-          .update(classTable)
-          .set({ ...changes, updatedAt: new Date() })
-          .where(
-            and(eq(classTable.schoolId, schoolId), eq(classTable.id, classId)),
-          )
-          .returning();
-        if (!schoolClass) throw rpcError.notFound("Class");
-        return toClassDto(schoolClass);
+        const result = await context.db.transaction((transaction) =>
+          updateClassConfiguration(transaction, input, context),
+        );
+        return result.class;
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
+  addClassSubject: protectedProcedure
+    .route({
+      summary: "Add a subject to a class",
+      description:
+        "Add one subject (name, slug unique in the class, exam modes summing to 100%) to a class, either to the classroom (attachment kind 'school': offered in every examination) or only for one examination (kind 'exam' with sessionId and examSlug; needs permission to create exam plans, and the examination must be in the active session, not completed and not released to the Cadet Portal). The subject gets its plan at once in each examination it is offered in where the class takes part, the plan exists and the examination can still change: 100 marks, its modes, active if the examination has started, otherwise draft. A classroom subject that would get such a plan needs permission to create exam plans too.",
+      tags: ["School", "Classes"],
+    })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: false,
+        module: "classes",
+      },
+    })
+    .input(addClassSubjectInputSchema)
+    .use(requireSchoolPermission(SCHOOL_ACTIONS.UPDATE_CLASS_CONFIGURATION))
+    .use(requireExamPlanPermissionForExamOnlySubject)
+    .use(resolveCanCreateExamPlan)
+    .output(classSubjectChangeOutputSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        return await context.db.transaction((transaction) =>
+          addClassSubject(transaction, input, context),
+        );
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
+  updateClassSubject: protectedProcedure
+    .route({
+      summary: "Update one subject of a class",
+      description:
+        "Change one subject's name and exam modes (at least one, summing to 100%), and optionally its slug, leaving every other subject as stored. Where the subject is offered and its books stay. A new slug renames the subject (no plans are created); it is refused while the subject has exam plans and for a slug the class already has.",
+      tags: ["School", "Classes"],
+    })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: true,
+        module: "classes",
+      },
+    })
+    .input(updateClassSubjectInputSchema)
+    .use(requireSchoolPermission(SCHOOL_ACTIONS.UPDATE_CLASS_CONFIGURATION))
+    .output(classSubjectOutputSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        return await context.db.transaction((transaction) =>
+          updateClassSubject(transaction, input),
+        );
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
+  removeClassSubject: protectedProcedure
+    .route({
+      summary: "Remove one subject from a class",
+      description:
+        "Remove one subject from a class, leaving every other subject as stored. Refused while the subject has exam plans in any examination; delete those plans first.",
+      tags: ["School", "Classes"],
+    })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: true,
+        module: "classes",
+      },
+    })
+    .input(classSubjectInputSchema)
+    .use(requireSchoolPermission(SCHOOL_ACTIONS.UPDATE_CLASS_CONFIGURATION))
+    .output(classSubjectOutputSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        return await context.db.transaction((transaction) =>
+          removeClassSubject(transaction, input),
+        );
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
+  moveClassSubjectToClassroom: protectedProcedure
+    .route({
+      summary: "Move an exam-only subject to the classroom",
+      description:
+        "Make a subject that was added only for one examination a classroom subject, offered in every examination of the class. Its slug, plans and question papers stay. It also gets a plan in every other examination the class takes part in that can still change, which needs permission to create exam plans.",
+      tags: ["School", "Classes"],
+    })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: false,
+        module: "classes",
+      },
+    })
+    .input(classSubjectInputSchema)
+    .use(requireSchoolPermission(SCHOOL_ACTIONS.UPDATE_CLASS_CONFIGURATION))
+    .use(resolveCanCreateExamPlan)
+    .output(classSubjectChangeOutputSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        return await context.db.transaction((transaction) =>
+          moveClassSubjectToClassroom(transaction, input, context),
+        );
       } catch (error) {
         throw toRpcError(error);
       }
