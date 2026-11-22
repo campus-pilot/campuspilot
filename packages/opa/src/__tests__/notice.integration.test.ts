@@ -21,7 +21,7 @@ describe("Notice authorization with real OPA", () => {
 
   const ALL_ROLES = ["school.principal", "school.manager", "school.teacher", "school.accountant", "school.exam_coordinator"];
   const role = (name: string, schoolId = "school-1"): RoleAssignment =>
-    ({ role: name, scope: { kind: "school", schoolId }, meta: name === "school.teacher" ? { classIds: ["class-1"] } : null }) as RoleAssignment;
+    ({ role: name, scope: { kind: "school", schoolId, schoolKind: "school" }, meta: name === "school.teacher" ? { classIds: ["class-1"] } : null }) as RoleAssignment;
   const allowed = (action: AuthorizationInput["action"], assignment: RoleAssignment) =>
     isAuthorized(
       {

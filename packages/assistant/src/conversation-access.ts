@@ -1,5 +1,7 @@
 import { assertPermission, checkPermissions } from '@campuspilot/api/permissions/authorization';
+import { rpcError } from '@campuspilot/api/errors';
 import { CLASS_ACTIONS, SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
+import { readSchoolKind } from '@campuspilot/api/school-access/school-kind.service';
 
 import type { AssistantSession } from './session';
 import { sharedPaperOf, sharedStandalonePaperOf, type ConversationRow, type PaperKeyParts } from './store';
@@ -38,9 +40,20 @@ const STANDALONE_PAPER_ACTION = {
   continue: SCHOOL_ACTIONS.MANAGE_STANDALONE_PAPERS,
 } as const;
 
+/**
+ * Whether the school is a personal space (`school.kind`, docs/personal-space.md): standalone papers exist only
+ * there, so a conversation shared with one is reached, and one is started, only in a personal space. Its own check,
+ * next to the permission (which OPA also grants only in a personal space), never inferred from it.
+ */
+async function isPersonalSpace(session: AssistantSession, schoolId: string): Promise<boolean> {
+  return (await readSchoolKind(session.context.db, schoolId)) === 'personal';
+}
+
 export async function mayReachConversation(session: AssistantSession, row: ConversationRow, need: ConversationNeed): Promise<boolean> {
-  // A conversation shared with a standalone paper is reached through the paper's school permission, like an exam paper's.
+  // A conversation shared with a standalone paper is reached through the paper's school permission, like an exam paper's,
+  // and only in a personal space.
   if (sharedStandalonePaperOf(row) !== null) {
+    if (!(await isPersonalSpace(session, row.schoolId))) return false;
     const [allowed] = await checkPermissions(session.context, [{ action: STANDALONE_PAPER_ACTION[need], resource: { kind: 'school', schoolId: row.schoolId } }]);
     return allowed === true;
   }
@@ -64,10 +77,12 @@ export async function assertMayManagePaper(session: AssistantSession, schoolId: 
 }
 
 /**
- * Throws FORBIDDEN unless the user may manage the school's standalone papers:
- * the right to start a conversation shared with one, or to read its history.
+ * Throws FORBIDDEN unless the school is a personal space and the user may
+ * manage its standalone papers: the right to start a conversation shared
+ * with one, or to read its history.
  */
 export async function assertMayManageStandalonePaper(session: AssistantSession, schoolId: string): Promise<void> {
+  if (!(await isPersonalSpace(session, schoolId))) throw rpcError.forbidden();
   await assertPermission(session.context, {
     action: SCHOOL_ACTIONS.MANAGE_STANDALONE_PAPERS,
     resource: { kind: 'school', schoolId },

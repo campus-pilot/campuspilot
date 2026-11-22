@@ -36,7 +36,7 @@ describe("Exam authorization with real OPA", () => {
   }
   const teacher: RoleAssignment = {
     role: "school.teacher",
-    scope: { kind: "school", schoolId: "school-1" },
+    scope: { kind: "school", schoolId: "school-1", schoolKind: "school" },
     meta: { classIds: [] },
   };
   const admin: RoleAssignment = {
@@ -77,7 +77,7 @@ describe("Exam authorization with real OPA", () => {
     for (const role of ["principal", "manager", "exam_coordinator"] as const) {
       const staff: RoleAssignment = {
         role: `school.${role}`,
-        scope: { kind: "school", schoolId: "school-1" },
+        scope: { kind: "school", schoolId: "school-1", schoolKind: "school" },
         meta: null,
       };
       for (const action of [
@@ -97,7 +97,7 @@ describe("Exam authorization with real OPA", () => {
           await isAuthorized(
             input(action, {
               ...staff,
-              scope: { kind: "school", schoolId: "school-2" },
+              scope: { kind: "school", schoolId: "school-2", schoolKind: "school" },
             }),
             { client },
           ),
@@ -121,7 +121,7 @@ describe("Exam authorization with real OPA", () => {
         await isAuthorized(
           input(action, {
             role: "school.accountant",
-            scope: { kind: "school", schoolId: "school-1" },
+            scope: { kind: "school", schoolId: "school-1", schoolKind: "school" },
             meta: null,
           }),
           { client },

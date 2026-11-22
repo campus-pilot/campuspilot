@@ -31,7 +31,7 @@ describe('Document permissions against real OPA', () => {
         roleAssignments: [
           {
             role,
-            scope: { kind: 'school', schoolId },
+            scope: { kind: 'school', schoolId, schoolKind: 'school' },
             meta: null,
           } as RoleAssignment,
         ],

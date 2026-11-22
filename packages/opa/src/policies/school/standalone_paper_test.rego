@@ -4,9 +4,11 @@ import rego.v1
 
 import data.campuspilot.authorization
 
-school_input(action, role, school_id) := {
+school_input(action, role, school_id) := kind_input(action, role, school_id, "personal")
+
+kind_input(action, role, school_id, school_kind) := {
   "action": action,
-  "subject": {"userId": "u1", "roleAssignments": [{"role": role, "scope": {"kind": "school", "schoolId": school_id}, "meta": null}]},
+  "subject": {"userId": "u1", "roleAssignments": [{"role": role, "scope": {"kind": "school", "schoolId": school_id, "schoolKind": school_kind}, "meta": null}]},
   "resource": {"kind": "school", "schoolId": "school-1"},
 }
 
@@ -40,7 +42,29 @@ test_platform_admin_has_no_standalone_paper_actions if {
 test_standalone_paper_actions_are_not_class_actions if {
   not authorization.allow with input as {
     "action": "school.standalone_paper.read",
-    "subject": {"userId": "u1", "roleAssignments": [{"role": "school.principal", "scope": {"kind": "school", "schoolId": "school-1"}, "meta": null}]},
+    "subject": {"userId": "u1", "roleAssignments": [{"role": "school.principal", "scope": {"kind": "school", "schoolId": "school-1", "schoolKind": "personal"}, "meta": null}]},
     "resource": {"kind": "class", "schoolId": "school-1", "classId": "class-1"},
+  }
+}
+
+test_a_real_school_principal_has_no_standalone_paper_actions if {
+  every action in standalone_paper_actions {
+    not authorization.allow with input as kind_input(action, "school.principal", "school-1", "school")
+  }
+}
+
+test_an_assignment_without_its_school_kind_has_no_standalone_paper_actions if {
+  every action in standalone_paper_actions {
+    not authorization.allow with input as {
+      "action": action,
+      "subject": {"userId": "u1", "roleAssignments": [{"role": "school.principal", "scope": {"kind": "school", "schoolId": "school-1"}, "meta": null}]},
+      "resource": {"kind": "school", "schoolId": "school-1"},
+    }
+  }
+}
+
+test_the_school_kind_changes_no_other_action if {
+  every school_kind in {"school", "personal"} {
+    authorization.allow with input as kind_input("school.details.read", "school.principal", "school-1", school_kind)
   }
 }
