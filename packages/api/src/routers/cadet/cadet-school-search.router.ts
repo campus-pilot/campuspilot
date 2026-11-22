@@ -91,6 +91,10 @@ export const cadetSchoolSearchRouter = {
      * Demo schools (`is_demo`) are sandboxes, so they are left out of
      * suggestions and only returned when the query is their exact school
      * code; that keeps a demo usable without listing every demo publicly.
+     *
+     * Personal spaces (`kind = 'personal'`, docs/personal-space.md) are never
+     * returned, not even for their exact code: they are named after a real
+     * person, have no students and no Cadet Portal.
      */
     .handler(async ({ context, input }) => {
       try {
@@ -102,11 +106,14 @@ export const cadetSchoolSearchRouter = {
           .select({ slug: schoolTable.slug, name: schoolTable.name, logoS3Key: schoolTable.logoS3Key })
           .from(schoolTable)
           .where(
-            or(
-              exactSlug,
-              and(
-                eq(schoolTable.isDemo, false),
-                or(ilike(schoolTable.name, contains), ilike(schoolTable.slug, contains)),
+            and(
+              eq(schoolTable.kind, 'school'),
+              or(
+                exactSlug,
+                and(
+                  eq(schoolTable.isDemo, false),
+                  or(ilike(schoolTable.name, contains), ilike(schoolTable.slug, contains)),
+                ),
               ),
             ),
           )
@@ -138,14 +145,14 @@ export const cadetSchoolSearchRouter = {
      * Looks the code up exactly (case-insensitively), demo schools included,
      * like `searchSchools` does for an exact code. It backs both a shared
      * `?school=<code>` sign-in link and the header shown once a school is
-     * picked.
+     * picked. A personal space is not found (docs/personal-space.md).
      */
     .handler(async ({ context, input }) => {
       try {
         const [school] = await context.db
           .select({ slug: schoolTable.slug, name: schoolTable.name, logoS3Key: schoolTable.logoS3Key })
           .from(schoolTable)
-          .where(eq(sql`lower(${schoolTable.slug})`, input.slug.toLowerCase()))
+          .where(and(eq(sql`lower(${schoolTable.slug})`, input.slug.toLowerCase()), eq(schoolTable.kind, 'school')))
           .limit(1);
         if (!school) throw rpcError.notFound('School');
         return await toSchoolOption(school);

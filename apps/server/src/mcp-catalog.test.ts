@@ -108,6 +108,8 @@ const HIDDEN_TOOLS = [
   'systemAdmin.listDataMigrations',
   'systemAdmin.listDataMigrationSkippedItems',
   'systemAdmin.requestDataMigrationRun',
+  // Website leads carry prospects' contact details: platform admins only.
+  'systemAdmin.listLeads',
   // Demo provisioning, credentials and purge stay human admin actions.
   'systemAdmin.listDemoClassCatalogue',
   'systemAdmin.createDemoSchool',
@@ -172,10 +174,29 @@ const HIDDEN_TOOLS = [
   'schoolCreation.getStatus',
   'schoolCreation.createSchool',
   'schoolCreation.requestMore',
+  // So is the new school's guided setup: the owner's first walk through it.
+  'school.getOnboarding',
+  'school.completeOnboarding',
+  'school.skipOnboarding',
   'systemAdmin.listSchoolCreationRequests',
   'systemAdmin.countPendingSchoolCreationRequests',
   'systemAdmin.decideSchoolCreationRequest',
   'systemAdmin.updateSchoolOwner',
+  // A personal space is opened by its person (docs/personal-space.md).
+  'personalSpace.getStatus',
+  'personalSpace.create',
+  // The standalone paper screen's own procedures, human actions as for exam papers.
+  'school.startStandalonePaperGeneration',
+  'school.getStandalonePaperDetail',
+  'school.reserveStandalonePaperPages',
+  'school.releaseStandalonePaperPage',
+  'school.reorderStandalonePaperPages',
+  'school.rotateStandalonePaperPage',
+  'school.deleteStandalonePaperPage',
+  'school.deleteStandalonePaper',
+  'school.getStandalonePaperPreview',
+  'school.previewStandalonePaperDraft',
+  'school.getStandalonePaperDownload',
 ];
 
 /**
@@ -284,8 +305,11 @@ describe('catalog metadata', () => {
     // create, update, delete, preview, publish preview, publish, download);
     // +3 exam timetable publication tools (publish preview, publish, withdraw);
     // +8 question paper tools (list, get, versions, learn, validate, save, get draft, edit);
-    // +1 school.updateExamClasses (change the classes taking part in an exam).
-    expect(catalog.advanced).toHaveLength(119);
+    // +1 school.updateExamClasses (change the classes taking part in an exam);
+    // +10 standalone paper tools of a personal space (list, filter options, create,
+    // get, get draft, versions, learn, validate, save, edit);
+    // +1 systemAdmin.getPersonalSpaceStats (the admin dashboard's personal space counts).
+    expect(catalog.advanced).toHaveLength(130);
   });
 });
 
@@ -780,7 +804,13 @@ describe('assistant service view', () => {
       expect(typeof tool._meta?.[ASSISTANT_TOOL_META.module]).toBe('string');
       // Every school sees the same listing; the worker drops the tools of features its school lacks.
       expect(tool._meta?.[ASSISTANT_TOOL_META.features], tool.name).toEqual([...definitions.get(tool.name)!.features]);
+      // And the kinds of school it serves, so a personal space is offered only its own tools.
+      expect(tool._meta?.[ASSISTANT_TOOL_META.schoolKinds], tool.name).toEqual([...definitions.get(tool.name)!.schoolKinds]);
     }
+    expect(tools.find(({ name }) => name === 'school.listStandalonePapers')?._meta?.[ASSISTANT_TOOL_META.schoolKinds]).toEqual(['personal']);
+    expect(tools.find(({ name }) => name === 'school.listStudents')?._meta?.[ASSISTANT_TOOL_META.schoolKinds]).toEqual(['school']);
+    // Account-level tools name no school, so every kind of school is offered them.
+    expect(tools.find(({ name }) => name === 'school.listMySchools')?._meta?.[ASSISTANT_TOOL_META.schoolKinds]).toEqual(['school', 'personal']);
     expect(tools.find(({ name }) => name === 'school.listAdmissions')?._meta?.[ASSISTANT_TOOL_META.features]).toEqual(['studentManagement']);
     expect(allowed.some((tool) => tool.mcp.exposure === 'advanced')).toBe(true);
   });
@@ -798,6 +828,10 @@ describe('assistant service view', () => {
       'school.getQuestionPaperDraft': 200_000,
       'school.validateQuestionPaperDraft': 40_000,
       'school.learn_question_paper_generation': 40_000,
+      'school.getStandalonePaper': 200_000,
+      'school.getStandalonePaperDraft': 200_000,
+      'school.validateStandalonePaperDraft': 40_000,
+      'school.learn_standalone_question_paper': 40_000,
     });
     // Procedures the assistant may not use are not listed at all.
     expect(tools.map((tool) => tool.name)).not.toContain('school.startQuestionPaperGeneration');
@@ -842,10 +876,12 @@ describe('assistant service view', () => {
     expect(learn?._meta?.[ASSISTANT_TOOL_META.exposure]).toBe('advanced');
     for (const name of [...QUESTION_PAPER_TOOLS.reads, ...QUESTION_PAPER_TOOLS.writes]) expect(listed.has(name), name).toBe(true);
     for (const name of QUESTION_PAPER_TOOLS.humanOnly) expect(listed.has(name), name).toBe(false);
-    expect(tools.filter((tool) => tool._meta?.[ASSISTANT_TOOL_META.skipsApproval] !== undefined).map((tool) => [tool.name, tool._meta![ASSISTANT_TOOL_META.skipsApproval]])).toEqual([
+    expect(tools.filter((tool) => tool._meta?.[ASSISTANT_TOOL_META.skipsApproval] !== undefined).map((tool) => [tool.name, tool._meta![ASSISTANT_TOOL_META.skipsApproval]]).sort()).toEqual([
       ['school.saveQuestionPaperVersion', true],
       ['school.editQuestionPaper', true],
-    ]);
+      ['school.saveStandalonePaperVersion', true],
+      ['school.editStandalonePaper', true],
+    ].sort());
   });
 
   it('gives external clients the learn tool through the advanced tools', async () => {

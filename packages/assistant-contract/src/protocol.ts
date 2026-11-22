@@ -17,6 +17,13 @@ export const ASSISTANT_TOOL_META = {
    * conversation's school has all of them.
    */
   features: 'campuspilot/features',
+  /**
+   * The kinds of school the tool's procedure serves (`school`, `personal`;
+   * docs/personal-space.md). The assistant offers a tool only in a
+   * conversation whose school is of one of them; a tool listed without it
+   * serves real schools only.
+   */
+  schoolKinds: 'campuspilot/school-kinds',
 } as const;
 
 /**
@@ -26,6 +33,7 @@ export const ASSISTANT_TOOL_META = {
  */
 export const ASSISTANT_CARD_TOOLS = {
   'school.validateQuestionPaperDraft': 'question_paper_draft',
+  'school.validateStandalonePaperDraft': 'standalone_paper_draft',
 } as const;
 export type AssistantCardKind = (typeof ASSISTANT_CARD_TOOLS)[keyof typeof ASSISTANT_CARD_TOOLS];
 

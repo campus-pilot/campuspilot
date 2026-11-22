@@ -349,7 +349,7 @@ export const featureExtras: Record<FeatureSlug, FeatureExtra> = {
       },
       {
         question: "Is the AI feature on for every school?",
-        answer: "It is enabled per school. Book a demo and we will show it with your own class and subject set-up.",
+        answer: "It is enabled per school. Contact us and we will show it with your own class and subject set-up.",
       },
     ],
     ctaTitle: "See a question paper made from your own handwriting.",

@@ -11,6 +11,7 @@ import { Skeleton } from "@campuspilot/ui/components/skeleton";
 import { BookOpen, GraduationCap, Layers3, Users } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { client, orpc } from "@/lib/orpc";
+import { AddClassAction } from "./add-class-action";
 import { RequirePermissions } from "./require-permissions";
 import { classroomHref } from './classroom-sections';
 import { useSchoolFeature } from './require-feature';
@@ -103,6 +104,7 @@ function ClassroomTable({
       columns={studentManagement ? columns : columns.filter(({ id }) => id !== "students")}
       data={classes}
       emptyMessage="No classrooms have been created yet."
+      emptyAction={<AddClassAction schoolId={schoolId} variant="outline" />}
       getRowId={(schoolClass) => schoolClass.id}
       getRowLabel={(schoolClass) => schoolClass.label}
       onReorder={canReorder ? onReorder : undefined}

@@ -45,10 +45,16 @@ import { usePageUploads, type PageUploads } from './use-page-uploads';
 import {
   useCanManageQuestionPaper,
   useDownloadQuestionPaper,
-  useQuestionPaperDetail,
+  useExamQuestionPaperDetail,
   useRefreshQuestionPaper,
-  type QuestionPaperDetail,
 } from './use-question-paper-detail';
+import { studioDetailOfExam } from './paper-target';
+import { paperLabelOf } from '@/components/assistant/assistant-question-paper-model';
+import type { z } from 'zod';
+import type { detailOutputSchema } from '@campuspilot/api/routers/school/question-paper/question-paper.dto';
+
+/** An exam paper's read, with the names of its plan. */
+type QuestionPaperDetail = z.infer<typeof detailOutputSchema>;
 
 /**
  * One paper: a class, subject and assessment mode of an exam. A paper with
@@ -75,7 +81,7 @@ export function QuestionPaperWorkspace({ scope }: { scope: QuestionPaperScope })
 }
 
 function WorkspaceData({ scope }: { scope: QuestionPaperScope }) {
-  const query = useQuestionPaperDetail(scope);
+  const query = useExamQuestionPaperDetail(scope);
   const canManage = useCanManageQuestionPaper(scope);
   // Held data wins over a failed refetch, so a poll that fails never replaces a paper on screen.
   if (query.data === undefined) {
@@ -154,7 +160,7 @@ function VersionsDialog({
             }}
             onDownload={(versionNo) =>
               download.mutate(
-                { ...scope, versionNo },
+                { target: scope, versionNo },
                 { onError: (error) => toast.error(requestErrorMessage(error, 'The PDF could not be prepared.')) },
               )
             }
@@ -221,7 +227,7 @@ function PaperMenu({
               disabled={!hasVersion}
               onSelect={() =>
                 download.mutate(
-                  { ...scope, versionNo: paper.latestVersionNo },
+                  { target: scope, versionNo: paper.latestVersionNo },
                   { onError: (error) => toast.error(requestErrorMessage(error, 'The PDF could not be prepared.')) },
                 )
               }
@@ -313,7 +319,8 @@ function PaperLayout({ scope, detail, canManage }: { scope: QuestionPaperScope; 
       {view.kind === 'studio' ? (
         <QuestionPaperStudio
           scope={scope}
-          detail={detail}
+          detail={studioDetailOfExam(detail)}
+          paperLabel={paperLabelOf(detail.paper)}
           canManage={canManage}
           chatId={chatId}
           versionParam={search.get('version')}
@@ -346,7 +353,8 @@ function PaperLayout({ scope, detail, canManage }: { scope: QuestionPaperScope; 
           {notice}
           <QuestionPaperStart
             scope={scope}
-            detail={detail}
+            detail={studioDetailOfExam(detail)}
+            examNames={{ className: detail.paper.className, subjectName: detail.paper.subjectName }}
             canManage={canManage}
             uploads={uploads}
             earlierOpen={view.picking}

@@ -36,18 +36,20 @@ const session = (impersonatedBy: string | null = null): AssistantSession => ({
 
 describe('voiceRefusal', () => {
   it('allows voice when the platform has a voice model, the user may send and the school has voice on', () => {
-    expect(voiceRefusal(session(), ALLOWED, SETTINGS)).toBeNull();
+    expect(voiceRefusal(session(), ALLOWED, SETTINGS, 'school')).toBeNull();
+    // A personal space has no voice mode, whatever its assistant settings say (docs/personal-space.md).
+    expect(voiceRefusal(session(), ALLOWED, SETTINGS, 'personal')).toEqual({ reason: 'access', message: 'Voice is not available in a personal space.' });
   });
 
   it('says voice is not set up when the platform has no voice model, whatever the school has', () => {
-    expect(voiceRefusal(session(), ALLOWED, null)).toEqual({ reason: 'unavailable', message: 'Voice is not set up on this platform.' });
+    expect(voiceRefusal(session(), ALLOWED, null, 'school')).toEqual({ reason: 'unavailable', message: 'Voice is not set up on this platform.' });
   });
 
   it('gives the assistant’s own refusal first, and names the monthly limit as its own reason', () => {
     const atLimit: AssistantAccessDecision = { ...ALLOWED, limitReached: true, allowed: false, refusal: { code: 'limit_reached', message: 'The school reached its limit.' } };
-    expect(voiceRefusal(session(), atLimit, SETTINGS)).toEqual({ reason: 'limit_reached', message: 'The school reached its limit.' });
+    expect(voiceRefusal(session(), atLimit, SETTINGS, 'school')).toEqual({ reason: 'limit_reached', message: 'The school reached its limit.' });
     const noRole: AssistantAccessDecision = { ...ALLOWED, allowedRoles: [], allowed: false, refusal: { code: 'role_not_enabled', message: 'Your role cannot use the AI assistant.' } };
-    expect(voiceRefusal(session(), noRole, SETTINGS)).toEqual({ reason: 'access', message: 'Your role cannot use the AI assistant.' });
+    expect(voiceRefusal(session(), noRole, SETTINGS, 'school')).toEqual({ reason: 'access', message: 'Your role cannot use the AI assistant.' });
   });
 
   it('refuses a read-only school (suspended or without a plan) with the assistant’s own refusal: it starts no turn, spoken or typed', () => {
@@ -57,21 +59,21 @@ describe('voiceRefusal', () => {
       allowed: false,
       refusal: { code: 'school_suspended', message: 'This school is suspended.' },
     };
-    expect(voiceRefusal(session(), suspended, SETTINGS)).toEqual({ reason: 'access', message: 'This school is suspended.' });
+    expect(voiceRefusal(session(), suspended, SETTINGS, 'school')).toEqual({ reason: 'access', message: 'This school is suspended.' });
     const noPlan: AssistantAccessDecision = {
       ...ALLOWED,
       noPlan: true,
       allowed: false,
       refusal: { code: 'no_plan', message: 'This school has no active plan.' },
     };
-    expect(voiceRefusal(session(), noPlan, SETTINGS)).toEqual({ reason: 'access', message: 'This school has no active plan.' });
+    expect(voiceRefusal(session(), noPlan, SETTINGS, 'school')).toEqual({ reason: 'access', message: 'This school has no active plan.' });
   });
 
   it('refuses a school whose assistant has voice switched off: the assistant alone never grants voice', () => {
-    expect(voiceRefusal(session(), { ...ALLOWED, voiceEnabled: false }, SETTINGS)).toEqual({ reason: 'access', message: 'Voice is not switched on for this school.' });
+    expect(voiceRefusal(session(), { ...ALLOWED, voiceEnabled: false }, SETTINGS, 'school')).toEqual({ reason: 'access', message: 'Voice is not switched on for this school.' });
   });
 
   it('refuses an impersonating administrator, who could never start a turn', () => {
-    expect(voiceRefusal(session('adm_1'), ALLOWED, SETTINGS)?.reason).toBe('access');
+    expect(voiceRefusal(session('adm_1'), ALLOWED, SETTINGS, 'school')?.reason).toBe('access');
   });
 });

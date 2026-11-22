@@ -21,14 +21,16 @@ import { and, desc, eq, isNull } from 'drizzle-orm';
 import { rpcError } from '../../../errors';
 import { FIGURE_MAX_BYTES } from '../../../files/image-derivative';
 import { convertDocumentPdf } from '../document/document.render';
+import { assertPersonalSpaceStorageRoom, assertStandaloneVersionRoom } from '../../../personal-space/personal-space.storage';
 import { documentDownloadUrl, persistDocumentObject } from '../document/document.storage';
 import { attachmentFigureIds, attachmentFigureProblems, chatFiguresOf, convertAttachmentFigures, isAttachmentFigureId, type ChatFigures } from './question-paper.attachments';
 import { buildQuestionPaperContext } from './question-paper.context';
-import { isPaperChat } from './question-paper.conversations';
+import { conversationRefOf, isPaperChat, type PaperConversationRef } from './question-paper.conversations';
 import { createMathRenderer, renderMathSpans } from './question-paper.math';
 import {
   findPaper,
-  lockOrCreatePaper,
+  findPaperOf,
+  lockOrCreatePaperOf,
   templateMissingError,
   type PaperRow,
   type VersionRow,
@@ -42,10 +44,19 @@ import {
   readPinnedQuestionPaperTemplate,
   renderQuestionPaperBody,
   renderQuestionPaperDocument,
+  renderStandaloneQuestionPaperDocument,
   selectedQuestionPaperTemplate,
 } from './question-paper.render';
 import { sanitizeQuestionPaperBody, type SanitizedQuestionPaperBody } from './question-paper.sanitize';
-import { assertPaperWritable, assertPaperWritableLocked, type PaperScope } from './question-paper.scope';
+import {
+  assertResolvedPaperWritable,
+  assertResolvedPaperWritableLocked,
+  isStandalonePaper,
+  paperSchoolIdOf,
+  type PaperScope,
+  type ResolvedPaper,
+} from './question-paper.scope';
+import type { QuestionPaperDetails } from '@campuspilot/question-paper/details';
 
 /** The most validation errors one refusal message lists. */
 const MAX_LISTED_ERRORS = 10;
@@ -158,7 +169,7 @@ const noticesOf = (stripped: readonly string[]): QuestionPaperNotice[] => stripp
  */
 export async function checkQuestionPaperDraft(
   db: DatabaseExecutor,
-  scope: PaperScope,
+  scope: ResolvedPaper,
   raw: string,
   options: DraftCheckOptions = {},
 ): Promise<DraftCheck> {
@@ -180,7 +191,7 @@ type DraftCheckOptions = {
 /** {@link checkQuestionPaperDraft} without its `qp.draft.check` timing. */
 async function checkQuestionPaperDraftUntimed(
   db: DatabaseExecutor,
-  scope: PaperScope,
+  scope: ResolvedPaper,
   raw: string,
   options: DraftCheckOptions,
 ): Promise<DraftCheck> {
@@ -200,8 +211,8 @@ async function checkQuestionPaperDraftUntimed(
   }
   if (!hasContent(sanitized)) problems.push('The paper is empty. Write the questions as HTML.');
 
-  const paper = await findPaper(db, scope.key);
-  const unusable = await figureProblems(db, { schoolId: scope.key.schoolId, paper, chat: options.chat }, sanitized.stats.figureIds);
+  const paper = await findPaperOf(db, scope);
+  const unusable = await figureProblems(db, { schoolId: paperSchoolIdOf(scope), paper, chat: options.chat }, sanitized.stats.figureIds);
   if (unusable.size > 0) {
     if (options.unresolvedFigures === 'placeholder') {
       sanitized = sanitizeQuestionPaperBody(figureIdsToPlaceholders(sanitized.html, new Set(unusable.keys())));
@@ -264,13 +275,23 @@ export function invalidPaperError(problems: readonly string[]) {
   return rpcError.badRequest(`The question paper is not valid${more}. ${listed.join('; ')}`);
 }
 
-const DRAFT_TOOL_NAME = /(^|[._])validateQuestionPaperDraft$/;
+/**
+ * The validate tool whose calls hold a paper's drafts, by the paper's kind: a
+ * standalone paper's drafts are validated with `validateStandalonePaperDraft`
+ * (its own rules: the heading is part of the paper), an exam paper's with
+ * `validateQuestionPaperDraft`. A draft of one kind is never saved as the other.
+ */
+const DRAFT_TOOL_NAME = {
+  exam: /(^|[._])validateQuestionPaperDraft$/,
+  standalone: /(^|[._])validateStandalonePaperDraft$/,
+} as const satisfies Record<PaperConversationRef['kind'], RegExp>;
 /** How many of a conversation's newest tool calls are searched for a draft. */
 const DRAFT_SEARCH_DEPTH = 60;
 
 /**
  * Finds the HTML a chat agent validated earlier in this conversation
- * (design E7): the newest `validateQuestionPaperDraft` tool call whose input
+ * (design E7): the newest call of the paper kind's validate tool
+ * ({@link DRAFT_TOOL_NAME}) whose input
  * `html` hashes to `draftId`. A draft is not a database row; the chat transcript is
  * its only home, which is why this reads the assistant's items, scoped to the
  * conversation, its school and its user. External clients have no
@@ -278,11 +299,11 @@ const DRAFT_SEARCH_DEPTH = 60;
  */
 export async function findChatDraftContent(
   db: DatabaseExecutor,
-  input: { conversationId: string; key: PaperKey; userId: string; draftId: string },
+  input: { conversationId: string; paper: PaperConversationRef; userId: string; draftId: string },
 ): Promise<string> {
   const notFound = rpcError.badRequest('No draft with that draftId was validated in this conversation. Send the full html instead.');
   // The user's own chat, or one shared with this paper (continued by a colleague): drafts are read from nothing else.
-  if (!(await isPaperChat(db, { conversationId: input.conversationId, userId: input.userId, key: input.key }))) throw notFound;
+  if (!(await isPaperChat(db, { conversationId: input.conversationId, userId: input.userId, paper: input.paper }))) throw notFound;
   const items = await db
     .select({ body: assistantItemTable.body })
     .from(assistantItemTable)
@@ -291,7 +312,7 @@ export async function findChatDraftContent(
     .limit(DRAFT_SEARCH_DEPTH);
   for (const { body } of items) {
     const call = body as { toolName?: unknown; input?: unknown };
-    if (typeof call.toolName !== 'string' || !DRAFT_TOOL_NAME.test(call.toolName)) continue;
+    if (typeof call.toolName !== 'string' || !DRAFT_TOOL_NAME[input.paper.kind].test(call.toolName)) continue;
     const html = (call.input as { html?: unknown } | null)?.html;
     if (typeof html === 'string' && questionPaperDraftId(html) === input.draftId) return html;
   }
@@ -321,7 +342,8 @@ export type SaveSource =
 export type SavedVersion = {
   versionNo: number;
   paperId: string;
-  planMaxMarks: number;
+  /** The exam plan's maximum marks the version snapshotted; always null for a standalone paper, which has no plan. */
+  planMaxMarks: number | null;
   warnings: QuestionPaperNotice[];
   hasPdf: true;
   /** True when this job had already saved its version and nothing was written. */
@@ -334,8 +356,17 @@ class VersionRaceError extends Error {}
 /** The generation job that is saving this version ended (swept at its deadline, deleted) before the save committed. */
 export class SourceJobEndedError extends Error {}
 
-const artifactName = (scope: PaperScope, versionNo: number) =>
-  `Question paper: ${scope.subjectName} (${scope.modeName}) - ${scope.className} - v${versionNo}`;
+/** The details a standalone paper's names are made of, as its row holds them now. */
+type NamedDetails = Pick<QuestionPaperDetails, 'subjectName' | 'className' | 'examName'>;
+
+/** What a paper's PDF is named after: the exam plan's names, or a standalone paper's current details. */
+type PaperNames = { kind: 'exam'; scope: PaperScope } | { kind: 'standalone'; details: NamedDetails };
+
+const artifactName = (names: PaperNames, versionNo: number) => {
+  if (names.kind === 'exam') return `Question paper: ${names.scope.subjectName} (${names.scope.modeName}) - ${names.scope.className} - v${versionNo}`;
+  const parts = [names.details.subjectName, names.details.className, names.details.examName].filter((part): part is string => part !== null);
+  return `Question paper: ${parts.length > 0 ? parts.join(' - ') : 'Untitled'} - v${versionNo}`;
+};
 
 /**
  * The name a downloaded version's PDF is saved under, without `.pdf`:
@@ -344,8 +375,31 @@ const artifactName = (scope: PaperScope, versionNo: number) =>
  * Documents history shows, and derived from the paper at download time, so
  * PDFs stored before this format download under it too.
  */
-const downloadFileName = (scope: PaperScope, versionNo: number) =>
-  `${scope.subjectName}_${scope.className}_${scope.modeName}_v${versionNo}`;
+const downloadFileName = (names: PaperNames, versionNo: number) => {
+  if (names.kind === 'exam') return `${names.scope.subjectName}_${names.scope.className}_${names.scope.modeName}_v${versionNo}`;
+  // A standalone paper's details are a model's text: only characters a file name can carry are kept.
+  const parts = [names.details.subjectName, names.details.className, names.details.examName]
+    .filter((part): part is string => part !== null)
+    .map((part) => part.replace(/[\\/:*?"<>|]+/g, ' ').trim())
+    .filter((part) => part !== '');
+  return `${parts.length > 0 ? parts.join('_') : 'Question paper'}_v${versionNo}`;
+};
+
+/** The names of a resolved paper, reading a standalone paper's current details from its row. */
+async function paperNamesOf(db: DatabaseExecutor, scope: ResolvedPaper): Promise<PaperNames> {
+  if (!isStandalonePaper(scope)) return { kind: 'exam', scope };
+  const paper = await findPaperOf(db, scope);
+  return {
+    kind: 'standalone',
+    details: { subjectName: paper?.detailsSubjectName ?? null, className: paper?.detailsClassName ?? null, examName: paper?.detailsExamName ?? null },
+  };
+}
+
+/** The template a version prints with: a school template revision for an exam paper, the built-in shell (no revision) for a standalone one. */
+type PrintTemplate = { kind: 'exam'; revisionId: string; name: string; content: string } | { kind: 'standalone' };
+
+/** The planned maximum marks a new version of this paper snapshots: the exam plan's, none for a standalone paper. */
+const planMaxMarksOf = (scope: ResolvedPaper): number | null => (isStandalonePaper(scope) ? null : scope.planMaxMarks);
 
 async function savedByJob(db: DatabaseExecutor, jobId: string): Promise<VersionRow | undefined> {
   const [version] = await db
@@ -356,7 +410,7 @@ async function savedByJob(db: DatabaseExecutor, jobId: string): Promise<VersionR
   return version;
 }
 
-const savedResult = (version: VersionRow, planMaxMarks: number): SavedVersion => ({
+const savedResult = (version: VersionRow, planMaxMarks: number | null): SavedVersion => ({
   versionNo: version.versionNo,
   paperId: version.paperId,
   planMaxMarks: version.planMaxMarks ?? planMaxMarks,
@@ -390,29 +444,47 @@ const savedResult = (version: VersionRow, planMaxMarks: number): SavedVersion =>
 export async function saveQuestionPaperVersion(
   db: Database,
   input: {
-    scope: PaperScope;
+    scope: ResolvedPaper;
     userId: string;
     expectedVersionNo: number | null;
     /** The fragment as written; it is cleaned and checked here. */
     html: string;
     source: SaveSource;
+    /**
+     * What the save does to a standalone paper's details
+     * (docs/personal-space.md), required for one: the details the saved
+     * paper states, which replace all four `details_*` columns in this save's
+     * transaction, or `keep` for a version that states none (the generation
+     * job's answer without a readable details block), which leaves them as
+     * they are. Ignored for an exam paper, whose names come from its plan.
+     */
+    details?: QuestionPaperDetails | 'keep';
     signal?: AbortSignal;
   },
 ): Promise<SavedVersion> {
   const { scope, source } = input;
+  if (isStandalonePaper(scope) && !input.details) throw new Error('A standalone question paper is saved with its details.');
   if (source.kind === 'ai_job') {
     const done = await savedByJob(db, source.jobId);
-    if (done) return savedResult(done, scope.planMaxMarks);
+    if (done) return savedResult(done, planMaxMarksOf(scope));
   }
-  assertPaperWritable(scope);
+  assertResolvedPaperWritable(scope);
+  // A standalone paper's limits (docs/personal-space.md "Limits"), looked at before any chat image is copied into the
+  // paper and before the PDF is printed, so a refused save writes and prints nothing; the save's transaction checks
+  // them again under the lock.
+  if (isStandalonePaper(scope)) await assertStandaloneSaveRoom(db, scope, source, false);
   let checked: Extract<DraftCheck, { ok: true }>;
   if (source.kind === 'copy') {
+    // Copying an earlier paper is a feature of exam papers (same class and subject); a standalone paper has no class.
+    if (isStandalonePaper(scope)) throw new Error('A standalone question paper cannot be started from a copy.');
     checked = await checkCopiedFragment(db, { scope, userId: input.userId, html: input.html, expectedVersionNo: input.expectedVersionNo, sourcePaperId: source.sourcePaperId });
   } else {
     // Chat attachments may be figures only when an agent saves from a chat. The AI job has no way to attach an
     // image, so a figure id it cannot resolve becomes a placeholder; an agent is told and fixes it.
     const chat =
-      source.kind === 'agent' && source.conversationId ? await chatFiguresOf(db, { userId: input.userId, conversationId: source.conversationId, key: scope.key }) : undefined;
+      source.kind === 'agent' && source.conversationId
+        ? await chatFiguresOf(db, { userId: input.userId, conversationId: source.conversationId, paper: conversationRefOf(scope) })
+        : undefined;
     const unresolvedFigures: UnresolvedFigures = source.kind === 'ai_job' ? 'placeholder' : 'problem';
     const first = await checkQuestionPaperDraft(db, scope, input.html, { chat, unresolvedFigures });
     if (!first.ok) throw invalidPaperError(first.problems);
@@ -428,11 +500,10 @@ export async function saveQuestionPaperVersion(
       checked = { ...converted, notices, stripped };
     }
   }
-  const template = await selectedQuestionPaperTemplate(db, scope.key.schoolId);
-  if (!template) throw templateMissingError();
+  const template = await printTemplateFor(db, scope);
 
   for (let attempt = 1; ; attempt += 1) {
-    const paper = await findPaper(db, scope.key);
+    const paper = await findPaperOf(db, scope);
     const latest = paper?.latestVersionNo ?? 0;
     if (input.expectedVersionNo !== null && input.expectedVersionNo !== latest) {
       throw rpcError.conflict(`The paper changed: its latest version is ${latest}, not ${input.expectedVersionNo}. Read it again with getQuestionPaper.`);
@@ -446,17 +517,43 @@ export async function saveQuestionPaperVersion(
       if (source.kind === 'ai_job') {
         // A replayed step that lost a race with itself: the version exists.
         const done = await savedByJob(db, source.jobId);
-        if (done) return savedResult(done, scope.planMaxMarks);
+        if (done) return savedResult(done, planMaxMarksOf(scope));
       }
       throw error;
     }
   }
 }
 
+/**
+ * A standalone paper's limits for one more version: the version cap and,
+ * for every save but the AI job's, the space's save rate
+ * (`assertStandaloneVersionRoom`), then the space's stored bytes with the
+ * new PDF (`pdfBytes`; 0 for the early look before it is printed). An exam
+ * paper has none of these.
+ */
+async function assertStandaloneSaveRoom(db: DatabaseExecutor, scope: ResolvedPaper, source: SaveSource, lock: boolean, pdfBytes = 0, paperId?: string) {
+  const schoolId = paperSchoolIdOf(scope);
+  const resolvedPaperId = paperId ?? (await findPaperOf(db, scope))?.id ?? null;
+  await assertStandaloneVersionRoom(db, { schoolId, paperId: resolvedPaperId, countsTowardRate: source.kind !== 'ai_job', lock });
+  await assertPersonalSpaceStorageRoom(db, { schoolId, addedBytes: pdfBytes, lock });
+}
+
+/**
+ * The template a new version of this paper prints with: the school's
+ * currently selected question paper template for an exam paper (none
+ * selected is PRECONDITION_FAILED), the built-in shell for a standalone one.
+ */
+async function printTemplateFor(db: DatabaseExecutor, scope: ResolvedPaper): Promise<PrintTemplate> {
+  if (isStandalonePaper(scope)) return { kind: 'standalone' };
+  const template = await selectedQuestionPaperTemplate(db, scope.key.schoolId);
+  if (!template) throw templateMissingError();
+  return { kind: 'exam', ...template };
+}
+
 /** CONFLICT unless the paper's `latest_version_no` is `expected` (no expectation: the AI job). An early look, not under the lock. */
-async function assertExpectedVersion(db: DatabaseExecutor, scope: PaperScope, expected: number | null): Promise<void> {
+async function assertExpectedVersion(db: DatabaseExecutor, scope: ResolvedPaper, expected: number | null): Promise<void> {
   if (expected === null) return;
-  const latest = (await findPaper(db, scope.key))?.latestVersionNo ?? 0;
+  const latest = (await findPaperOf(db, scope))?.latestVersionNo ?? 0;
   if (expected !== latest) {
     throw rpcError.conflict(`The paper changed: its latest version is ${latest}, not ${expected}. Read it again with getQuestionPaper.`);
   }
@@ -543,47 +640,77 @@ export async function copyQuestionPaperVersion(
   });
 }
 
+/**
+ * The HTML a version of this paper prints as: the school's template with the
+ * exam's context for an exam paper, the built-in shell for a standalone one.
+ * `planMaxMarks` is what the template's header shows (the version's own
+ * snapshot when an old version is printed again).
+ */
+async function renderPaperDocument(
+  db: DatabaseExecutor,
+  input: { scope: ResolvedPaper; template: PrintTemplate; body: Awaited<ReturnType<typeof renderQuestionPaperBody>>; versionNo: number; planMaxMarks: number | null; generatedAt?: Date },
+): Promise<string> {
+  const { scope, template, body } = input;
+  if (isStandalonePaper(scope) || template.kind === 'standalone') {
+    if (!isStandalonePaper(scope) || template.kind !== 'standalone') throw new Error('A question paper and its print template are of different kinds.');
+    return renderStandaloneQuestionPaperDocument(body);
+  }
+  const context = await measure('qp.context', () =>
+    buildQuestionPaperContext(db, { ...scope, planMaxMarks: input.planMaxMarks ?? scope.planMaxMarks }, { versionNo: input.versionNo }, input.generatedAt),
+  );
+  return renderQuestionPaperDocument({ template, context, body });
+}
+
+/** The artifact columns that name what a question paper PDF belongs to: the exam's, none for a standalone paper. */
+const artifactScopeOf = (scope: ResolvedPaper) =>
+  isStandalonePaper(scope)
+    ? { sessionId: null, examSlug: null, classId: null }
+    : { sessionId: scope.key.sessionId, examSlug: scope.key.examSlug, classId: scope.key.classId };
+
 async function renderAndStore(
   db: Database,
   input: {
-    scope: PaperScope;
+    scope: ResolvedPaper;
     userId: string;
     expectedVersionNo: number | null;
     source: SaveSource;
+    details?: QuestionPaperDetails | 'keep';
     signal?: AbortSignal;
     versionNo: number;
     assumedLatest: number;
     checked: Extract<DraftCheck, { ok: true }>;
-    template: { revisionId: string; content: string };
+    template: PrintTemplate;
   },
 ): Promise<SavedVersion> {
   const { scope, checked, versionNo, source } = input;
-  const paper = await findPaper(db, scope.key);
+  const schoolId = paperSchoolIdOf(scope);
+  const planMaxMarks = planMaxMarksOf(scope);
+  const paper = await findPaperOf(db, scope);
   const body = await renderQuestionPaperBody(db, {
-    schoolId: scope.key.schoolId,
+    schoolId,
     paperId: paper?.id ?? null,
     html: checked.html,
   });
-  const context = await measure('qp.context', () => buildQuestionPaperContext(db, scope, { versionNo }));
-  const html = renderQuestionPaperDocument({ template: input.template, context, body });
+  const html = await renderPaperDocument(db, { scope, template: input.template, body, versionNo, planMaxMarks });
   const pdf = await convertDocumentPdf(html, 'question_paper', input.signal);
+  // A standalone paper's PDF is named after the details this very save states, or the paper's own when it keeps them.
+  const names: PaperNames =
+    !isStandalonePaper(scope) ? { kind: 'exam', scope } : input.details === 'keep' || !input.details ? await paperNamesOf(db, scope) : { kind: 'standalone', details: input.details };
 
   const artifactId = generateId('artifact');
   return persistDocumentObject(
     db,
     {
       id: artifactId,
-      schoolId: scope.key.schoolId,
+      schoolId,
       kind: 'pdf',
       documentType: 'question_paper',
-      name: artifactName(scope, versionNo),
-      s3Key: `schools/${scope.key.schoolId}/documents/${artifactId}.pdf`,
+      name: artifactName(names, versionNo),
+      s3Key: `schools/${schoolId}/documents/${artifactId}.pdf`,
       contentType: 'application/pdf',
       pageSize: 'full',
-      templateRevisionId: input.template.revisionId,
-      sessionId: scope.key.sessionId,
-      examSlug: scope.key.examSlug,
-      classId: scope.key.classId,
+      templateRevisionId: input.template.kind === 'exam' ? input.template.revisionId : null,
+      ...artifactScopeOf(scope),
       studentIds: [],
       studentCount: 0,
       createdBy: input.userId,
@@ -591,8 +718,8 @@ async function renderAndStore(
     pdf,
     async (tx, artifact) => {
       // Session share lock first, then the paper lock: a completion of the exam cannot slip in between.
-      await assertPaperWritableLocked(tx, scope.key);
-      const locked = await lockOrCreatePaper(tx, scope.key, input.userId);
+      await assertResolvedPaperWritableLocked(tx, scope);
+      const locked = await lockOrCreatePaperOf(tx, scope, input.userId);
       if (source.kind === 'ai_job') {
         // A job swept at its deadline (or deleted with its paper) must not commit a version afterwards. The row is
         // read FOR SHARE after the paper lock (the order every job-row writer here also keeps: the sweep and the
@@ -610,7 +737,7 @@ async function renderAndStore(
         const [kept] = await tx
           .select({ id: examQuestionPaperVersionTable.id })
           .from(examQuestionPaperVersionTable)
-          .where(and(eq(examQuestionPaperVersionTable.id, source.sourceVersionId), eq(examQuestionPaperVersionTable.schoolId, scope.key.schoolId)))
+          .where(and(eq(examQuestionPaperVersionTable.id, source.sourceVersionId), eq(examQuestionPaperVersionTable.schoolId, schoolId)))
           .for('key share');
         if (!kept) throw copySourceNotFoundError('Question paper version');
       }
@@ -622,9 +749,11 @@ async function renderAndStore(
       }
       // The figures were validated against the paper as it was before the lock; it is the same paper (same id).
       if (paper && paper.id !== locked.id) throw new VersionRaceError();
+      if (isStandalonePaper(scope)) await assertStandaloneSaveRoom(tx, scope, source, true, artifact.byteSize, locked.id);
       await tx.insert(examQuestionPaperVersionTable).values({
         paperId: locked.id,
-        schoolId: scope.key.schoolId,
+        paperKind: locked.kind,
+        schoolId,
         versionNo,
         contentHtml: checked.html,
         contentSha256: questionPaperContentSha256(checked.html),
@@ -633,20 +762,34 @@ async function renderAndStore(
         sourcePageIds: source.kind === 'ai_job' ? source.pageIds : null,
         sourceConversationId: source.kind === 'agent' ? source.conversationId : null,
         sourceVersionId: source.kind === 'copy' ? source.sourceVersionId : null,
-        planMaxMarks: scope.planMaxMarks,
+        planMaxMarks,
         warnings: checked.notices,
-        templateRevisionId: input.template.revisionId,
+        templateRevisionId: input.template.kind === 'exam' ? input.template.revisionId : null,
         pdfArtifactId: artifact.id,
         createdBy: input.userId,
       });
+      // A standalone paper's details are not revisioned: this save's details replace all four, in this transaction
+      // (`keep`: a version that states none leaves them as they are).
+      const details = isStandalonePaper(scope) && input.details && input.details !== 'keep' ? input.details : null;
       await tx
         .update(examQuestionPaperTable)
-        .set({ latestVersionNo: versionNo, updatedAt: new Date() })
+        .set({
+          latestVersionNo: versionNo,
+          updatedAt: new Date(),
+          ...(details
+            ? {
+                detailsSchoolName: details.schoolName,
+                detailsClassName: details.className,
+                detailsSubjectName: details.subjectName,
+                detailsExamName: details.examName,
+              }
+            : {}),
+        })
         .where(eq(examQuestionPaperTable.id, locked.id));
       return {
         versionNo,
         paperId: locked.id,
-        planMaxMarks: scope.planMaxMarks,
+        planMaxMarks,
         warnings: checked.notices,
         hasPdf: true as const,
         replayed: false,
@@ -673,23 +816,28 @@ export async function getVersion(db: DatabaseExecutor, paperId: string, versionN
  */
 export async function renderStoredVersionHtml(
   db: DatabaseExecutor,
-  scope: PaperScope,
+  scope: ResolvedPaper,
   version: VersionRow,
   generatedAt: Date = new Date(),
-): Promise<{ html: string; templateName: string }> {
-  const template = await readPinnedQuestionPaperTemplate(db, scope.key.schoolId, version.templateRevisionId);
-  const body = await renderQuestionPaperBody(db, { schoolId: scope.key.schoolId, paperId: version.paperId, html: version.contentHtml });
+): Promise<{ html: string; templateName: string | null }> {
+  const schoolId = paperSchoolIdOf(scope);
+  const template = await pinnedPrintTemplateOf(db, scope, version);
+  const body = await renderQuestionPaperBody(db, { schoolId, paperId: version.paperId, html: version.contentHtml });
   // The maximum marks are the saved fact (`plan_max_marks`), not the plan as it is today: an edited plan must not change
   // an old version's preview or a restored PDF. Class, subject, mode and exam names still come from the live scope.
-  const context = await measure('qp.context', () =>
-    buildQuestionPaperContext(
-      db,
-      { ...scope, planMaxMarks: version.planMaxMarks ?? scope.planMaxMarks },
-      { versionNo: version.versionNo },
-      generatedAt,
-    ),
-  );
-  return { html: renderQuestionPaperDocument({ template, context, body }), templateName: template.name };
+  const html = await renderPaperDocument(db, { scope, template, body, versionNo: version.versionNo, planMaxMarks: version.planMaxMarks, generatedAt });
+  return { html, templateName: template.kind === 'exam' ? template.name : null };
+}
+
+/**
+ * The template a stored version prints with again: the revision it pinned
+ * (an exam paper), or the built-in shell (a standalone paper, whose versions
+ * pin none: `exam_question_paper_version_template_check`).
+ */
+async function pinnedPrintTemplateOf(db: DatabaseExecutor, scope: ResolvedPaper, version: VersionRow): Promise<PrintTemplate> {
+  if (isStandalonePaper(scope)) return { kind: 'standalone' };
+  if (version.templateRevisionId === null) throw new Error(`Exam question paper version ${version.id} has no template revision.`);
+  return { kind: 'exam', ...(await readPinnedQuestionPaperTemplate(db, scope.key.schoolId, version.templateRevisionId)) };
 }
 
 /** A concurrent download stored a PDF for the same version first; this one is discarded. */
@@ -704,7 +852,7 @@ class PdfAlreadyStoredError extends Error {}
  */
 export async function storedVersionPdfKey(
   db: Database,
-  input: { scope: PaperScope; version: VersionRow; userId: string; signal?: AbortSignal },
+  input: { scope: ResolvedPaper; version: VersionRow; userId: string; signal?: AbortSignal },
 ): Promise<string> {
   const { scope } = input;
   let version = input.version;
@@ -713,7 +861,7 @@ export async function storedVersionPdfKey(
       const [artifact] = await db
         .select({ s3Key: artifactTable.s3Key, status: artifactTable.status })
         .from(artifactTable)
-        .where(and(eq(artifactTable.id, version.pdfArtifactId), eq(artifactTable.schoolId, scope.key.schoolId)))
+        .where(and(eq(artifactTable.id, version.pdfArtifactId), eq(artifactTable.schoolId, paperSchoolIdOf(scope))))
         .limit(1);
       if (artifact?.status === 'ready') return artifact.s3Key;
     }
@@ -730,29 +878,30 @@ export async function storedVersionPdfKey(
 /** A short-lived download URL for a version's PDF ({@link storedVersionPdfKey}). */
 export async function downloadVersionPdf(
   db: Database,
-  input: { scope: PaperScope; version: VersionRow; userId: string; signal?: AbortSignal },
+  input: { scope: ResolvedPaper; version: VersionRow; userId: string; signal?: AbortSignal },
 ): Promise<{ url: string; fileName: string }> {
   const s3Key = await storedVersionPdfKey(db, input);
-  const fileName = downloadFileName(input.scope, input.version.versionNo);
+  const fileName = downloadFileName(await paperNamesOf(db, input.scope), input.version.versionNo);
   return { url: await documentDownloadUrl(s3Key, fileName), fileName: `${fileName}.pdf` };
 }
 
 /** Prints the version again and stores the PDF as its artifact; answers with the new object's key. */
 async function restoreVersionPdf(
   db: Database,
-  input: { scope: PaperScope; version: VersionRow; userId: string; signal?: AbortSignal },
+  input: { scope: ResolvedPaper; version: VersionRow; userId: string; signal?: AbortSignal },
 ): Promise<string> {
   const { scope, version } = input;
+  const schoolId = paperSchoolIdOf(scope);
   const { html } = await renderStoredVersionHtml(db, scope, version);
   const pdf = await convertDocumentPdf(html, 'question_paper', input.signal);
   const artifactId = generateId('artifact');
-  const name = artifactName(scope, version.versionNo);
-  const s3Key = `schools/${scope.key.schoolId}/documents/${artifactId}.pdf`;
+  const name = artifactName(await paperNamesOf(db, scope), version.versionNo);
+  const s3Key = `schools/${schoolId}/documents/${artifactId}.pdf`;
   await persistDocumentObject(
     db,
     {
       id: artifactId,
-      schoolId: scope.key.schoolId,
+      schoolId,
       kind: 'pdf',
       documentType: 'question_paper',
       name,
@@ -760,9 +909,7 @@ async function restoreVersionPdf(
       contentType: 'application/pdf',
       pageSize: 'full',
       templateRevisionId: version.templateRevisionId,
-      sessionId: scope.key.sessionId,
-      examSlug: scope.key.examSlug,
-      classId: scope.key.classId,
+      ...artifactScopeOf(scope),
       studentIds: [],
       studentCount: 0,
       createdBy: input.userId,

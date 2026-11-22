@@ -74,8 +74,7 @@ function GuideShelf() {
 const paths: readonly [string, string, string][] = [
   ["/features", "Explore every feature", "Admissions, academics, fees, exams, documents and dashboards."],
   ["/ai-ready", "See what AI-ready means", "How assistants work with your records, within each person's access."],
-  ["/contact", "Ask us directly", "WhatsApp, call or email with any question about your setup."],
-  ["/book-demo", "Book a walkthrough", "30 minutes, built around your school."],
+  ["/contact", "Contact us", "A short form, WhatsApp, call or email: whatever is easiest."],
 ];
 
 function PathLink({ href, title, text }: { href: string; title: string; text: string }) {
@@ -118,8 +117,8 @@ export function DocumentationPage() {
         description="We're writing practical guides for principals, office staff, accountants and teachers. Until they're ready, we'll happily walk you through anything directly."
         actions={
           <ButtonRow>
-            <ButtonLink href="/book-demo" size="lg">
-              Book a demo
+            <ButtonLink href="/contact" size="lg">
+              Contact us
             </ButtonLink>
             <ButtonLink href="/features" size="lg" tone="light">
               Explore features

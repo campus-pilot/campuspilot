@@ -20,6 +20,7 @@ import { parseImageUpload } from '../../../files/image-upload';
 import { assertSchoolFeatureEnabled } from '../../../feature-flags/feature-flags.service';
 import { assertPermission } from '../../../permissions/authorization';
 import { assertSchoolWritableByCaller } from '../../../school-access/school-access.service';
+import { assertSchoolKindServedByCaller, REAL_SCHOOLS_ONLY } from '../../../school-access/school-kind.service';
 import {
   ADMISSION_PHOTO_FIELD_NAME,
   MAX_ADMISSION_PHOTO_BYTES,
@@ -47,6 +48,8 @@ export async function handleAdmissionPhotoUpload(
   reportError?: HttpErrorReporter,
 ): Promise<Response> {
   try {
+    // Admissions are data of real schools (docs/personal-space.md); held before the permission, as `requireAuth` does.
+    await assertSchoolKindServedByCaller(context, input.schoolId, REAL_SCHOOLS_ONLY);
     await assertPermission(context, {
       action: SCHOOL_ACTIONS.UPDATE_ADMISSION,
       resource: { kind: 'school', schoolId: input.schoolId },
@@ -93,6 +96,8 @@ export async function handleAdmissionPhotoRead(
   reportError?: HttpErrorReporter,
 ): Promise<Response> {
   try {
+    // Admissions are data of real schools (docs/personal-space.md); held before the permission, as `requireAuth` does.
+    await assertSchoolKindServedByCaller(context, input.schoolId, REAL_SCHOOLS_ONLY);
     await assertPermission(context, {
       action: SCHOOL_ACTIONS.READ_ADMISSION,
       resource: { kind: 'school', schoolId: input.schoolId },
@@ -136,6 +141,8 @@ export async function handleAdmissionDocumentUpload(
     ) {
       throw rpcError.badRequest('School, admission, and document type are required.');
     }
+    // Admissions are data of real schools (docs/personal-space.md); held before the permission, as `requireAuth` does.
+    await assertSchoolKindServedByCaller(context, input.schoolId, REAL_SCHOOLS_ONLY);
     await assertPermission(context, {
       action: SCHOOL_ACTIONS.UPDATE_ADMISSION,
       resource: { kind: 'school', schoolId: input.schoolId },
@@ -218,6 +225,8 @@ export async function handleAdmissionDocumentRead(
   reportError?: HttpErrorReporter,
 ): Promise<Response> {
   try {
+    // Admissions are data of real schools (docs/personal-space.md); held before the permission, as `requireAuth` does.
+    await assertSchoolKindServedByCaller(context, input.schoolId, REAL_SCHOOLS_ONLY);
     await assertPermission(context, {
       action: SCHOOL_ACTIONS.READ_ADMISSION,
       resource: { kind: 'school', schoolId: input.schoolId },
@@ -253,6 +262,8 @@ export async function handleAdmissionDocumentDelete(
   reportError?: HttpErrorReporter,
 ): Promise<Response> {
   try {
+    // Admissions are data of real schools (docs/personal-space.md); held before the permission, as `requireAuth` does.
+    await assertSchoolKindServedByCaller(context, input.schoolId, REAL_SCHOOLS_ONLY);
     await assertPermission(context, {
       action: SCHOOL_ACTIONS.UPDATE_ADMISSION,
       resource: { kind: 'school', schoolId: input.schoolId },

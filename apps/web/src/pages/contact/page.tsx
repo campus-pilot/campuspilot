@@ -1,37 +1,29 @@
-import { MessagesSquare } from "lucide-react";
-
 import { FinalCta } from "@/site/ui/final-cta";
-import { PageHero } from "@/site/ui/page-hero";
 
+import { AgendaSection } from "./agenda";
+import { AssuranceSection } from "./assurances";
 import { ChannelGrid } from "./channel-grid";
+import { ContactHero } from "./hero";
+import { PrepSection } from "./prep";
 import { SwitchboardSection } from "./switchboard";
 
-function ContactHero() {
-  return (
-    <PageHero
-      eyebrow="Talk to CampusPilot"
-      eyebrowIcon={MessagesSquare}
-      title={
-        <>
-          Reach us the way <em>you already work.</em>
-        </>
-      }
-      description="Questions about your school's setup, a demo, or what AI-ready means for your records? Message, call or email, and we'll take it from there."
-      note="Nursery to Class 12 · Single campus or a group of schools · Fees in ₹"
-    />
-  );
-}
-
-/** `/contact`: hero → channel cards → "which channel for what" switchboard → final CTA. */
+/**
+ * `/contact`, the site's only contact page: hero with the contact form →
+ * assurances → the three direct channels → "which channel for what"
+ * switchboard → demo agenda → prep checklist → final CTA.
+ */
 export function ContactPage() {
   return (
     <>
       <ContactHero />
+      <AssuranceSection />
       <ChannelGrid />
       <SwitchboardSection />
+      <AgendaSection />
+      <PrepSection />
       <FinalCta
-        title="Prefer to see it first?"
-        description="Book a focused walkthrough of your sessions, classes, fee structures and exams, and what AI-ready means for your records."
+        title="Rather try it yourself?"
+        description="Log in to set up your school, or explore what CampusPilot covers first."
         secondary={{ href: "/features", label: "Explore features" }}
       />
     </>

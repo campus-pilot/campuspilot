@@ -724,7 +724,7 @@ describe('question paper pages', () => {
       expect(await db.select().from(artifactTable).where(eq(artifactTable.id, versions[0]!.pdfArtifactId!))).toHaveLength(0);
       for (const objectKey of [figure.s3Key, ...artifactKeys, ...pageKeys]) expect(await exists(objectKey), objectKey).toBe(false);
       // The template revision the version pinned is shared and stays.
-      expect(await db.select().from(artifactTable).where(eq(artifactTable.id, versions[0]!.templateRevisionId))).toHaveLength(1);
+      expect(await db.select().from(artifactTable).where(eq(artifactTable.id, versions[0]!.templateRevisionId!))).toHaveLength(1);
     });
 
     it('removes the papers of a plan when the plan is deleted, and only that plan\'s subject', async () => {

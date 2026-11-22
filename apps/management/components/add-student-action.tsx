@@ -15,6 +15,7 @@ import { z } from 'zod';
 
 import { client, orpc } from '@/lib/orpc';
 import { FormErrors } from './form-errors';
+import { CreateAdmissionAction } from './create-admission-action';
 import { RequireFeature } from './require-feature';
 
 const admissionOptionSchema = z.object({ id: z.string().min(1), name: z.string(), admissionNo: z.string() });
@@ -29,7 +30,7 @@ const enrollmentSchema = z.object({ admission: admissionOptionSchema.nullable().
  */
 function AdmissionCombobox({ schoolId, sessionId, value, searchQuery, onValueChange, onSearchChange }: { schoolId: string; sessionId: string; value: AdmissionOption | null; searchQuery: string; onValueChange: (value: AdmissionOption | null) => void; onSearchChange: (value: string) => void }) {
   const admissionsQuery = useQuery(orpc.school.listAdmissions.queryOptions({ input: { schoolId, limit: 20, searchQuery: searchQuery.trim() || undefined, filters: { registered: true, unadmittedForSessionId: sessionId } } }));
-  return (
+  const combobox = (
     <Combobox
       items={admissionsQuery.data?.items ?? []}
       value={value}
@@ -47,6 +48,28 @@ function AdmissionCombobox({ schoolId, sessionId, value, searchQuery, onValueCha
       showClear
       emptyMessage={admissionsQuery.isPending ? 'Loading admissions…' : admissionsQuery.isError ? 'Unable to load admissions. Try again.' : 'No eligible admissions found.'}
     />
+  );
+  return admissionsQuery.data?.items.length === 0 && !searchQuery.trim() ? (
+    <>
+      {combobox}
+      <NoEligibleAdmissions schoolId={schoolId} />
+    </>
+  ) : combobox;
+}
+
+/**
+ * Nothing to enroll and nothing searched: every registered admission is
+ * already a student this session, or there are none. Staff who may create
+ * admissions get New admission (its own gated dialog, opened over this one);
+ * a new admission is registered and refreshes the picker, so it can be
+ * chosen straight away.
+ */
+function NoEligibleAdmissions({ schoolId }: { schoolId: string }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+      <span>No admission is waiting to be enrolled.</span>
+      <CreateAdmissionAction schoolId={schoolId} variant="outline" />
+    </div>
   );
 }
 
@@ -86,7 +109,7 @@ function EnrollmentDialog({ schoolId, sessionId, classId, onClose }: { schoolId:
 }
 
 /** Enrolling a student needs admissions, which belong to student management; without it there is no action. */
-export function AddStudentAction(props: { schoolId: string; sessionId: string; classId: string }) {
+export function AddStudentAction(props: { schoolId: string; sessionId: string; classId: string; variant?: 'default' | 'outline' }) {
   return (
     <RequireFeature schoolId={props.schoolId} feature="studentManagement">
       <PermittedAddStudentAction {...props} />
@@ -94,15 +117,16 @@ export function AddStudentAction(props: { schoolId: string; sessionId: string; c
   );
 }
 
-function PermittedAddStudentAction({ schoolId, sessionId, classId }: { schoolId: string; sessionId: string; classId: string }) {
+function PermittedAddStudentAction({ schoolId, sessionId, classId, variant = 'default' }: { schoolId: string; sessionId: string; classId: string; variant?: 'default' | 'outline' }) {
   const [open, setOpen] = useState(false);
   const permissionQuery = useQuery(orpc.authorization.checkPermissions.queryOptions({ input: { permissions: [
     { action: SCHOOL_ACTIONS.CREATE_STUDENT, resource: { kind: 'school', schoolId } },
     { action: CLASS_ACTIONS.ADD_STUDENT, resource: { kind: 'class', schoolId, classId } },
     { action: SCHOOL_ACTIONS.LIST_ADMISSIONS, resource: { kind: 'school', schoolId } },
     { action: SCHOOL_ACTIONS.LIST_SECTIONS, resource: { kind: 'school', schoolId } },
+    { action: SCHOOL_ACTIONS.LIST_STUDENTS, resource: { kind: 'school', schoolId } },
   ] } }));
   const permissions = permissionQuery.data?.results;
-  if (!permissions || (!(permissions[0] || permissions[1])) || !permissions[2] || !permissions[3]) return null;
-  return <><Button type="button" size="sm" onClick={() => setOpen(true)}><Plus aria-hidden />Add student</Button>{open ? <EnrollmentDialog schoolId={schoolId} sessionId={sessionId} classId={classId} onClose={() => setOpen(false)} /> : null}</>;
+  if (!permissions || (!(permissions[0] || permissions[1])) || !permissions[2] || !permissions[3] || !permissions[4]) return null;
+  return <><Button type="button" size="sm" variant={variant} onClick={() => setOpen(true)}><Plus aria-hidden />Add student</Button>{open ? <EnrollmentDialog schoolId={schoolId} sessionId={sessionId} classId={classId} onClose={() => setOpen(false)} /> : null}</>;
 }

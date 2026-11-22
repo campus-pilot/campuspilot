@@ -11,7 +11,7 @@ import { SYSTEM_ACTIONS } from "@campuspilot/opa/policies/system";
 import { and, asc, count, desc, eq, inArray, ne } from "drizzle-orm";
 
 import { rpcError, toRpcError } from "../../../errors";
-import { protectedProcedure } from "../../../index";
+import { platformAdminProcedure } from "../../../index";
 import {
   createNextPageCursor,
   createPaginatedResult,
@@ -55,7 +55,7 @@ const platformUserColumns = {
  * credentials or change how someone signs in, so they stay human actions.
  */
 export const userRouter = {
-  listUsers: protectedProcedure
+  listUsers: platformAdminProcedure
     .route({
       summary: "List users",
       description:
@@ -111,7 +111,7 @@ export const userRouter = {
       }
     }),
 
-  setUserPassword: protectedProcedure
+  setUserPassword: platformAdminProcedure
     .route({
       summary: "Set a user's password",
       description:
@@ -166,7 +166,7 @@ export const userRouter = {
       }
     }),
 
-  updateUserSignIn: protectedProcedure
+  updateUserSignIn: platformAdminProcedure
     .route({
       summary: "Update a user's sign-in details",
       description:

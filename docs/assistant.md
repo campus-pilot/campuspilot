@@ -69,7 +69,15 @@ permissions.
    view** lists: every procedure the policy allows, core and advanced, tagged
    with exposure and module. Core tools load up front; advanced ones are
    deferred to the provider's tool search where it has one (Anthropic);
-   Gemini gets every tool on each request.
+   Gemini gets every tool on each request. A tool whose input has a top-level
+   `schoolId` (`schoolScoped`, from its listed schema) is shown to the model
+   without it, and the run fills in the conversation's school when calling it
+   (`modelInputSchemaOf`, `toolInputFor` in `src/runtime/tools.ts`): models
+   mistype long random ids, and a one-character slip was refused as another
+   school. A `schoolId` the model sends anyway is passed on unchanged, so the
+   API still refuses a call naming another school. The tool call item records
+   the arguments as called (school included), since the chat's draft cards and
+   approvals read the call from it.
 5. A write pauses on a Restate awakeable until the user approves or declines
    it in the UI. The decision is saved on the approval row and handed to the
    worker (`AssistantControl.resolveApproval`, which wakes the run with the
@@ -280,8 +288,8 @@ not told which. `beginRun` makes the choice from the message's `tier`, journals 
 run (`RunFacts.model`), and each step resolves the provider and its prices by that model
 (`ProviderRegistry.get` and `prices` with a model), so every cost row carries the model it
 called and that model's prices.
-`QUESTION_PAPER_MAX_RUNNING_JOBS_PER_SCHOOL` (default 3) caps the jobs (queued plus
-running) one school may have at once, which bounds how many run at the same time (not how far
+`QUESTION_PAPER_MAX_RUNNING_JOBS_PER_SCHOOL` (default 3; 1 for a personal space,
+`PERSONAL_SPACE_MAX_RUNNING_JOBS`) caps the jobs (queued plus running) one school may have at once, which bounds how many run at the same time (not how far
 the cached spend check can be overshot by jobs started one after another).
 The worker needs the same `QUESTION_PAPER_*` values as the API server.
 
@@ -610,6 +618,12 @@ the worker logs a warning when it is on in production.
 
 ## Conversations shared with a question paper
 
+A standalone paper of a personal space is shared by its id instead
+(`assistant_conversation.standalone_paper_id`, seed `standalone_question_paper`), reached
+through the school's standalone paper permission; tools are offered per school kind
+(`ASSISTANT_TOOL_META.schoolKinds`, `toolCatalogForSchool`). See
+[Personal space](personal-space.md#assistant-and-mcp).
+
 A conversation is private to the user who started it, with one exception: a
 conversation started on a question paper's screen is **shared with that paper**,
 so a colleague who takes the paper over reads how it came to be and carries on.
@@ -716,6 +730,8 @@ Voice needs all of these, each its own fact (`voice/access.ts`, `voiceRefusal`):
    settings, edited on the admin app's School › AI page. Settings saved before
    voice existed read as off.
 4. **Nobody is impersonating the user.**
+5. **The school is not a personal space** (`school.kind`, docs/personal-space.md):
+   a personal space has no voice mode, refused on the server as well as hidden.
 
 `getStatus` reports the result as `voice.available`; the voice button is shown
 only then. When the platform has no voice model, the admin app's School › AI

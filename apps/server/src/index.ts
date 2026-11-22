@@ -23,6 +23,9 @@ import { sweepNotificationRetention } from '@campuspilot/api/notifications/reten
 import { sweepResultPublications } from '@campuspilot/api/notifications/emitters/results';
 import { sweepWhatsAppFailureAlerts } from '@campuspilot/api/notifications/failure-alerts';
 import { startRuntimeMonitor } from '@campuspilot/logger/perf';
+import { sweepLeadAlertOutbox } from '@campuspilot/api/leads/lead.outbox';
+import { registerGoogleSignUpHandler } from '@campuspilot/auth/google-sign-up';
+import { createPersonalSpaceAfterGoogleSignUp } from '@campuspilot/api/personal-space/personal-space.service';
 
 import { app, cadetMcpCatalog, cadetMcpHandler, mcpCatalog, mcpHandler } from './http';
 import { log } from './log';
@@ -109,6 +112,15 @@ async function sweepImages() {
   if (reservations.released > 0) log.info(reservations, 'question-paper.reservations.released');
 }
 
+/**
+ * One lead alert sweep: schedules with Restate the WhatsApp alerts of saved
+ * leads whose hand-off after commit failed or never happened.
+ */
+async function sweepLeadAlerts() {
+  const result = await sweepLeadAlertOutbox();
+  if (Object.values(result).some((value) => value > 0)) log.info(result, 'lead-alert.outbox.ok');
+}
+
 /** Finishes result publications whose deliveries settled (publisher notified once). */
 async function sweepPublications() {
   const publications = await sweepResultPublications();
@@ -126,6 +138,7 @@ const OUTBOX_SWEEPS: ReadonlyArray<{ errorMessage: string; run: () => Promise<vo
   { errorMessage: 'assistant.outbox.error', run: sweepAssistant },
   { errorMessage: 'question-paper.outbox.error', run: sweepQuestionPapers },
   { errorMessage: 'image-derivatives.outbox.error', run: sweepImages },
+  { errorMessage: 'lead-alert.outbox.error', run: sweepLeadAlerts },
   { errorMessage: 'notification.results.sweep.error', run: sweepPublications },
   // Reports failed WhatsApp deliveries to staff granted to receive them (D-30).
   { errorMessage: 'notification.failure-alerts.error', run: async () => { await sweepWhatsAppFailureAlerts(); } },
@@ -164,6 +177,8 @@ function configureQuestionPaperGeneration() {
 
 async function main() {
   configureQuestionPaperGeneration();
+  // A new Google sign-up gets its personal space (docs/personal-space.md). Registered before any request is served.
+  registerGoogleSignUpHandler((userId) => createPersonalSpaceAfterGoogleSignUp(db, userId));
   // Every later phase and request expects the current schema.
   await phase('db.migrate', () => runMigrations());
   await phase('mcp.catalog', async () => {

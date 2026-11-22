@@ -173,6 +173,15 @@ Before changing exam timetable drafting, publishing or withdrawal, the
 `exam.timetable_published*` notifications, or the Cadet Portal timetable
 screens, read [Examination timetable publishing](docs/exam-timetable-publishing.md).
 
+## Website leads
+
+Before changing the website's demo request form, the public `/public/leads/*`
+routes and their proof-of-work, the `lead` table, the `LeadControl` /
+`leadAlert` Restate services or the admin Demo requests page, read
+[Website leads](docs/leads.md). A submission must only depend on the lead
+insert; every side effect (the WhatsApp alert) is scheduled after commit and
+may fail without failing the request.
+
 ## School feature flags and subscription tiers
 
 Before adding a per-school feature or a tier, gating a procedure, page or
@@ -225,11 +234,29 @@ or store the plan.
 
 Before changing who may create a school, the `school_creation` ledger or
 `user.school_creation_limit`, requests for more schools, the school owner
-(`school.owner_user_id`) and its member guards, or what a self-created school
-starts with, read [Self-service school creation](docs/school-creation.md). The
+(`school.owner_user_id`) and its member guards, what a self-created school
+starts with, or its guided setup (`school_onboarding`, `school.completeOnboarding`,
+the Get started screens), read [Self-service school creation](docs/school-creation.md). The
 allowance counts every school a person ever created (deleted or handed over
 ones included), and the owner can never be removed or lose the principal role
 through school procedures.
+
+## Personal space
+
+Before changing who gets a personal space (`school.kind = 'personal'`, the
+Google sign-up hook, `personalSpace.*`), the school kind gate (`schoolKinds`
+in procedure metadata, `requireAuth`, `assertSchoolKindServedByCaller`),
+standalone question papers (`exam_question_paper.kind = 'standalone'`, their
+details, procedures, plain shell and job branch), the personal space screens
+in `apps/management`, or before letting another procedure serve personal
+spaces, read [Personal space](docs/personal-space.md). A procedure serves
+real schools only unless it says otherwise, reads included; the eligibility
+reads the linked Google account, never `email_verified`; a person gets one
+space for good (`user.personal_space_created_at`); details are not
+revisioned (every save overwrites them). A new way to store bytes or print a
+PDF in a personal space must go through its limits
+(`personal-space.limits.ts`, the guide's "Limits" table) inside the write's
+transaction.
 
 ## Demo schools
 

@@ -8,7 +8,7 @@ import {
   SessionDetailsView,
   UnsavedChangesDialog,
   type SchoolSessionDto,
-  type SessionConfig,
+  type SessionSaveRequest,
 } from '@campuspilot/components/session';
 import {
   AlertDialog,
@@ -49,6 +49,7 @@ import {
 } from 'lucide-react';
 import { client, orpc } from '@/lib/orpc';
 import { SessionFinanceSettings } from './session-finance-settings';
+import { reportSessionSave, toSessionSaveInput } from './session-save';
 
 const newSessionSchema = z
   .object({
@@ -255,12 +256,12 @@ export function SessionManagement({ schoolId }: { schoolId: string }) {
 
   // Mutations
   const updateSessionMutation = useMutation({
-    mutationFn: async (payload: { sessionConfig: SessionConfig | null }) => {
+    mutationFn: async (payload: SessionSaveRequest) => {
       if (!currentSession) return;
       return await client.school.updateSession({
         schoolId,
         sessionId: currentSession.id,
-        sessionConfig: payload.sessionConfig,
+        ...toSessionSaveInput(payload),
       });
     },
     onSuccess: (updated) => {
@@ -482,9 +483,17 @@ export function SessionManagement({ schoolId }: { schoolId: string }) {
             key={currentSession.id}
             session={currentSession as SchoolSessionDto}
             isSaving={updateSessionMutation.isPending}
-            onSave={async (updates) => {
-              await updateSessionMutation.mutateAsync(updates);
-            }}
+            onSave={(request) =>
+              reportSessionSave(
+                () => updateSessionMutation.mutateAsync(request),
+                () =>
+                  queryClient.invalidateQueries({
+                    queryKey: orpc.school.listSessions.queryKey({
+                      input: { schoolId },
+                    }),
+                  }),
+              )
+            }
             onDirtyChange={setIsSessionDirty}
           />
           <SessionFinanceSettings

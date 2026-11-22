@@ -1,5 +1,5 @@
 import type { Context } from '@campuspilot/api/context';
-import { protectedProcedure } from '@campuspilot/api';
+import { platformAdminProcedure, protectedProcedure } from '@campuspilot/api';
 import type {
   McpProcedureMeta,
   ProcedureMeta,
@@ -550,5 +550,71 @@ describe('school feature gates', () => {
     expect(await listed(new Set(['studentManagement']))).toEqual(['listPupils', 'listRooms']);
     // No feature list (the assistant's view, Cadet): nothing is filtered here.
     expect(await listed(undefined)).toEqual(['listPupils', 'listRooms']);
+  });
+});
+
+describe('school kinds in the listing', () => {
+  const route = (summary: string) => ({ summary, description: `${summary}.`, tags: ['Test'] });
+  const schoolInput = z.object({ schoolId: z.string() });
+  async function kindCatalog() {
+    const listRooms = protectedProcedure.meta(mcpMeta()).route(route('List rooms')).input(schoolInput).handler(() => []);
+    const listPapers = protectedProcedure
+      .meta({ ...mcpMeta(), schoolKinds: ['personal'] })
+      .route(route('List papers'))
+      .input(schoolInput)
+      .handler(() => []);
+    // An account-level procedure: no schoolId, so no kind gate holds it.
+    const listMine = protectedProcedure.meta(mcpMeta()).route(route('List mine')).handler(() => []);
+    // Platform administration names a school but acts on it from outside: every kind.
+    const schoolStats = platformAdminProcedure.meta(mcpMeta()).route(route('School stats')).input(schoolInput).handler(() => ({}));
+    return buildMcpCatalog({ listRooms, listPapers, listMine, schoolStats });
+  }
+
+  it('records the kinds a tool serves, real schools only when it names none', async () => {
+    const byName = new Map((await kindCatalog()).core.map((tool) => [tool.name, tool]));
+    expect(byName.get('listRooms')?.schoolKinds).toEqual(['school']);
+    expect(byName.get('listPapers')?.schoolKinds).toEqual(['personal']);
+    // A procedure that names no school serves every kind (the kind gate reads the input's schoolId).
+    expect(byName.get('listMine')?.schoolKinds).toEqual(['school', 'personal']);
+    expect(byName.get('schoolStats')?.schoolKinds).toEqual(['school', 'personal']);
+  });
+
+  it("lists a tool only while one of the user's schools is of a kind it serves", async () => {
+    const catalog = await kindCatalog();
+    const listed = async (availableSchoolKinds?: ReadonlySet<'school' | 'personal'>) => {
+      const server = createCampusPilotMcpServer({ catalog, availableSchoolKinds, createContext: async () => asContext({}), reportError: vi.fn() });
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const client = new Client({ name: 'campuspilot-test', version: '0.1.0' });
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      openConnections.push({ client, close: async () => { await client.close(); await server.close(); } });
+      return (await client.listTools()).tools.map(({ name }) => name).sort();
+    };
+    // A user whose only school is a personal space still finds their schools (and so their schoolId).
+    expect(await listed(new Set(['personal']))).toEqual(['listMine', 'listPapers', 'schoolStats']);
+    expect(await listed(new Set(['school']))).toEqual(['listMine', 'listRooms', 'schoolStats']);
+    expect(await listed(new Set(['school', 'personal']))).toEqual(['listMine', 'listPapers', 'listRooms', 'schoolStats']);
+    // Not narrowed (a platform administrator, a user with no membership, the assistant's view): every tool.
+    expect(await listed(undefined)).toEqual(['listMine', 'listPapers', 'listRooms', 'schoolStats']);
+  });
+});
+
+describe('the procedure path of an MCP call', () => {
+  it("calls the procedure with its catalogue path, which middleware sees", async () => {
+    const seenPaths: Array<readonly string[]> = [];
+    const ping = os
+      .meta(mcpMeta())
+      .route({ summary: 'Ping', description: 'Ping.', tags: ['Test'] })
+      .use(({ next, path }) => {
+        seenPaths.push(path);
+        return next();
+      })
+      .handler(() => ({ ok: true }));
+    const catalog = await buildMcpCatalog({ system: { nested: { ping } } });
+    const tool = catalog.core[0]!;
+    expect(tool.path).toEqual(['system', 'nested', 'ping']);
+    const { client } = await connectMcp(catalog, asContext({}));
+    await client.callTool({ name: tool.name, arguments: {} });
+    expect(seenPaths).toEqual([['system', 'nested', 'ping']]);
   });
 });

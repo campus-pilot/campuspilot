@@ -16,6 +16,16 @@ the demo seed's question papers.
 
 ## Product model
 
+A personal space's papers are **standalone papers** (`exam_question_paper.kind = 'standalone'`):
+no session, exam, class, subject or mode, no school template (a built-in plain
+shell), details the AI states, and their own procedures. Everything below is about
+exam papers unless it says otherwise; the shared services, the sanitiser, the renderer
+pipeline and the job serve both kinds. A standalone paper's details are not revisioned:
+every save that states them replaces all four; a job version whose answer states none (no
+readable `paper-details` block) leaves them unchanged. A missing block alone never asks the
+model for a repair: it is added to the problems only of an answer that needs one anyway. See
+[Personal space](personal-space.md).
+
 - A **paper** is one fact per `(session, exam, class, subject, mode)`, the
   natural key of an exam plan. "Mode" is the school-defined assessment mode of
   a subject (theory, practical, ...). One paper per key; sections of a class do
@@ -600,7 +610,10 @@ one the URL names, else the paper's latest shared conversation).
     is shown as its PDF (`VersionPdf`): the file stored at save, the same one *Download PDF*
     gives, streamed by `GET /api/blob/.../question-papers/{subject}/{mode}/versions/{n}/pdf`
     (the checks of `getQuestionPaperDownload`; a removed PDF is printed again first) and
-    drawn page by page with pdf.js (`PdfPages`), so the printed page breaks show. Each page
+    drawn page by page with pdf.js (`PdfPages`), so the printed page breaks show.
+    pdf.js is loaded from its `legacy` build: the default build calls JavaScript that current
+    Chrome lacks (`Math.sumPrecise`) while reading the embedded fonts, and then draws every
+    script in a generic font without shaping (broken Hindi). Each page
     is drawn at the pane's width times the screen's pixel ratio and only while it is near
     the screen. The chat's version *Preview* shows the same. An unsaved draft has no PDF
     and is not printed for the preview (that would mean a Gotenberg conversion on every
@@ -824,7 +837,8 @@ fails jobs that cannot progress (`dispatch_failed` after 10 minutes unaccepted,
 requests). Starting a job is refused while any page is still `awaiting` its photo, still
 `pending` its copies or `failed` (`pageNotReadyMessage`; the screen says the same beside the
 button before it is pressed). It is also refused when the school already has
-`QUESTION_PAPER_MAX_RUNNING_JOBS_PER_SCHOOL` (default 3) queued or running, because the
+`QUESTION_PAPER_MAX_RUNNING_JOBS_PER_SCHOOL` (default 3; a personal space:
+`PERSONAL_SPACE_MAX_RUNNING_JOBS`, 1, see [Personal space](personal-space.md)) queued or running, because the
 monthly-limit check reads a spend sum cached for ten minutes and would otherwise be
 passed by every job a user starts at once; the check runs under a per-school advisory
 lock. The cap bounds how many jobs run at the same time, not how far the cached limit
@@ -904,7 +918,8 @@ while the version renders cannot commit a version afterwards (the job stops quie
 plan that loses the paper's mode meanwhile fails the job as `plan_mode_removed`
 (`data.reason`), not `paper_unprintable`. A failed job has an `error_code` from `QUESTION_PAPER_JOB_FAILURES` (for the
 model path: `model_busy`, `model_error`, `model_rejected`, `provider_unavailable`, `invalid_output`,
-`output_too_long`) and a safe `error_message` the page shows; the page polls `getQuestionPaperDetail`.
+`output_too_long`; for a standalone paper also `storage_full` and `version_limit`, the
+personal space's limits) and a safe `error_message` the page shows; the page polls `getQuestionPaperDetail`.
 The job's own system prompt (`prompt.ts`) never enters chat.
 
 Model settings are separate `QUESTION_PAPER_*` env values (`QUESTION_PAPER_PROVIDER` and
@@ -1113,6 +1128,12 @@ internal assessment, ...), so the tab's accordion and mode filter have several c
 modes to work with without further seed data.
 
 ## Extending
+
+- Shared services take a resolved paper (`ResolvedPaper`: an exam `PaperScope` or a
+  `StandalonePaperScope`). A new kind-specific rule goes through `isStandalonePaper` in one
+  helper (`question-paper.records.ts`, `question-paper.scope.ts`,
+  `question-paper.version.service.ts`); exam behaviour must not change. See
+  [Personal space](personal-space.md).
 
 - **An allowed element, attribute or CSS property**: change the allowlist in
   `question-paper.sanitize.ts` / `question-paper.css.ts`, with a test that a hostile variant of it

@@ -64,7 +64,8 @@ export function SchoolDocumentHead({
         {pageTitle ? `${pageTitle}${TITLE_SEPARATOR}${schoolName}` : schoolName}
       </title>
       <SchoolIcons school={school} />
-      <link rel="manifest" href={schoolManifestHref(schoolId)} />
+      {/* A personal space has no public school manifest (docs/personal-space.md): installing it installs CampusPilot. */}
+      <link rel="manifest" href={school?.kind === 'personal' ? '/manifest.webmanifest' : schoolManifestHref(schoolId)} />
     </>
   );
 }

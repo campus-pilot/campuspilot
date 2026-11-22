@@ -7,11 +7,13 @@ import {
   useReactTable,
   type ColumnDef,
   type Row,
+  type RowData,
   type TableOptions,
 } from '@tanstack/react-table';
 import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import { Button } from '@campuspilot/ui/components/button';
 import { Skeleton } from '@campuspilot/ui/components/skeleton';
+import { TableEmptyMessage } from '../table-empty-message';
 import {
   Table,
   TableBody,
@@ -20,6 +22,18 @@ import {
   TableHeader,
   TableRow,
 } from '@campuspilot/ui/components/table';
+
+declare module '@tanstack/react-table' {
+  interface ColumnMeta<TData extends RowData, TValue> {
+    /**
+     * Classes for the column's header and every cell of it. For a column a
+     * phone can do without, `hidden sm:table-cell` leaves it out below `sm`
+     * with CSS alone, so the table reads without sideways scrolling; show its
+     * value in a column that stays (as a second line) when it matters.
+     */
+    className?: string;
+  }
+}
 
 export type DataTableColumnDef<TData, TValue = unknown> = ColumnDef<
   TData,
@@ -32,6 +46,8 @@ export type DataTableProps<TData> = Omit<
 > & {
   ariaLabel: string;
   emptyMessage?: string;
+  /** A next step shown under `emptyMessage` while there are no rows, such as a create button. Gated by the caller. */
+  emptyAction?: ReactNode;
   showPagination?: boolean;
   onRowClick?: (row: TData) => void;
   /** Renders a full-width detail row directly beneath an expanded parent row.
@@ -55,6 +71,7 @@ function SortIndicator({ direction }: { direction: false | 'asc' | 'desc' }) {
 export function DataTable<TData>({
   ariaLabel,
   emptyMessage = 'No results found.',
+  emptyAction,
   showPagination = false,
   onRowClick,
   renderExpandedRow,
@@ -79,7 +96,7 @@ export function DataTable<TData>({
           {table.getHeaderGroups().map((headerGroup) => (
             <TableRow key={headerGroup.id}>
               {headerGroup.headers.map((header) => (
-                <TableHead key={header.id} colSpan={header.colSpan}>
+                <TableHead key={header.id} colSpan={header.colSpan} className={header.column.columnDef.meta?.className}>
                   {header.isPlaceholder ? null : header.column.getCanSort() ? (
                     <Button
                       type="button"
@@ -132,7 +149,7 @@ export function DataTable<TData>({
                 >
 
                   {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id}>
+                    <TableCell key={cell.id} className={cell.column.columnDef.meta?.className}>
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </TableCell>
                   ))}
@@ -152,7 +169,7 @@ export function DataTable<TData>({
                 colSpan={table.getVisibleLeafColumns().length}
                 className="h-32 text-center text-muted-foreground"
               >
-                {emptyMessage}
+                <TableEmptyMessage message={emptyMessage} action={emptyAction} />
               </TableCell>
             </TableRow>
           )}

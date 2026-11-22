@@ -34,8 +34,8 @@ function FaqIntro({ title, description }: { title: React.ReactNode; description:
       <Pill>FAQ</Pill>
       <h2 id="cp-faq-title">{title}</h2>
       <p>{description}</p>
-      <Link className="cp-text-link" to="/book-demo">
-        Still curious? Book a demo <ArrowRight aria-hidden="true" />
+      <Link className="cp-text-link" to="/contact">
+        Still curious? Contact us <ArrowRight aria-hidden="true" />
       </Link>
     </div>
   );

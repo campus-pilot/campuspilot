@@ -263,6 +263,17 @@ export const assistantConversationTable = pgTable(
     paperClassId: text("paper_class_id"),
     paperSubjectSlug: text("paper_subject_slug"),
     paperModeSlug: text("paper_mode_slug"),
+    /**
+     * The standalone question paper (a personal space's paper, by its
+     * `exam_question_paper.id`) this conversation is shared with
+     * (docs/personal-space.md). Its own fact, set only when the conversation
+     * was started on that paper's screen to be shared with it, never inferred
+     * from a seed. A standalone paper always has its row, so it is named by
+     * id. A plain value without a foreign key, like the exam paper key:
+     * deleting the paper clears it explicitly (`unsharePaperConversations`).
+     * Never set together with the exam paper key (CHECK).
+     */
+    standalonePaperId: text("standalone_paper_id"),
   },
   (table) => [
     /** The history list: a user's live conversations in a school, newest first. */
@@ -281,6 +292,14 @@ export const assistantConversationTable = pgTable(
         table.updatedAt,
       )
       .where(sql`${table.paperClassId} is not null and ${table.deletedAt} is null`),
+    /** A standalone paper's live conversations, newest first. */
+    index("assistant_conversation_standalone_paper_updated_idx")
+      .on(table.schoolId, table.standalonePaperId, table.updatedAt)
+      .where(sql`${table.standalonePaperId} is not null and ${table.deletedAt} is null`),
+    check(
+      "assistant_conversation_one_shared_paper",
+      sql`${table.standalonePaperId} is null or ${table.paperClassId} is null`,
+    ),
     check(
       "assistant_conversation_paper_key_whole",
       sql`(${table.paperSessionId} is null and ${table.paperExamSlug} is null and ${table.paperClassId} is null and ${table.paperSubjectSlug} is null and ${table.paperModeSlug} is null)

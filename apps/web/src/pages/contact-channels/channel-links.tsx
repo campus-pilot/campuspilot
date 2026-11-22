@@ -1,4 +1,4 @@
-import { ArrowRight, ArrowUpRight } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 
 import { channelTarget, type Channel } from "./channels";
 
@@ -13,36 +13,6 @@ function ChannelIcon({ channel }: { channel: Channel }) {
     <span className="pg-cc-icon" data-channel={channel.id} aria-hidden="true">
       <Icon />
     </span>
-  );
-}
-
-type ChannelRowProps = {
-  channel: Channel;
-  /** Adds the "Recommended" tag and the accent treatment. */
-  recommended?: boolean;
-};
-
-/**
- * Compact, full-width channel link: icon, name, the env-provided destination
- * and a short action. Used where channels sit beside another primary action
- * (the scheduler on `/book-demo`).
- */
-export function ChannelRow({ channel, recommended = false }: ChannelRowProps) {
-  return (
-    <a className="pg-cc-row" href={channel.href} data-recommended={recommended || undefined} {...channelTarget(channel)}>
-      <ChannelIcon channel={channel} />
-      <span className="pg-cc-row-text">
-        <b>
-          {channel.name}
-          {recommended ? <em>Recommended</em> : null}
-        </b>
-        <small>{channel.value}</small>
-      </span>
-      <span className="pg-cc-row-action">
-        {channel.action} <ArrowUpRight aria-hidden="true" />
-      </span>
-      <NewTabHint channel={channel} />
-    </a>
   );
 }
 

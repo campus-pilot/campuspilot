@@ -5,7 +5,21 @@ controls, navigation, warnings and mobile verification. That guide also records
 the redesign decisions and the earlier approaches they replaced.
 
 The management flow is exam → class/section roster → student → every subject.
-Exams come from session settings. A dashed empty state opens a concise plan-review
+Exams come from session settings. The Examinations list's single Create examination
+action (`exam-create.tsx`; navbar and empty state) adds one to the session's
+settings through `school.createExam`: a name, and a slug that follows the name with
+the settings rule until the user types their own (`exam-create-model.ts`). The server
+lists it last and refuses a taken slug or a taken name (exam names are unique in a
+session, compared ignoring case, spacing differences, invisible characters and
+Unicode compatibility forms, `examNameKey`) with explicit reasons
+(`isExamSlugTakenError`, `isExamNameTakenError`), shown beside the slug or name
+field (`withServerRefusal`). Before any request the dialog checks both against the
+session's exams it already holds (the cached `getSession` read that gates the
+action); the server stays the authority. Any other refusal is shown
+above the buttons and never blocks trying again (each attempt clears it
+before `handleSubmit`, `startCreateExamAttempt`). It is offered
+with `CREATE_EXAM` while the session is known to be active, and refreshes the list,
+the session (settings) and the sessions list on success. A dashed empty state opens a concise plan-review
 dialog with classes, student counts, subjects and modes, and a checkbox per class
 choosing whether it takes part (all classes with subjects selected by default,
 Select all / Deselect all, at least one required; a class without subjects is
@@ -84,7 +98,7 @@ Checks:
 
 ```sh
 pnpm --filter @campuspilot/api test
-pnpm dlx tsx@4.23.13 --tsconfig apps/management/tsconfig.exam-tests.json --test apps/management/components/exam/exam-validation.test.ts apps/management/components/exam/exam-student-workspace-model.test.ts
+pnpm dlx tsx@4.23.13 --tsconfig apps/management/tsconfig.exam-tests.json --test apps/management/components/exam/exam-validation.test.ts apps/management/components/exam/exam-student-workspace-model.test.ts apps/management/components/exam/exam-create-model.test.ts
 pnpm check-types
 ```
 

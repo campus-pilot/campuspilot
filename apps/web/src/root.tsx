@@ -7,6 +7,7 @@ import {
   ScrollRestoration,
 } from "react-router";
 
+import { MetaPixelPageView, MetaPixelScript } from "@/site/meta-pixel";
 import { SITE_LANGUAGE, SITE_LOGO } from "@/site/seo";
 
 import type { Route } from "./+types/root";
@@ -35,9 +36,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <Meta />
         <meta property="og:logo" content={SITE_LOGO} />
         <Links />
+        <MetaPixelScript />
       </head>
       <body>
         {children}
+        <MetaPixelPageView />
         <ScrollRestoration />
         <Scripts />
       </body>

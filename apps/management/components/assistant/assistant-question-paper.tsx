@@ -2,13 +2,14 @@
 
 import { CLASS_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import type { AssistantToolCallItemDto } from '@campuspilot/assistant-contract/dto';
-import type { AssistantQuestionPaperView } from '@campuspilot/assistant-contract/views';
+import type { AssistantQuestionPaperView, AssistantStandaloneQuestionPaperView } from '@campuspilot/assistant-contract/views';
 import type { AssistantTimelineRow } from '@campuspilot/components/assistant/timeline-model';
 import { AssistantViewFrame } from '@campuspilot/components/assistant';
 import { DocumentPreview } from '@campuspilot/components/documents/document-controls';
 import {
   draftCallsNeedingRecheck,
   draftFactsOf,
+  isStandaloneDraft,
   parseDraftCallInput,
   parseStoredDraftResult,
   saveDraftMessage,
@@ -29,6 +30,7 @@ import { RequirePermissions } from '@/components/require-permissions';
 import { useDownloadQuestionPaper } from '@/components/question-paper/use-question-paper-detail';
 import { VersionPdf } from '@/components/question-paper/version-pdf';
 import { requestErrorMessage } from '@/components/question-paper/question-paper-model';
+import { paperPreviewQueryOptions, standalonePaperLabelOf, standalonePaperPermission, type PaperTarget } from '@/components/question-paper/paper-target';
 import { client, orpc } from '@/lib/orpc';
 
 import { draftCheckOf, paperLabelFromKey, paperLabelOf } from './assistant-question-paper-model';
@@ -90,15 +92,15 @@ export function DraftPreviewBody({
       'assistant',
       'question-paper-draft-preview',
       schoolId,
-      input.sessionId,
-      input.examSlug,
-      input.classId,
-      input.subjectSlug,
-      input.modeSlug,
+      // A standalone paper's draft (docs/personal-space.md) is named by its paper's id, an exam paper's by its key.
+      ...(isStandaloneDraft(input) ? ['standalone', input.paperId] : [input.sessionId, input.examSlug, input.classId, input.subjectSlug, input.modeSlug]),
       draftId,
       conversationId,
     ],
-    queryFn: () => client.school.previewQuestionPaperDraft({ ...input, conversationId }),
+    queryFn: () =>
+      isStandaloneDraft(input)
+        ? client.school.previewStandalonePaperDraft({ ...input, conversationId })
+        : client.school.previewQuestionPaperDraft({ ...input, conversationId }),
     staleTime: DRAFT_PREVIEW_STALE_MS,
     retry: retryUnlessRefused,
   });
@@ -122,7 +124,10 @@ const DRAFT_PREVIEW_STALE_MS = 60_000;
 function draftRecheckOptions(call: { id: string; conversationId: string }, input: DraftInput | null, stored: DraftResult | null) {
   return {
     queryKey: ['assistant', 'question-paper-draft-check', call.id],
-    queryFn: () => client.school.validateQuestionPaperDraft({ ...input!, conversationId: call.conversationId }),
+    queryFn: () =>
+      isStandaloneDraft(input!)
+        ? client.school.validateStandalonePaperDraft({ ...input!, conversationId: call.conversationId })
+        : client.school.validateQuestionPaperDraft({ ...input!, conversationId: call.conversationId }),
     enabled: !stored && Boolean(input),
     staleTime: Number.POSITIVE_INFINITY,
     gcTime: Number.POSITIVE_INFINITY,
@@ -164,23 +169,35 @@ export function useDraftVerdicts(rows: readonly AssistantTimelineRow[], conversa
  * (`paperLabelFromKey`), so Save is never blocked by a failed read.
  */
 function useDraftPaperLabel(schoolId: string, input: DraftInput | null) {
+  const exam = input && !isStandaloneDraft(input) ? input : null;
+  const standalone = input && isStandaloneDraft(input) ? input : null;
   const detail = useQuery({
     ...orpc.school.getQuestionPaperDetail.queryOptions({
       input: {
         schoolId,
-        sessionId: input?.sessionId ?? '',
-        examSlug: input?.examSlug ?? '',
-        classId: input?.classId ?? '',
-        subjectSlug: input?.subjectSlug ?? '',
-        modeSlug: input?.modeSlug ?? '',
+        sessionId: exam?.sessionId ?? '',
+        examSlug: exam?.examSlug ?? '',
+        classId: exam?.classId ?? '',
+        subjectSlug: exam?.subjectSlug ?? '',
+        modeSlug: exam?.modeSlug ?? '',
       },
     }),
-    enabled: Boolean(input),
+    enabled: exam !== null,
     retry: retryUnlessRefused,
   });
-  if (!input) return null;
+  // A standalone paper is named by its details (the same words its own screen's save request uses).
+  const standaloneDetail = useQuery({
+    ...orpc.school.getStandalonePaperDetail.queryOptions({ input: { schoolId, paperId: standalone?.paperId ?? '' } }),
+    enabled: standalone !== null,
+    retry: retryUnlessRefused,
+  });
+  if (standalone) {
+    if (standaloneDetail.data) return standalonePaperLabelOf(standaloneDetail.data.paper.details);
+    return standaloneDetail.isError ? standalonePaperLabelOf(null) : null;
+  }
+  if (!exam) return null;
   if (detail.data) return paperLabelOf(detail.data.paper);
-  return detail.isError ? paperLabelFromKey(input) : null;
+  return detail.isError ? paperLabelFromKey(exam) : null;
 }
 
 function DraftUnavailable({ ordinal, children }: { ordinal: number; children: ReactNode }) {
@@ -254,7 +271,10 @@ export function AssistantDraftCard({
       supersededBy={supersededBy}
       preview={
         facts.valid && input ? (
-          <PreviewDialog title={`Draft ${ordinal}`} description="How this draft prints with your school’s template. Nothing is saved.">
+          <PreviewDialog
+            title={`Draft ${ordinal}`}
+            description={input && isStandaloneDraft(input) ? 'How this draft prints. Nothing is saved.' : 'How this draft prints with your school’s template. Nothing is saved.'}
+          >
             <DraftPreviewBody schoolId={schoolId} conversationId={call.conversationId} input={input} draftId={facts.draftId} fill />
           </PreviewDialog>
         ) : null
@@ -267,12 +287,8 @@ export function AssistantDraftCard({
 }
 
 /** A saved version in the Preview dialog: its PDF, under what was removed from its HTML and its figure placeholders (as in the studio). */
-function VersionPreviewBody({ view, schoolId }: { view: AssistantQuestionPaperView; schoolId: string }) {
-  const scope = { ...view, schoolId };
-  const notes = useQuery({
-    ...orpc.school.getQuestionPaperPreview.queryOptions({ input: scope }),
-    retry: retryUnlessRefused,
-  });
+function VersionPreviewBody({ target, versionNo }: { target: PaperTarget; versionNo: number }) {
+  const notes = useQuery({ ...paperPreviewQueryOptions(target, versionNo), retry: retryUnlessRefused });
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto">
       {notes.data ? (
@@ -283,56 +299,99 @@ function VersionPreviewBody({ view, schoolId }: { view: AssistantQuestionPaperVi
       ) : null}
       {/* A long list of removed parts scrolls this column instead of squeezing the paper away. */}
       <div className="min-h-80 flex-1">
-        <VersionPdf scope={scope} versionNo={view.versionNo} />
+        <VersionPdf scope={target} versionNo={versionNo} />
       </div>
     </div>
   );
 }
 
-function VersionCard({ schoolId, view }: { schoolId: string; view: AssistantQuestionPaperView }) {
+/**
+ * One saved version as a card, for a paper of either kind (`paper-target.ts`):
+ * its paper's name, Preview and Download PDF. `paperLabel` names the paper
+ * from its detail (the plan's names, or a standalone paper's details).
+ */
+function VersionCard({
+  title,
+  target,
+  versionNo,
+  detail,
+  paperLabel,
+}: {
+  title: string | undefined;
+  target: PaperTarget;
+  versionNo: number;
+  detail: { isPending: boolean; data: { versions: Array<{ versionNo: number; warningCount: number; isLatest: boolean }> } | undefined };
+  paperLabel: string | null;
+}) {
   const download = useDownloadQuestionPaper();
-  const detail = useQuery({
-    ...orpc.school.getQuestionPaperDetail.queryOptions({ input: { ...view, schoolId } }),
-    retry: retryUnlessRefused,
-  });
   if (detail.isPending) {
     return (
-      <AssistantViewFrame title={view.title}>
+      <AssistantViewFrame title={title}>
         <Skeleton className="h-28 w-full rounded-xl" />
       </AssistantViewFrame>
     );
   }
-  const version = detail.data?.versions.find((candidate) => candidate.versionNo === view.versionNo);
-  if (!detail.data || !version) {
+  const version = detail.data?.versions.find((candidate) => candidate.versionNo === versionNo);
+  if (!detail.data || !version || paperLabel === null) {
     return (
-      <AssistantViewFrame title={view.title}>
+      <AssistantViewFrame title={title}>
         <PreviewMessage>This version of the question paper is not available.</PreviewMessage>
       </AssistantViewFrame>
     );
   }
-  const { paper } = detail.data;
   return (
     <QuestionPaperVersionCard
-      title={view.title}
-      subtitle={paperLabelOf(paper)}
+      title={title}
+      subtitle={paperLabel}
       versionNo={version.versionNo}
       removedCount={version.warningCount}
       isLatest={version.isLatest}
       downloading={download.isPending}
       onDownload={() =>
-        download.mutate(
-          { ...view, schoolId, versionNo: view.versionNo },
-          { onError: (error) => toast.error(requestErrorMessage(error, 'The PDF could not be prepared.')) },
-        )
+        download.mutate({ target, versionNo }, { onError: (error) => toast.error(requestErrorMessage(error, 'The PDF could not be prepared.')) })
       }
       preview={
-        <PreviewDialog title={`Version ${version.versionNo}`} description="As it was saved, with the template it was printed with.">
-          <VersionPreviewBody view={view} schoolId={schoolId} />
+        <PreviewDialog title={`Version ${version.versionNo}`} description="As it was saved, as it was printed.">
+          <VersionPreviewBody target={target} versionNo={versionNo} />
         </PreviewDialog>
       }
     />
   );
 }
+
+/** An exam paper's saved version: named by its plan. */
+function ExamVersionCard({ schoolId, view }: { schoolId: string; view: AssistantQuestionPaperView }) {
+  const target = { schoolId, sessionId: view.sessionId, examSlug: view.examSlug, classId: view.classId, subjectSlug: view.subjectSlug, modeSlug: view.modeSlug };
+  const detail = useQuery({ ...orpc.school.getQuestionPaperDetail.queryOptions({ input: target }), retry: retryUnlessRefused });
+  return <VersionCard title={view.title} target={target} versionNo={view.versionNo} detail={detail} paperLabel={detail.data ? paperLabelOf(detail.data.paper) : null} />;
+}
+
+/** A standalone paper's saved version (docs/personal-space.md): named by its details. */
+function StandaloneVersionCard({ schoolId, view }: { schoolId: string; view: AssistantStandaloneQuestionPaperView }) {
+  const target = { schoolId, paperId: view.paperId };
+  const detail = useQuery({ ...orpc.school.getStandalonePaperDetail.queryOptions({ input: target }), retry: retryUnlessRefused });
+  return (
+    <VersionCard
+      title={view.title}
+      target={target}
+      versionNo={view.versionNo}
+      detail={detail}
+      paperLabel={detail.data ? standalonePaperLabelOf(detail.data.paper.details) : null}
+    />
+  );
+}
+
+/** The frame of a version card while access is decided or refused. */
+const VersionPending = ({ title }: { title: string | undefined }) => (
+  <AssistantViewFrame title={title}>
+    <Skeleton className="h-28 w-full rounded-xl" />
+  </AssistantViewFrame>
+);
+const VersionRefused = ({ title }: { title: string | undefined }) => (
+  <AssistantViewFrame title={title}>
+    <PreviewMessage>You don’t have access to this question paper.</PreviewMessage>
+  </AssistantViewFrame>
+);
 
 /**
  * A saved question paper version in the chat (the assistant's
@@ -344,18 +403,23 @@ export function AssistantQuestionPaperViewBlock({ schoolId, view }: { schoolId: 
   return (
     <RequirePermissions
       permissions={{ action: CLASS_ACTIONS.READ_EXAM_QUESTION_PAPERS, resource: { kind: 'class', schoolId, classId: view.classId } }}
-      fallback={
-        <AssistantViewFrame title={view.title}>
-          <PreviewMessage>You don’t have access to this question paper.</PreviewMessage>
-        </AssistantViewFrame>
-      }
-      pending={
-        <AssistantViewFrame title={view.title}>
-          <Skeleton className="h-28 w-full rounded-xl" />
-        </AssistantViewFrame>
-      }
+      fallback={<VersionRefused title={view.title} />}
+      pending={<VersionPending title={view.title} />}
     >
-      <VersionCard schoolId={schoolId} view={view} />
+      <ExamVersionCard schoolId={schoolId} view={view} />
+    </RequirePermissions>
+  );
+}
+
+/** The same for a standalone paper of a personal space (`standalone_question_paper` view), behind the school's standalone paper permission. */
+export function AssistantStandalonePaperViewBlock({ schoolId, view }: { schoolId: string; view: AssistantStandaloneQuestionPaperView }) {
+  return (
+    <RequirePermissions
+      permissions={standalonePaperPermission(schoolId, 'read')}
+      fallback={<VersionRefused title={view.title} />}
+      pending={<VersionPending title={view.title} />}
+    >
+      <StandaloneVersionCard schoolId={schoolId} view={view} />
     </RequirePermissions>
   );
 }

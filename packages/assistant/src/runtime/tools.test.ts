@@ -21,7 +21,7 @@ vi.mock('@modelcontextprotocol/client', () => ({
 }));
 
 import { catalogOf, mcpTool } from '../testing/turn';
-import { callTool, loadToolCatalog, requiresApproval, toolCatalogForSchool } from './tools';
+import { callTool, loadToolCatalog, modelInputSchemaOf, requiresApproval, toolCatalogForSchool, toolInputFor } from './tools';
 
 const listed = (name: string, meta: Record<string, unknown> = {}) => ({
   name,
@@ -87,13 +87,13 @@ describe('tools of a school', () => {
     const papers = mcpTool('school.listQuestionPapers', 'read');
     const catalog = catalogOf(students, papers, notices);
 
-    const staffOnly = toolCatalogForSchool(catalog, new Set(['assistant']));
+    const staffOnly = toolCatalogForSchool(catalog, new Set(['assistant']), 'school');
     expect(staffOnly.ordered.map(({ mcpName }) => mcpName)).toEqual(['school.listQuestionPapers']);
     expect(staffOnly.tools.has('school_listStudents')).toBe(false);
     // The features that took a tool away: what the model is told about.
     expect([...staffOnly.withheldFeatures].sort()).toEqual(['notices', 'studentManagement']);
 
-    const everything = toolCatalogForSchool(catalog, new Set(['studentManagement', 'notices', 'assistant']));
+    const everything = toolCatalogForSchool(catalog, new Set(['studentManagement', 'notices', 'assistant']), 'school');
     expect(everything.ordered.map(({ mcpName }) => mcpName)).toEqual(['school.listStudents', 'school.listQuestionPapers', 'school.listNotices']);
     expect([...everything.withheldFeatures]).toEqual([]);
   });
@@ -101,7 +101,36 @@ describe('tools of a school', () => {
   it('does not count a missing feature that gates none of the tools', () => {
     // The assistant has no notice tools: a school without notices loses nothing, so nothing is withheld.
     const catalog = catalogOf(mcpTool('school.listStudents', 'read', { features: ['studentManagement'] }), mcpTool('school.listQuestionPapers', 'read'));
-    expect([...toolCatalogForSchool(catalog, new Set(['studentManagement'])).withheldFeatures]).toEqual([]);
+    expect([...toolCatalogForSchool(catalog, new Set(['studentManagement']), 'school').withheldFeatures]).toEqual([]);
+  });
+});
+
+describe('tools of a kind of school', () => {
+  it('reads the kinds a tool serves from its metadata, real schools only when it names none', async () => {
+    mcp.tools = [
+      listed('school.listStandalonePapers', { [ASSISTANT_TOOL_META.schoolKinds]: ['personal'] }),
+      listed('school.listStudents', {}),
+    ];
+    // Past the listing cache the tests above filled (and before the approval block's, further on).
+    vi.useFakeTimers({ now: Date.now() + 20 * 60_000, toFake: ['Date'] });
+    const { tools } = await loadToolCatalog('token').finally(() => vi.useRealTimers());
+    expect(tools.get('school_listStandalonePapers')?.schoolKinds).toEqual(['personal']);
+    expect(tools.get('school_listStudents')?.schoolKinds).toEqual(['school']);
+  });
+
+  it('offers a personal space only its own tools, and a real school never those', () => {
+    const students = mcpTool('school.listStudents', 'read');
+    const standalone = mcpTool('school.listStandalonePapers', 'read', { schoolKinds: ['personal'] });
+    const both = mcpTool('school.getFeatureFlags', 'read', { schoolKinds: ['school', 'personal'] });
+    const catalog = catalogOf(students, standalone, both);
+    expect(toolCatalogForSchool(catalog, new Set(['assistant']), 'personal').ordered.map(({ mcpName }) => mcpName)).toEqual([
+      'school.listStandalonePapers',
+      'school.getFeatureFlags',
+    ]);
+    expect(toolCatalogForSchool(catalog, new Set(['assistant']), 'school').ordered.map(({ mcpName }) => mcpName)).toEqual([
+      'school.listStudents',
+      'school.getFeatureFlags',
+    ]);
   });
 });
 
@@ -112,11 +141,40 @@ describe('approval', () => {
       { ...listed('school.saveQuestionPaperVersion', { [ASSISTANT_TOOL_META.skipsApproval]: true }), annotations: { readOnlyHint: false } },
       { ...listed('school.updateStudent'), annotations: { readOnlyHint: false } },
     ];
-    // Past the listing cache the tests above filled; this block is last so its own listing stays out of theirs.
-    vi.useFakeTimers({ now: Date.now() + 10 * 60_000, toFake: ['Date'] });
+    // Past the listing caches the tests above filled (the kinds block's runs until +25 minutes); this block is last so its own listing stays out of theirs.
+    vi.useFakeTimers({ now: Date.now() + 40 * 60_000, toFake: ['Date'] });
     const { tools } = await loadToolCatalog('token').finally(() => vi.useRealTimers());
     expect(requiresApproval(tools.get('school_getQuestionPaper')!)).toBe(false);
     expect(requiresApproval(tools.get('school_saveQuestionPaperVersion')!)).toBe(false);
     expect(requiresApproval(tools.get('school_updateStudent')!)).toBe(true);
+  });
+});
+
+describe("the conversation's school in a tool call", () => {
+  const schoolScoped = {
+    type: 'object',
+    properties: { schoolId: { type: 'string' }, paperId: { type: 'string' } },
+    required: ['schoolId', 'paperId'],
+    additionalProperties: false,
+  };
+
+  it('shows the model a school-scoped tool without schoolId, and records that it has one', () => {
+    expect(modelInputSchemaOf(schoolScoped)).toEqual({
+      inputSchema: { type: 'object', properties: { paperId: { type: 'string' } }, required: ['paperId'], additionalProperties: false },
+      schoolScoped: true,
+    });
+    const accountLevel = { type: 'object', properties: { query: { type: 'string' } } };
+    expect(modelInputSchemaOf(accountLevel)).toEqual({ inputSchema: accountLevel, schoolScoped: false });
+  });
+
+  it("fills in the conversation's school, so the model never copies the id (and cannot mistype it)", () => {
+    const tool = mcpTool('school.learn_standalone_question_paper', 'read', { schoolScoped: true });
+    expect(toolInputFor(tool, {}, 'sch_own')).toEqual({ schoolId: 'sch_own' });
+    expect(toolInputFor(tool, undefined, 'sch_own')).toEqual({ schoolId: 'sch_own' });
+    expect(toolInputFor(tool, { paperId: 'qp_1' }, 'sch_own')).toEqual({ paperId: 'qp_1', schoolId: 'sch_own' });
+    // A school the model named anyway is kept, so the API refuses another school instead of the call moving here.
+    expect(toolInputFor(tool, { schoolId: 'sch_other' }, 'sch_own')).toEqual({ schoolId: 'sch_other' });
+    // A tool without a school takes the input as it is.
+    expect(toolInputFor(mcpTool('school.listMySchools', 'read'), { page: 1 }, 'sch_own')).toEqual({ page: 1 });
   });
 });

@@ -23,6 +23,7 @@ import { z } from 'zod';
 import { schoolSessionHref } from './school-route';
 import { confirmNavigation } from '@/lib/navigation-guard';
 import { storeSchoolSessionId } from './session-selection';
+import { CreateSessionButton } from './session/create-session-button';
 import { sessionSwitchSuffix } from './session-switch-model';
 
 const sessionSwitcherSchema = z.object({
@@ -44,7 +45,30 @@ function sessionSuffixFromPath(pathname: string) {
   return /^\/school\/[^/]+\/sessions\/[^/]+(\/.*)?$/.exec(pathname)?.[1] ?? '';
 }
 
-export function SessionSwitcher({
+/**
+ * The sidebar's session picker. A school known to have no sessions at all
+ * (`hasNoSessions`: its list was read and is empty, never while it loads)
+ * gets "Create a session" in its place for people who may create one; the
+ * first session becomes active, so the picker then shows it.
+ */
+export function SessionSwitcher(props: {
+  schoolId: string;
+  selectedSessionId?: string;
+  sessions: SchoolSessionDto[];
+  hasNoSessions: boolean;
+}) {
+  if (!props.hasNoSessions) return <SessionPicker {...props} />;
+  return (
+    <CreateSessionButton
+      schoolId={props.schoolId}
+      variant="outline"
+      className="w-full justify-start"
+      fallback={<SessionPicker {...props} />}
+    />
+  );
+}
+
+function SessionPicker({
   schoolId,
   selectedSessionId,
   sessions,

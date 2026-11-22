@@ -3,6 +3,7 @@ import { assistantConversationTable, assistantRunTable } from '@campuspilot/db/s
 import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm';
 
 import type { PaperKey } from './question-paper.dto';
+import { isStandalonePaper, type ResolvedPaper } from './question-paper.scope';
 
 /**
  * The assistant conversations shared with a paper (`assistant_conversation`
@@ -12,8 +13,21 @@ import type { PaperKey } from './question-paper.dto';
  * already checked for this paper.
  */
 
+/**
+ * The paper a conversation can be shared with: an exam paper by its key (it
+ * may have no row yet), a standalone paper by its id (it always has one). Two
+ * separate facts on the conversation, never both set.
+ */
+export type PaperConversationRef =
+  | { kind: 'exam'; key: PaperKey }
+  | { kind: 'standalone'; schoolId: string; paperId: string };
+
+/** The conversation reference of a resolved paper. */
+export const conversationRefOf = (scope: ResolvedPaper): PaperConversationRef =>
+  isStandalonePaper(scope) ? { kind: 'standalone', schoolId: scope.schoolId, paperId: scope.paperId } : { kind: 'exam', key: scope.key };
+
 /** The paper key columns of a conversation equal to `key`, in the key's school. */
-const sharedWith = (key: PaperKey) =>
+const sharedWithExamPaper = (key: PaperKey) =>
   and(
     eq(assistantConversationTable.schoolId, key.schoolId),
     eq(assistantConversationTable.paperSessionId, key.sessionId),
@@ -24,12 +38,25 @@ const sharedWith = (key: PaperKey) =>
     isNull(assistantConversationTable.deletedAt),
   );
 
+/** A live conversation shared with this paper, of either kind. */
+const sharedWith = (paper: PaperConversationRef) =>
+  paper.kind === 'exam'
+    ? sharedWithExamPaper(paper.key)
+    : and(
+        eq(assistantConversationTable.schoolId, paper.schoolId),
+        eq(assistantConversationTable.standalonePaperId, paper.paperId),
+        isNull(assistantConversationTable.deletedAt),
+      );
+
+/** The school a conversation reference belongs to. */
+const schoolOf = (paper: PaperConversationRef) => (paper.kind === 'exam' ? paper.key.schoolId : paper.schoolId);
+
 /** The paper's most recently active shared conversation, whoever started it; null when it has none. */
-export async function latestPaperConversationId(db: DatabaseExecutor, key: PaperKey): Promise<string | null> {
+export async function latestPaperConversationId(db: DatabaseExecutor, paper: PaperConversationRef): Promise<string | null> {
   const [row] = await db
     .select({ id: assistantConversationTable.id })
     .from(assistantConversationTable)
-    .where(sharedWith(key))
+    .where(sharedWith(paper))
     .orderBy(desc(assistantConversationTable.updatedAt), desc(assistantConversationTable.id))
     .limit(1);
   return row?.id ?? null;
@@ -41,7 +68,7 @@ export async function latestPaperConversationId(db: DatabaseExecutor, key: Paper
  * sharing), or one shared with exactly this paper. Draft ids and figure
  * images of a chat are read from such a conversation only.
  */
-export async function isPaperChat(db: DatabaseExecutor, input: { conversationId: string; userId: string; key: PaperKey }): Promise<boolean> {
+export async function isPaperChat(db: DatabaseExecutor, input: { conversationId: string; userId: string; paper: PaperConversationRef }): Promise<boolean> {
   const [row] = await db
     .select({ id: assistantConversationTable.id })
     .from(assistantConversationTable)
@@ -49,8 +76,8 @@ export async function isPaperChat(db: DatabaseExecutor, input: { conversationId:
       and(
         eq(assistantConversationTable.id, input.conversationId),
         or(
-          and(eq(assistantConversationTable.schoolId, input.key.schoolId), eq(assistantConversationTable.userId, input.userId), isNull(assistantConversationTable.deletedAt)),
-          sharedWith(input.key),
+          and(eq(assistantConversationTable.schoolId, schoolOf(input.paper)), eq(assistantConversationTable.userId, input.userId), isNull(assistantConversationTable.deletedAt)),
+          sharedWith(input.paper),
         ),
       ),
     )
@@ -59,11 +86,11 @@ export async function isPaperChat(db: DatabaseExecutor, input: { conversationId:
 }
 
 /** Whether a live conversation is shared with exactly this paper (`shareWithPaper`), whoever started it. */
-export async function isSharedWithPaper(db: DatabaseExecutor, input: { conversationId: string; key: PaperKey }): Promise<boolean> {
+export async function isSharedWithPaper(db: DatabaseExecutor, input: { conversationId: string; paper: PaperConversationRef }): Promise<boolean> {
   const [row] = await db
     .select({ id: assistantConversationTable.id })
     .from(assistantConversationTable)
-    .where(and(eq(assistantConversationTable.id, input.conversationId), sharedWith(input.key)))
+    .where(and(eq(assistantConversationTable.id, input.conversationId), sharedWith(input.paper)))
     .limit(1);
   return row !== undefined;
 }
@@ -86,12 +113,12 @@ const sharedWithPaperOrPlan = (key: PaperOrPlanKey) =>
  * approval). Deleting the paper stops sharing its conversations, which would strand a colleague's pending approval,
  * so a paper is not deleted while one of them works.
  */
-export async function paperChatIsWorking(db: DatabaseExecutor, key: PaperKey): Promise<boolean> {
+export async function paperChatIsWorking(db: DatabaseExecutor, paper: PaperConversationRef): Promise<boolean> {
   const [row] = await db
     .select({ id: assistantRunTable.id })
     .from(assistantRunTable)
     .innerJoin(assistantConversationTable, eq(assistantConversationTable.id, assistantRunTable.conversationId))
-    .where(and(sharedWith(key), inArray(assistantRunTable.status, ['queued', 'running', 'awaiting_approval'])))
+    .where(and(sharedWith(paper), inArray(assistantRunTable.status, ['queued', 'running', 'awaiting_approval'])))
     .limit(1);
   return row !== undefined;
 }
@@ -107,4 +134,22 @@ export async function unsharePaperConversations(tx: DatabaseExecutor, key: Paper
     .update(assistantConversationTable)
     .set({ paperSessionId: null, paperExamSlug: null, paperClassId: null, paperSubjectSlug: null, paperModeSlug: null })
     .where(sharedWithPaperOrPlan(key));
+}
+
+/**
+ * Stops sharing the conversations of a deleted standalone paper: their
+ * `standalone_paper_id` is cleared, and each stays a private conversation in
+ * its starter's history, as for an exam paper.
+ */
+export async function unshareStandalonePaperConversations(tx: DatabaseExecutor, paper: { schoolId: string; paperId: string }): Promise<void> {
+  await tx
+    .update(assistantConversationTable)
+    .set({ standalonePaperId: null })
+    .where(and(eq(assistantConversationTable.schoolId, paper.schoolId), eq(assistantConversationTable.standalonePaperId, paper.paperId)));
+}
+
+/** Stops sharing the conversations of a deleted paper of either kind. */
+export async function unshareConversationsOf(tx: DatabaseExecutor, paper: PaperConversationRef): Promise<void> {
+  if (paper.kind === 'exam') await unsharePaperConversations(tx, paper.key);
+  else await unshareStandalonePaperConversations(tx, paper);
 }

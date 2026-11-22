@@ -37,6 +37,7 @@ import {
   useStoredSchoolSessionId,
 } from '@/components/session-selection';
 import { SchoolDocumentHead } from '@/components/school-document-head';
+import { RealSchoolOnly } from '@/components/personal-space/school-kind-gates';
 import { SessionSwitcher } from '@/components/session-switcher';
 import { AssistantAccess } from '@/components/assistant/assistant-access';
 import { isQuestionPaperSectionPath } from '@/components/exam/exam-model';
@@ -257,7 +258,22 @@ function questionPapersEntry(schoolId: string, sessionId: string, sessionBase: s
   };
 }
 
-export default function SchoolWorkspaceLayout({
+/**
+ * The school workspace. A personal space has none (docs/personal-space.md):
+ * its addresses here open its papers (`RealSchoolOnly`), before any workspace
+ * page asks for a session or a class.
+ */
+export default function SchoolWorkspaceLayout({ children }: { children: ReactNode }) {
+  const routeParams = useParams();
+  const schoolId = String(routeParams.schoolId ?? '');
+  return (
+    <RealSchoolOnly schoolId={schoolId}>
+      <SchoolWorkspaceShell>{children}</SchoolWorkspaceShell>
+    </RealSchoolOnly>
+  );
+}
+
+function SchoolWorkspaceShell({
   children,
 }: {
   children: ReactNode;
@@ -292,6 +308,7 @@ export default function SchoolWorkspaceLayout({
         schoolId={schoolId}
         selectedSessionId={selectedSessionId}
         sessions={sessions}
+        hasNoSessions={sessionsQuery.isSuccess && sessions.length === 0}
       />
     ),
     footerLinks: [

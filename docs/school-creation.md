@@ -47,6 +47,15 @@ A refused creation is `FORBIDDEN` with
 `data: { reason: 'SCHOOL_CREATION_REFUSED', refusal }`; clients read it with
 `schoolCreationRefusalOf(error)`, never from the message.
 
+### Personal spaces are not counted
+
+A personal space ([Personal space](personal-space.md)) is a school the person
+owns, of kind `personal`. It writes no `school_creation` row, so it does not
+use the allowance, and owning it is not `member_of_other_school`: someone with
+a personal space can still create one school. Who gets a personal space is
+decided by its own rules (a linked Google account, no school at all), not by
+these.
+
 ## Closing the loopholes
 
 | Attempt | Why it does not work |
@@ -81,7 +90,8 @@ still counts.
 
 1. locks the person and checks they may create one;
 2. inserts the school with a unique slug from its name, no subscription
-   (`tier` null) and the person as owner;
+   (`tier` null) and the person as owner (steps 2 to 5 are
+   `provisionSelfServiceSchool`, shared with personal spaces);
 3. starts a trial of `SELF_SERVICE_TRIAL_TIER` (Plus, the smallest tier, named
    explicitly rather than derived from the tier order) for
    `SELF_SERVICE_TRIAL_PERIODS` (one) 28-day billing period, which starts the
@@ -90,7 +100,8 @@ still counts.
    `SELF_SERVICE_ASSISTANT_MONTHLY_LIMIT_USD` (5 USD) per billing period, which also switches it on
    for the default roles;
 5. adds the person as a member with the principal role;
-6. writes the `school_creation` row.
+6. writes the `school_creation` row;
+7. offers the school its guided setup (a `school_onboarding` row, below).
 
 After the trial the school has no plan and is read-only, exactly as described
 in [School billing](school-billing.md), until an administrator records a
@@ -134,25 +145,115 @@ the read-only gate finds it. All are hidden from MCP and the assistant
 (`apps/server/src/mcp-catalog.test.ts`): opening schools and deciding
 allowances are human decisions.
 
+## Guided setup
+
+Most people who open a school want a question paper, not a tour of settings.
+So a self-created school opens into a guide that takes its owner from the
+school's name to their first paper, with everything in between proposed and
+saved in one step.
+
+### Its facts
+
+`school_onboarding` (migration `0077_school-onboarding.sql`), one row per school
+that is offered the guide, written by `createOwnSchool` (step 7 above). Schools
+an administrator opened, demo schools and every school created before the
+guide have no row and never see it.
+
+| Column | Meaning |
+| --- | --- |
+| `completed_at` | The guide finished: its session, examinations, classes, subjects and plans were created. |
+| `skipped_at` | Someone chose **Set up later**; the guide stops opening on its own. It may still be finished later. |
+
+`school.getOnboarding({ schoolId })` reads the state (`not_offered`, `pending`,
+`skipped`, `completed`; any member may read it). Nothing infers the state from
+whether the school has a session.
+
+### What it proposes
+
+The catalogue is `packages/api/src/school-onboarding/school-onboarding.contract.ts`,
+its own and not the demo seed's:
+
+- **Session**: the April to March academic year running today in India
+  (`academicSessionStartYear`: 2026–27 from April 2026, 2025–26 in February
+  2026), moved a year at a time.
+- **Examinations**: First Term, Second Term, Third Term and Last Term, one to
+  eight, each renamable. Slugs are derived from the names with the exam slug
+  rule (`first_term`; `exam_2` for a name with no Latin letters).
+- **Classes**: Nursery, LKG, UKG and Class 1 to 10 ticked, Class 11 and 12
+  offered. Each gets section A.
+- **Subjects**: a starter list per stage (Pre-primary, Primary, Middle,
+  Secondary, Senior secondary), shown only for stages with a chosen class.
+  Every subject gets a single mode, Written at 100%
+  (`ONBOARDING_SUBJECT_EXAM_MODES`), so a subject has exactly one paper per
+  examination. Mark splits are added later in the class's subject settings.
+- **Paper header**: an optional logo and one of the two marketplace question
+  paper designs (Classic or Compact), previewed with the marketplace's sample
+  data.
+
+### What saving does
+
+**Finish setup** uploads the logo (if any) through the school's logo route,
+selects the design with `school.selectMarketplaceTemplate` (skipped when the
+school already has it, so a retry is harmless), then calls
+`school.completeOnboarding`, which in one transaction:
+
+1. locks the school and its guide row; without a row it is NOT_FOUND, a
+   finished guide CONFLICT (a double tap changes nothing);
+2. refuses a school that already has a session or a class (CONFLICT,
+   `data.reason` `ONBOARDING_SCHOOL_NOT_EMPTY`): the guide only ever starts a
+   school;
+3. creates the session with its examinations (`createSchoolSessionRecord`,
+   the function `school.createSession` uses), which becomes active;
+4. creates the classes in catalogue order with their subjects
+   (`createClassRecord`, as `school.createClass`);
+5. generates every examination's plan for all of those classes
+   (`generateExamPlanRecords`, as `school.generateExamPlan`);
+6. sets `completed_at`.
+
+It checks the permission of each step it takes (`school.session.create`,
+`school.exam.create`, `school.class.create`, `school.exam.plan.create`), is
+refused for a suspended school or one without a plan like every write, and
+leaves the student-only session settings at their defaults, so a Plus trial is
+never refused. The logo upload is optional: if it fails the setup continues and
+the person is told to add the logo from Organization settings.
+
+`school.skipOnboarding` sets `skipped_at` (it needs `school.session.create`).
+All three procedures are hidden from MCP and the assistant.
+
 ## What management shows
 
-- A person with no school sees "You are not part of a school yet" on `/school`
-  with a **Create a school** button, the button to ask for more once their
-  allowance is used, or the reason they cannot. No form is shown on the page.
-- **Create a school** opens a dialog: name, location, an optional
-  registration number and the logo (required). The logo is checked and
-  compressed in the browser before the school is created, so an unusable
-  image leaves no school behind; it is uploaded through the school's logo
-  route (`/api/blob/schools/{id}/logo`) right after. If that upload fails the
-  school still opens and the person is told to add the logo from Organization
-  settings: the creation is not undone, since its allowance would not come
-  back.
-- The new school opens with a welcome dialog (`?welcome=1`,
-  `components/school-creation/new-school-welcome.tsx`): the trial's plan and
-  end date, the assistant's limit and what happens when the trial ends, read
-  from the school list and the feature flags rather than the constants, plus
-  **Set up your first session** while the school has no active session. It
-  shows only while the school is on a trial; closing it removes the parameter.
+- A person with no school sees **Set up your school** on `/school` with the
+  create-school form itself: name, town and an optional registration number,
+  the details a paper header prints. Someone whose allowance is used sees the
+  button to ask for more, and anyone else the reason they cannot create one.
+  `/school/new` (from the school switcher) shows the same panel.
+- **Start free trial** creates the school and opens its guide at
+  `/school/{id}/get-started` (`components/school-onboarding`), outside the
+  workspace shell. Its first screen tells what the trial gives
+  (`NewSchoolTrialFacts`: the plan and end date, the assistant's limit and what
+  happens after, read from the school list and feature flags rather than the
+  constants). The screens are Session, Examinations, Classes, Subjects and
+  Paper header, one TanStack form validated with the procedure's own input
+  rule, with **Set up later** on each.
+- Once the guide is finished the same page offers the first paper: an
+  examination (the first is chosen), a class and a subject, opening the paper
+  on its start screen (photos, a description for the assistant, or a PDF).
+  People without the assistant see only the way to the dashboard.
+- Someone who cannot run the guide (a teacher added meanwhile) is told the
+  owner sets the school up.
+- A new school has no academic session, and every workspace page belongs to
+  one. The school's entry page sends a school whose guide is `pending` to the
+  guide. Otherwise every place that says the school has no session offers
+  **Create a session** (`components/session/create-session-button.tsx`, gated
+  on `school.session.create`): the school's entry page (with **Use the guided
+  setup** beside it while the guide is set aside), the sidebar's session
+  switcher and the statement's session requirement. `school.createSession`
+  makes the new session active when the school has no active session (under a
+  lock on the school, so two first sessions cannot both become active); with
+  one already active it is created inactive and changing over stays an
+  explicit `activateSession`.
+- Beside the panel, someone with a linked Google account and no school sees
+  **Create personal space** ([Personal space](personal-space.md)).
 - **Ask for more schools** opens the request form in a dialog.
 - The school switcher offers **Create a school** (`/school/new`, the same
   panel) to people who may create one or ask for more; staff of a school they
@@ -164,6 +265,9 @@ allowances are human decisions.
   only from `createOwnSchool` and `updateSchoolOwner`.
 - A new way to remove members or change roles must keep the owner rules above.
 - Changing what a new school starts with: change the constants in
-  `school-creation.contract.ts` and this guide. The welcome dialog reads the
-  school's actual plan and assistant limit, so it follows on its own.
-- Tests: `packages/api/src/school-creation/school-creation.integration.test.ts`.
+  `school-creation.contract.ts` and this guide. The trial facts read the
+  school's actual plan and assistant limit, so they follow on their own.
+- Changing what the guide proposes: change `school-onboarding.contract.ts`
+  (both the screens and the procedure read it) and this guide.
+- Tests: `packages/api/src/school-creation/school-creation.integration.test.ts`
+  and `packages/api/src/school-onboarding/school-onboarding.integration.test.ts`.

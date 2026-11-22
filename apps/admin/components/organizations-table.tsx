@@ -21,7 +21,8 @@ import { SchoolBadges } from './school-badges';
 
 type OrganizationOrderField = 'name' | 'location' | 'createdAt' | 'updatedAt';
 /** `plan`: schools in an active billing period of a kind, or schools without a plan (docs/school-billing.md). */
-type OrganizationFilters = { plan?: 'trial' | 'paid' | 'complimentary' | 'none' };
+/** `kind`: real schools or personal spaces (docs/personal-space.md). */
+type OrganizationFilters = { plan?: 'trial' | 'paid' | 'complimentary' | 'none'; kind?: 'school' | 'personal' };
 type OrganizationListController = DataTableListController<
   OrganizationOrderField,
   OrganizationFilters
@@ -37,6 +38,15 @@ const organizationFilters: TableFilterConfig<keyof OrganizationFilters>[] = [
       { value: 'paid', label: 'Paid period' },
       { value: 'complimentary', label: 'Free period' },
       { value: 'none', label: 'No plan' },
+    ],
+  },
+  {
+    id: 'kind',
+    label: 'Kind',
+    type: 'single',
+    options: [
+      { value: 'school', label: 'Schools' },
+      { value: 'personal', label: 'Personal spaces' },
     ],
   },
 ];
@@ -74,6 +84,8 @@ const organizationColumns: DataTableColumnDef<SchoolDto>[] = [
   {
     accessorKey: 'location',
     header: 'Location',
+    // A personal space has no location: a dash, as for a missing registration.
+    cell: ({ row }) => (row.original.location === '' ? '—' : row.original.location),
   },
   {
     id: 'registrationNo',
@@ -87,9 +99,13 @@ const organizationColumns: DataTableColumnDef<SchoolDto>[] = [
     header: 'Status',
     enableSorting: false,
     // Demo rows always show their seeding job's own status (which reads
-    // "Onboarded" once it succeeded); other rows show onboarding.
+    // "Onboarded" once it succeeded); a personal space has no guided setup,
+    // so it shows no status (its Personal badge says what it is); other rows
+    // show onboarding.
     cell: ({ row }) =>
-      row.original.isDemo ? (
+      row.original.kind === 'personal' ? (
+        <span className="text-muted-foreground">—</span>
+      ) : row.original.isDemo ? (
         <DemoSchoolJobStatus schoolId={row.original.id} />
       ) : (
         <Badge
@@ -121,7 +137,13 @@ function OrganizationRows({
         limit: controller.query.limit,
         searchQuery: controller.query.searchQuery,
         orderBy: controller.query.orderBy,
-        filters: controller.query.filters?.plan ? { plan: controller.query.filters.plan } : undefined,
+        filters:
+          controller.query.filters?.plan || controller.query.filters?.kind
+            ? {
+                ...(controller.query.filters.plan ? { plan: controller.query.filters.plan } : {}),
+                ...(controller.query.filters.kind ? { kind: controller.query.filters.kind } : {}),
+              }
+            : undefined,
       },
     }),
   );
@@ -141,7 +163,7 @@ function OrganizationRows({
       showPagination
       state={controller.tableState}
       emptyMessage={
-        controller.query.searchQuery || controller.query.filters?.plan
+        controller.query.searchQuery || controller.query.filters?.plan || controller.query.filters?.kind
           ? 'No organizations match this search.'
           : 'No organizations have been added yet.'
       }

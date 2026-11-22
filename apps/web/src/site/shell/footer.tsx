@@ -1,5 +1,6 @@
-import { ArrowRight } from "lucide-react";
 import { Link } from "react-router";
+
+import { LoginCta } from "./login-dialog";
 
 import { navMenus } from "./nav-data";
 import { BrandMark } from "./navbar";
@@ -24,9 +25,7 @@ function FooterBrand() {
     <div className="cp-footer-brand">
       <BrandMark />
       <p>The connected school operating system for schools in India — admin done once, records ready for AI.</p>
-      <Link className="cp-btn cp-btn-primary cp-btn-sm" to="/book-demo">
-        Book a demo <ArrowRight aria-hidden="true" />
-      </Link>
+      <LoginCta size="sm" />
     </div>
   );
 }

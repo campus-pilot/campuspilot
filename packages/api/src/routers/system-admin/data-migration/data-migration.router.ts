@@ -9,7 +9,7 @@ import { handOffDataMigrationRun } from '../../../data-migrations/data-migration
 import { DATA_MIGRATIONS, findDataMigration } from '../../../data-migrations/registry';
 import { requestDataMigrationRun } from '../../../data-migrations/run-store';
 import { rpcError, toRpcError } from '../../../errors';
-import { protectedProcedure } from '../../../index';
+import { platformAdminProcedure } from '../../../index';
 import { requireSystemPermission } from '../../../permissions/system';
 import {
   dataMigrationRunDtoSchema,
@@ -37,7 +37,7 @@ function toRunDto(run: typeof dataMigrationRunTable.$inferSelect): DataMigration
  * waits for the worker.
  */
 export const dataMigrationRouter = {
-  listDataMigrations: protectedProcedure
+  listDataMigrations: platformAdminProcedure
     .route({
       summary: 'List data migrations',
       description: 'List every registered data migration with its most recent runs. Requires system-administrator permission.',
@@ -74,7 +74,7 @@ export const dataMigrationRouter = {
       }
     }),
 
-  listDataMigrationSkippedItems: protectedProcedure
+  listDataMigrationSkippedItems: platformAdminProcedure
     .route({
       summary: 'List the skipped items of a data migration run',
       description: 'Page through the items a data migration run reported instead of migrating. Requires system-administrator permission.',
@@ -106,7 +106,7 @@ export const dataMigrationRouter = {
       }
     }),
 
-  requestDataMigrationRun: protectedProcedure
+  requestDataMigrationRun: platformAdminProcedure
     .route({
       summary: 'Request a data migration run',
       description: 'Request an apply run or a dry run of a registered data migration. It is handed to the worker in the background; at most one run per migration is pending or running at a time. Requires system-administrator permission.',

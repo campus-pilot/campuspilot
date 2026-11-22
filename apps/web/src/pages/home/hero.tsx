@@ -1,5 +1,4 @@
 import {
-  ArrowRight,
   Check,
   ChevronRight,
   ClipboardCheck,
@@ -8,9 +7,9 @@ import {
   IndianRupee,
   LayoutDashboard,
   Megaphone,
+  Mic,
   MousePointer2,
   ShieldCheck,
-  Sparkles,
   UserPlus,
   Users,
   Wallet,
@@ -18,7 +17,8 @@ import {
 } from "lucide-react";
 import { Link } from "react-router";
 
-import { LoginButton } from "@/site/shell/login-dialog";
+import { LoginCta } from "@/site/shell/login-dialog";
+import { AssistantMark } from "@/site/signature";
 
 /* ------------------------------------------------------------------ copy */
 
@@ -36,18 +36,16 @@ function HeroCopy() {
       </h1>
       <p className="cp-hero-lede">
         CampusPilot connects admissions, fees, marks and report cards for Indian schools. Repeated work is
-        entered once and flows on — and the AI assistants your team already uses answer from live records,
-        seeing only what each person is allowed to see.
+        entered once and flows on — and you can simply ask: talk or type to the assistant built in, or connect
+        the one your team already uses. It answers from live records, seeing only what each person may see.
       </p>
       <div className="cp-hero-actions">
-        <Link className="cp-btn cp-btn-primary cp-btn-lg" to="/book-demo">
-          Book a demo <ArrowRight aria-hidden="true" />
-        </Link>
+        <LoginCta size="lg" />
         <a className="cp-btn cp-btn-light cp-btn-lg" href="#how-it-works">
           See how it works <ChevronRight aria-hidden="true" />
         </a>
       </div>
-      <LoginButton className="cp-hero-note cp-hero-login">Log in</LoginButton>
+      <Link className="cp-hero-note cp-hero-login" to="/contact">Contact us</Link>
     </div>
   );
 }
@@ -211,12 +209,24 @@ function ConsoleWindow() {
 function AssistantHeader() {
   return (
     <div className="cp-ai-head">
-      <span className="cp-ai-avatar">
-        <Sparkles />
-      </span>
+      <AssistantMark speaking className="cp-ai-mark" />
       <b>Assistant</b>
       <span className="cp-ai-role">Ms. Rao · Class teacher, 8-A</span>
     </div>
+  );
+}
+
+/** The question arrives by voice: a mic and a small live waveform before the words. */
+function SpokenQuestion() {
+  return (
+    <p className="cp-ai-question">
+      <span className="cp-ai-voice">
+        <Mic />
+        <span className="cp-ai-wave"><i /><i /><i /><i /></span>
+        Spoken
+      </span>
+      Whose First Term marks are still missing in my class?
+    </p>
   );
 }
 
@@ -235,12 +245,12 @@ function AssistantAnswer() {
   );
 }
 
-/** Shows a permission-scoped answer: the teacher's question only reaches her own class. */
+/** Shows a spoken question and a permission-scoped answer: the teacher's question only reaches her own class. */
 function AssistantCard() {
   return (
     <div className="cp-ai-card">
       <AssistantHeader />
-      <p className="cp-ai-question">Whose First Term marks are still missing in my class?</p>
+      <SpokenQuestion />
       <AssistantAnswer />
       <p className="cp-ai-scope">
         <ShieldCheck /> Only classes assigned to you

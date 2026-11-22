@@ -2,15 +2,27 @@ import { examOverview, examOverviews } from './exam-lifecycle.service';
 import { and, asc, eq } from 'drizzle-orm';
 import { classTable } from '@campuspilot/db/schema/class';
 import { schoolSessionTable } from '@campuspilot/db/schema/session';
-import { examClassTable, examPlanTable, examTimetableTable } from '@campuspilot/db/schema/exam';
+import {
+  examNameKey,
+  findExamNameClash,
+  nextExamOrder,
+} from '@campuspilot/db/schema/jsonb/session-config';
+import { examClassTable } from '@campuspilot/db/schema/exam';
+import { assertExamsHaveNoData } from '../session/session-exam-removal';
 import { resolvePaginationInput } from '../../../paginations';
 import { pageResult, route } from './exam.pagination';
-import { getExam, getExamSession } from './exam.service';
+import { examNameTakenError, getExam, getExamSession } from './exam.service';
 import { examClassWhere } from './exam.scope';
 import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
 import { protectedProcedure } from '../../../index';
 import { requireSchoolPermission } from '../../../permissions/school';
-import { rpcError, toRpcError } from '../../../errors';
+import { ORPCError } from '@orpc/server';
+import { toRpcError } from '../../../errors';
+import {
+  EXAM_SLUG_TAKEN_MESSAGE,
+  EXAM_SLUG_TAKEN_REASON,
+  type ExamSlugTakenData,
+} from './exam-definition.contract';
 import * as dto from './exam.dto';
 
 export const schoolExamDefinitionRouter = {
@@ -168,7 +180,7 @@ export const schoolExamDefinitionRouter = {
     .route(
       route(
         'Create a session exam',
-        'Add a unique exam slug and definition to an active session. School exam administrators only.',
+        'Add an exam with a slug and a name unique in the session to an active session, listed after the last exam unless an order is given. Names are compared ignoring case, spacing differences, invisible characters and Unicode compatibility forms. The slugs __proto__, constructor and prototype are reserved. School exam administrators only.',
       ),
     )
     .meta({
@@ -187,10 +199,23 @@ export const schoolExamDefinitionRouter = {
         return await context.db.transaction(async (tx) => {
           const session = await getExamSession(tx, input, 'update');
           if (Object.hasOwn(session.config.examConfig, input.examSlug))
-            throw rpcError.conflict(
-              'An exam with this slug already exists in the session.',
-            );
-          const exam = { name: input.name, order: input.order };
+            throw new ORPCError('CONFLICT', {
+              message: EXAM_SLUG_TAKEN_MESSAGE,
+              data: { reason: EXAM_SLUG_TAKEN_REASON } satisfies ExamSlugTakenData,
+            });
+          // Exam names are unique within the session (`examNameKey`).
+          // The slug is checked first, so a request whose name derives a taken
+          // slug keeps being refused as a taken slug.
+          if (findExamNameClash(session.config.examConfig, input.name) !== undefined)
+            throw examNameTakenError();
+          // Read and written under the session row lock (FOR UPDATE), which the
+          // full-config `updateSession` save takes too: concurrent creations and
+          // saves run one after the other, each on the configuration the previous
+          // one committed, so this never drops another exam.
+          const exam = {
+            name: input.name,
+            order: input.order ?? nextExamOrder(session.config.examConfig),
+          };
           await tx
             .update(schoolSessionTable)
             .set({
@@ -214,7 +239,7 @@ export const schoolExamDefinitionRouter = {
     .route(
       route(
         'Update a session exam',
-        'Edit the name and display order of an exam without changing its stable slug.',
+        'Edit the name and display order of an exam without changing its stable slug. A new name must not be used by another exam of the session (compared ignoring case, spacing differences, invisible characters and Unicode compatibility forms).',
       ),
     )
     .meta({
@@ -236,6 +261,18 @@ export const schoolExamDefinitionRouter = {
             input,
             'update',
           );
+          // A new name must not clash with another exam of the session. Keeping
+          // the exam's own name, or changing only what `examNameKey` ignores
+          // (case, spacing, invisible characters), does not introduce a clash
+          // and is allowed, even when the session already stored a duplicate
+          // of it.
+          if (
+            input.name !== undefined &&
+            examNameKey(input.name) !== examNameKey(existing.name) &&
+            findExamNameClash(session.config.examConfig, input.name, input.examSlug) !==
+              undefined
+          )
+            throw examNameTakenError();
           const exam = {
             name: input.name ?? existing.name,
             order: input.order ?? existing.order,
@@ -263,7 +300,7 @@ export const schoolExamDefinitionRouter = {
     .route(
       route(
         'Delete a session exam',
-        'Remove an exam definition only after all its plans and optional timetable have been deleted. Its record of the classes taking part is removed with it.',
+        'Remove an exam definition that has no recorded data: refused (CONFLICT) while it has plans, results, a timetable, a working-day limit, student assessments or remarks, a started or completed lifecycle, a results notification record or question papers. Its record of the classes taking part is removed with it.',
       ),
     )
     .meta({
@@ -281,30 +318,18 @@ export const schoolExamDefinitionRouter = {
       try {
         return await context.db.transaction(async (tx) => {
           const { session, exam } = await getExam(tx, input, 'update');
-          const [plan] = await tx
-            .select({ id: examPlanTable.id })
-            .from(examPlanTable)
-            .where(
-              and(
-                eq(examPlanTable.sessionId, session.id),
-                eq(examPlanTable.examSlug, input.examSlug),
-              ),
-            )
-            .limit(1);
-          const [timetable] = await tx
-            .select({ id: examTimetableTable.id })
-            .from(examTimetableTable)
-            .where(
-              and(
-                eq(examTimetableTable.sessionId, session.id),
-                eq(examTimetableTable.examSlug, input.examSlug),
-              ),
-            )
-            .limit(1);
-          if (plan || timetable)
-            throw rpcError.conflict(
-              'Delete this exam’s plans and timetable before deleting the exam.',
-            );
+          // The removal guard `updateSession` uses too: plans (and results),
+          // a timetable, a set working-day limit, student assessments and
+          // remarks, a lifecycle beyond the bare `ready` row, a results
+          // notification record or question papers keep the exam. Checked
+          // under the session row lock taken above.
+          await assertExamsHaveNoData(
+            tx,
+            session.id,
+            session.config.examConfig,
+            [input.examSlug],
+            'delete',
+          );
           // Classes may still take part without plans (after deleting every
           // legacy plan); that selection belongs to the exam and goes with it.
           await tx.delete(examClassTable).where(examClassWhere(input));

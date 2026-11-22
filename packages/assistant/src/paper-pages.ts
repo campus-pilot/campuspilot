@@ -8,6 +8,9 @@ import { log } from './log';
 import type { PaperPagePhoto } from './runtime/context';
 import type { PaperKeyParts } from './store';
 
+/** The paper whose photographed pages a conversation shared with it shows: an exam paper by its key, a standalone one by its id. */
+export type PaperPagesTarget = { schoolId: string; paper: PaperKeyParts } | { schoolId: string; standalonePaperId: string };
+
 /**
  * The photographed pages of a question paper for a chat request: each page's
  * model copy (the JPEG the generation job reads, at most 1800 px, already
@@ -22,25 +25,24 @@ import type { PaperKeyParts } from './store';
  * papers, and everyone who may continue it may read them too
  * (`conversation-access.ts`), so the pages are no wider than the chat.
  */
-export async function loadPaperPagePhotos(
-  input: { schoolId: string; paper: PaperKeyParts },
-  db: AssistantExecutor = defaultDb,
-): Promise<PaperPagePhoto[]> {
-  const { schoolId, paper } = input;
+export async function loadPaperPagePhotos(input: PaperPagesTarget, db: AssistantExecutor = defaultDb): Promise<PaperPagePhoto[]> {
+  const { schoolId } = input;
+  // A standalone paper (docs/personal-space.md) by its id; an exam paper by its key.
+  const paperWhere =
+    'standalonePaperId' in input
+      ? and(eq(examQuestionPaperTable.id, input.standalonePaperId), eq(examQuestionPaperTable.kind, 'standalone'))
+      : and(
+          eq(examQuestionPaperTable.sessionId, input.paper.sessionId),
+          eq(examQuestionPaperTable.examSlug, input.paper.examSlug),
+          eq(examQuestionPaperTable.classId, input.paper.classId),
+          eq(examQuestionPaperTable.subjectSlug, input.paper.subjectSlug),
+          eq(examQuestionPaperTable.modeSlug, input.paper.modeSlug),
+        );
   const rows = await db
     .select({ pageId: examQuestionPaperPageTable.id, position: examQuestionPaperPageTable.position, key: examQuestionPaperPageTable.modelS3Key, mimeType: examQuestionPaperPageTable.modelContentType })
     .from(examQuestionPaperPageTable)
     .innerJoin(examQuestionPaperTable, eq(examQuestionPaperTable.id, examQuestionPaperPageTable.paperId))
-    .where(
-      and(
-        eq(examQuestionPaperTable.schoolId, schoolId),
-        eq(examQuestionPaperTable.sessionId, paper.sessionId),
-        eq(examQuestionPaperTable.examSlug, paper.examSlug),
-        eq(examQuestionPaperTable.classId, paper.classId),
-        eq(examQuestionPaperTable.subjectSlug, paper.subjectSlug),
-        eq(examQuestionPaperTable.modeSlug, paper.modeSlug),
-      ),
-    )
+    .where(and(eq(examQuestionPaperTable.schoolId, schoolId), paperWhere))
     .orderBy(asc(examQuestionPaperPageTable.position));
   // Numbered as the teacher sees them: out of every page of the paper, also one whose copy is not ready.
   const total = rows.length;

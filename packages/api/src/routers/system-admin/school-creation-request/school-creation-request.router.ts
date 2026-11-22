@@ -9,7 +9,7 @@ import { SYSTEM_ACTIONS } from "@campuspilot/opa/policies/system";
 import { asc, count, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { rpcError, toRpcError } from "../../../errors";
-import { protectedProcedure } from "../../../index";
+import { platformAdminProcedure } from "../../../index";
 import {
   createNextPageCursor,
   createPaginatedResult,
@@ -55,7 +55,7 @@ async function createdSchoolsByUser(db: DatabaseExecutor, userIds: string[]) {
  * from MCP: how many schools someone may open is a human platform decision.
  */
 export const schoolCreationRequestRouter = {
-  listSchoolCreationRequests: protectedProcedure
+  listSchoolCreationRequests: platformAdminProcedure
     .route({
       summary: "List school creation requests",
       description:
@@ -119,7 +119,7 @@ export const schoolCreationRequestRouter = {
       }
     }),
 
-  countPendingSchoolCreationRequests: protectedProcedure
+  countPendingSchoolCreationRequests: platformAdminProcedure
     .route({
       summary: "Count pending school creation requests",
       description: "How many requests to create more schools wait for a decision. Requires system-administrator permission.",
@@ -140,7 +140,7 @@ export const schoolCreationRequestRouter = {
       }
     }),
 
-  decideSchoolCreationRequest: protectedProcedure
+  decideSchoolCreationRequest: platformAdminProcedure
     .route({
       summary: "Decide a school creation request",
       description:

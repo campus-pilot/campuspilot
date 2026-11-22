@@ -7,19 +7,15 @@ import {
   schoolCreationTable,
 } from '@campuspilot/db/schema/school-creation';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
-import { schoolUserRoleTable } from '@campuspilot/db/schema/school-user-role';
 import { and, count, desc, eq, sql } from 'drizzle-orm';
 
 import { rpcError } from '../errors';
-import { setSchoolFeature } from '../feature-flags/feature-flags.service';
-import { addBillingPeriods } from '../billing/billing.contract';
-import { startTrialPeriod } from '../billing/billing.service';
-import { uniqueSlug } from '../workflows/demo-school/identity';
+import { provisionSelfServiceSchool } from './school-provisioning';
 import { slugifySchoolName } from '../workflows/demo-school/slug';
+import { offerSchoolOnboarding } from '../school-onboarding/school-onboarding.service';
 import {
   SCHOOL_CREATION_REFUSAL_MESSAGES,
   SCHOOL_CREATION_REFUSED_REASON,
-  SELF_SERVICE_ASSISTANT_MONTHLY_LIMIT_USD,
   SELF_SERVICE_TRIAL_PERIODS,
   SELF_SERVICE_TRIAL_TIER,
   type SchoolCreationRefusal,
@@ -119,7 +115,9 @@ export type CreateOwnSchoolInput = {
  *
  * 1. locks the person and checks they may create one (refused with
  *    {@link schoolCreationRefusedError});
- * 2. inserts the school with the person as owner and no subscription;
+ * 2. to 5. are `provisionSelfServiceSchool`, shared with personal spaces:
+ * 2. inserts the school (kind `school`, slug from its name) with the person
+ *    as owner and no subscription;
  * 3. starts a {@link SELF_SERVICE_TRIAL_TIER} trial of
  *    {@link SELF_SERVICE_TRIAL_PERIODS} billing period (28 days), which is
  *    where the school's billing cycle begins: it ends on its own and the
@@ -128,55 +126,31 @@ export type CreateOwnSchoolInput = {
  * 4. switches the assistant on with its monthly limit (which also switches it
  *    on for the default roles);
  * 5. makes the person a member with the principal role;
- * 6. records the creation in the ledger.
+ * 6. records the creation in the ledger;
+ * 7. offers the school its guided setup (`school_onboarding`), which opens
+ *    as the owner's next screen.
  */
 export async function createOwnSchool(db: DatabaseExecutor, input: CreateOwnSchoolInput): Promise<{ schoolId: string }> {
   await lockUser(db, input.userId);
   const status = await readSchoolCreationStatus(db, input.userId);
   if (status.refusal) throw schoolCreationRefusedError(status.refusal);
 
-  // The insert itself claims the slug: a slug taken meanwhile, even by another
-  // person's creation at the same moment, moves on to the next suffix.
-  const created: { id?: string } = {};
-  await uniqueSlug(slugifySchoolName(input.name) || 'school', async (candidate) => {
-    const [row] = await db
-      .insert(schoolTable)
-      .values({
-        slug: candidate,
-        name: input.name,
-        location: input.location,
-        registrationNo: input.registrationNo,
-        tier: null,
-        ownerUserId: input.userId,
-      })
-      .onConflictDoNothing({ target: schoolTable.slug })
-      .returning({ id: schoolTable.id });
-    created.id = row?.id;
-    return row === undefined;
+  // The shared start of every self-provisioned school (trial, assistant, owner as principal); the slug comes from the name.
+  const { schoolId } = await provisionSelfServiceSchool(db, {
+    ownerUserId: input.userId,
+    now: input.now,
+    school: {
+      kind: 'school',
+      name: input.name,
+      location: input.location,
+      registrationNo: input.registrationNo,
+      slug: { fromName: slugifySchoolName(input.name) || 'school' },
+    },
   });
-  if (!created.id) throw rpcError.internal();
-  const school = { id: created.id };
-
-  await startTrialPeriod(db, {
-    schoolId: school.id,
-    tier: SELF_SERVICE_TRIAL_TIER,
-    endsAt: addBillingPeriods(input.now, SELF_SERVICE_TRIAL_PERIODS),
-    createdBy: input.userId,
-  });
-  // A system write (no administrator made it), hence no `updatedBy`.
-  await setSchoolFeature(db, {
-    schoolId: school.id,
-    feature: 'assistant',
-    enabled: true,
-    config: { monthlyLimitUsd: SELF_SERVICE_ASSISTANT_MONTHLY_LIMIT_USD, voice: { enabled: false } },
-    updatedBy: null,
-  });
-  await db.insert(schoolMemberTable).values({ schoolId: school.id, userId: input.userId });
-  await db
-    .insert(schoolUserRoleTable)
-    .values({ schoolId: school.id, userId: input.userId, role: 'principal', meta: null });
-  await db.insert(schoolCreationTable).values({ userId: input.userId, schoolId: school.id });
-  return { schoolId: school.id };
+  // Only a school someone creates counts against their allowance and is offered the guided setup.
+  await db.insert(schoolCreationTable).values({ userId: input.userId, schoolId });
+  await offerSchoolOnboarding(db, schoolId);
+  return { schoolId };
 }
 
 /** The person's newest request, or null when they never asked. */

@@ -19,7 +19,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useForm } from '@tanstack/react-form';
-import { z } from 'zod';
+import { nextExamOrder } from '@campuspilot/db/schema/jsonb/session-config';
 import { Badge } from '@campuspilot/ui/components/badge';
 import { Button } from '@campuspilot/ui/components/button';
 import {
@@ -51,15 +51,7 @@ import {
   slugify,
   type ExamDefinition,
 } from './types';
-
-const examFormSchema = z.object({
-  name: z.string().trim().min(1, 'Exam name is required'),
-  slug: z
-    .string()
-    .trim()
-    .min(1, 'Exam slug is required')
-    .regex(/^[a-z0-9_]+$/, 'Slug can only contain lowercase letters, numbers, and underscores'),
-});
+import { examDialogSchema } from './exam-dialog-model';
 
 function FieldErrors({ errors }: { errors: unknown[] }) {
   return errors.map((error, index) => {
@@ -79,7 +71,8 @@ interface ExamDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   initialValues?: { slug: string; name: string };
-  existingSlugs: string[];
+  /** The settings draft's exams, which the slug and name rules check against. */
+  examConfig: Record<string, ExamDefinition>;
   onSubmit: (values: { slug: string; name: string }) => void;
 }
 
@@ -87,7 +80,7 @@ function ExamDialog({
   open,
   onOpenChange,
   initialValues,
-  existingSlugs,
+  examConfig,
   onSubmit,
 }: ExamDialogProps) {
   const isEditing = Boolean(initialValues);
@@ -97,16 +90,10 @@ function ExamDialog({
       slug: initialValues?.slug ?? '',
     },
     validators: {
-      onSubmit: examFormSchema.refine(
-        (val) => {
-          if (isEditing && val.slug === initialValues?.slug) return true;
-          return !existingSlugs.includes(val.slug);
-        },
-        {
-          message: 'An examination with this slug already exists.',
-          path: ['slug'],
-        },
-      ),
+      onSubmit: examDialogSchema({
+        examConfig,
+        editingSlug: initialValues?.slug,
+      }),
     },
     onSubmit: ({ value }) => {
       onSubmit(value);
@@ -333,7 +320,7 @@ export function ExaminationSection({
     const order =
       dialogState.editingSlug && current[dialogState.editingSlug]
         ? current[dialogState.editingSlug]!.order
-        : entries.length + 1;
+        : nextExamOrder(examConfig ?? {});
 
     current[values.slug] = {
       name: values.name,
@@ -469,7 +456,7 @@ export function ExaminationSection({
                 }
               : undefined
           }
-          existingSlugs={sortedKeys}
+          examConfig={examConfig ?? {}}
           onSubmit={handleAddOrEdit}
         />
       )}

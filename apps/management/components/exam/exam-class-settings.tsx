@@ -3,6 +3,8 @@ import { useForm } from '@tanstack/react-form';
 import { useQuery } from '@tanstack/react-query';
 import { z } from 'zod';
 import { Users } from 'lucide-react';
+import Link from 'next/link';
+import { Button } from '@campuspilot/ui/components/button';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import {
   type ExamContextDto,
@@ -35,7 +37,28 @@ import {
   participatingClassIds,
   selectionIssue,
 } from './exam-class-model';
-import { errorCode, errorMessage, schoolPermission, type ExamScope } from './exam-model';
+import { errorCode, errorMessage, examResultsHref, schoolPermission, type ExamScope } from './exam-model';
+
+/**
+ * The classes are chosen when the plan is created, and the plan is created
+ * from the examination's Results page (its "No plans yet" state), so a
+ * settings page with no plan and no classes links there. Opening that page
+ * needs `READ_EXAM_PLANS`; creating the plan needs `CREATE_EXAM_PLAN`.
+ */
+function CreateExamPlanLink({ scope }: { scope: ExamScope }) {
+  return (
+    <RequirePermissions
+      permissions={[
+        schoolPermission(scope.schoolId, SCHOOL_ACTIONS.CREATE_EXAM_PLAN),
+        schoolPermission(scope.schoolId, SCHOOL_ACTIONS.READ_EXAM_PLANS),
+      ]}
+    >
+      <Button asChild size="sm" variant="outline">
+        <Link href={examResultsHref(scope)}>Create exam plan</Link>
+      </Button>
+    </RequirePermissions>
+  );
+}
 
 /**
  * Settings section listing the classes taking part in the examination, with
@@ -76,6 +99,9 @@ export function ExamClassesSection({
             : 'No classes yet. Create the exam plan to choose them.'}
         </p>
       </div>
+      {active && overview.planCount === 0 && context.classes.length === 0 && (
+        <CreateExamPlanLink scope={scope} />
+      )}
       {editable && (
         <RequirePermissions
           permissions={schoolPermission(scope.schoolId, SCHOOL_ACTIONS.UPDATE_EXAM_PLAN)}

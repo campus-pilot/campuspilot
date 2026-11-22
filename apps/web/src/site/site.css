@@ -1197,19 +1197,10 @@ body {
   font-weight: 600;
 }
 
-.cp-ai-avatar {
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 7px;
-  background: var(--cp-ink);
-  color: var(--cp-accent-warm);
-}
-
-.cp-ai-avatar svg {
-  width: 13px;
-  height: 13px;
+.cp-ai-mark {
+  width: 30px;
+  height: 30px;
+  margin-top: -6px;
 }
 
 .cp-ai-role {
@@ -1231,6 +1222,61 @@ body {
   background: #f1f1ee;
   line-height: 1.45;
   animation: cp-msg-question 12s ease infinite;
+}
+
+/* "Spoken" label inside the question bubble: the hero's nod to voice mode. */
+.cp-ai-voice {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 3px;
+  color: var(--cp-accent);
+  font: 500 10.5px/1 var(--cp-mono);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.cp-ai-voice > svg {
+  width: 12px;
+  height: 12px;
+}
+
+.cp-ai-wave {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 12px;
+}
+
+.cp-ai-wave i {
+  width: 2px;
+  height: 7px;
+  border-radius: 1px;
+  background: var(--cp-accent);
+  animation: cp-ai-wave 0.9s ease-in-out infinite;
+}
+
+.cp-ai-wave i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.cp-ai-wave i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+.cp-ai-wave i:nth-child(4) {
+  animation-delay: 0.45s;
+}
+
+@keyframes cp-ai-wave {
+  0%,
+  100% {
+    height: 3px;
+  }
+
+  50% {
+    height: 11px;
+  }
 }
 
 .cp-ai-answer {
@@ -3077,7 +3123,7 @@ button.cp-hero-login {
 }
 
 /* Home hero: a quiet text link in the note's place and type. */
-button.cp-hero-login {
+.cp-hero-login {
   padding: 0;
   text-decoration: underline;
   text-decoration-color: var(--cp-line-strong);
@@ -3085,7 +3131,7 @@ button.cp-hero-login {
   transition: color 0.2s ease, text-decoration-color 0.2s ease;
 }
 
-button.cp-hero-login:hover {
+.cp-hero-login:hover {
   color: var(--cp-ink);
   text-decoration-color: currentColor;
 }

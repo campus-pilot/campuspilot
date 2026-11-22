@@ -1,4 +1,5 @@
 import type { DatabaseExecutor } from '@campuspilot/db';
+import { schoolTable } from '@campuspilot/db/schema/school';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
 import { schoolUserRoleTable } from '@campuspilot/db/schema/school-user-role';
 import type { SchoolAction } from '@campuspilot/opa/policies/school';
@@ -18,8 +19,9 @@ import { rpcError } from '../errors';
 /**
  * Resolves all role assignments for the subject and resource before asking OPA.
  * Multiple school roles are preserved as separate facts, including each row's
- * metadata. Every assignment carries its explicit runtime scope; namespaced
- * roles identify the role vocabulary independently of that scope.
+ * metadata. Every assignment carries its explicit runtime scope, with the
+ * school's kind (read in the same query); namespaced roles identify the role
+ * vocabulary independently of that scope.
  */
 export async function assertPermission<TAction extends AuthorizationAction>(
   context: Context,
@@ -78,10 +80,12 @@ export async function checkPermissions(
       : await context.db
           .select({
             schoolId: schoolUserRoleTable.schoolId,
+            schoolKind: schoolTable.kind,
             role: schoolUserRoleTable.role,
             meta: schoolUserRoleTable.meta,
           })
           .from(schoolUserRoleTable)
+          .innerJoin(schoolTable, eq(schoolTable.id, schoolUserRoleTable.schoolId))
           .where(
             and(
               eq(schoolUserRoleTable.userId, authenticatedUser.id),
@@ -94,7 +98,7 @@ export async function checkPermissions(
     const assignments = schoolRoleAssignments.get(assignment.schoolId) ?? [];
     assignments.push({
       role: `school.${assignment.role}` as const,
-      scope: { kind: 'school', schoolId: assignment.schoolId },
+      scope: { kind: 'school', schoolId: assignment.schoolId, schoolKind: assignment.schoolKind },
       meta: assignment.meta,
     });
     schoolRoleAssignments.set(assignment.schoolId, assignments);
@@ -138,8 +142,9 @@ export async function schoolMembersWithPermission(
   action: SchoolAction,
 ): Promise<string[]> {
   const rows = await db
-    .select({ userId: schoolUserRoleTable.userId, role: schoolUserRoleTable.role, meta: schoolUserRoleTable.meta })
+    .select({ userId: schoolUserRoleTable.userId, schoolKind: schoolTable.kind, role: schoolUserRoleTable.role, meta: schoolUserRoleTable.meta })
     .from(schoolUserRoleTable)
+    .innerJoin(schoolTable, eq(schoolTable.id, schoolUserRoleTable.schoolId))
     .innerJoin(
       schoolMemberTable,
       and(eq(schoolMemberTable.schoolId, schoolUserRoleTable.schoolId), eq(schoolMemberTable.userId, schoolUserRoleTable.userId)),
@@ -148,7 +153,7 @@ export async function schoolMembersWithPermission(
   const assignmentsByUser = new Map<string, RoleAssignment[]>();
   for (const row of rows) {
     const assignments = assignmentsByUser.get(row.userId) ?? [];
-    assignments.push({ role: `school.${row.role}` as const, scope: { kind: 'school', schoolId }, meta: row.meta });
+    assignments.push({ role: `school.${row.role}` as const, scope: { kind: 'school', schoolId, schoolKind: row.schoolKind }, meta: row.meta });
     assignmentsByUser.set(row.userId, assignments);
   }
   const users = [...assignmentsByUser.keys()].sort();

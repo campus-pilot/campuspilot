@@ -76,6 +76,14 @@ const questionPaperViewSchema = z.object({
   versionNo: z.number().int().min(1).describe('The saved version to show, exactly as saveQuestionPaperVersion or getQuestionPaper returned it.'),
 });
 
+/** A saved version of a standalone paper of a personal space (docs/personal-space.md), named by the paper's id. */
+const standaloneQuestionPaperViewSchema = z.object({
+  type: z.literal('standalone_question_paper'),
+  title,
+  paperId: text(120).describe('The paper id exactly as a standalone paper tool returned it.'),
+  versionNo: z.number().int().min(1).describe('The saved version to show, exactly as saveStandalonePaperVersion or getStandalonePaper returned it.'),
+});
+
 const cellValueSchema = z.union([z.string().max(300), z.number(), z.null()]);
 
 const tableColumnSchema = z.object({
@@ -143,6 +151,7 @@ export const assistantViewSchema = z.discriminatedUnion('type', [
   examResultViewSchema,
   documentsViewSchema,
   questionPaperViewSchema,
+  standaloneQuestionPaperViewSchema,
   tableViewSchema,
   statsViewSchema,
   detailsViewSchema,
@@ -154,6 +163,7 @@ export type AssistantRecordsView = z.infer<typeof recordsViewSchema>;
 export type AssistantExamResultView = z.infer<typeof examResultViewSchema>;
 export type AssistantDocumentsView = z.infer<typeof documentsViewSchema>;
 export type AssistantQuestionPaperView = z.infer<typeof questionPaperViewSchema>;
+export type AssistantStandaloneQuestionPaperView = z.infer<typeof standaloneQuestionPaperViewSchema>;
 export type AssistantTableView = z.infer<typeof tableViewSchema>;
 export type AssistantStatsView = z.infer<typeof statsViewSchema>;
 export type AssistantDetailsView = z.infer<typeof detailsViewSchema>;
@@ -174,6 +184,7 @@ export const SHOW_VIEW_TOOL_DESCRIPTION = [
   'records for specific admissions, students, classes, exams or staff (pass their ids); exam_result for one student’s result in an exam;',
   'documents for generated documents such as report cards, bills or receipts, each shown with a Download button (this is the only way to give the user a document: never write a download link);',
   'question_paper for a saved version of a question paper, with Preview and Download (after saveQuestionPaperVersion, or to show an older version);',
+  'standalone_question_paper for a saved version of a personal space paper, the same with its paperId (after saveStandalonePaperVersion);',
   'table for rows of data; stats for a few headline numbers; details for one item’s facts; bars to compare amounts; notice for one important caution.',
   'Only use data you got from tools. After showing a view, add at most one or two sentences of explanation; do not repeat what the view shows.',
 ].join(' ');

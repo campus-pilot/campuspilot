@@ -1,5 +1,7 @@
 import { SCHOOL_FEATURE_KEYS, type SchoolFeatureKey } from '@campuspilot/db/feature-flags/catalogue';
 import { getSchoolFeatureFlags } from '@campuspilot/db/feature-flags/store';
+import type { SchoolKind } from '@campuspilot/db/school-kind';
+import { getSchoolKind } from '@campuspilot/db/school-kind-store';
 
 import { db } from '../db';
 
@@ -13,4 +15,14 @@ import { db } from '../db';
 export async function readActiveSchoolFeatures(schoolId: string): Promise<ReadonlySet<SchoolFeatureKey>> {
   const features = await getSchoolFeatureFlags(db, schoolId);
   return new Set(SCHOOL_FEATURE_KEYS.filter((key) => features[key].active));
+}
+
+/**
+ * The school's kind (docs/personal-space.md), read with its features for
+ * every model request and tool call. A school that cannot be found is read as
+ * a real school: its tools are refused by the API anyway, and a real school's
+ * tools never reach a personal space's data.
+ */
+export async function readSchoolKind(schoolId: string): Promise<SchoolKind> {
+  return (await getSchoolKind(db, schoolId)) ?? 'school';
 }

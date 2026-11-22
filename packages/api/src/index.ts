@@ -4,7 +4,7 @@ import type { Context } from "./context";
 import { rpcError } from "./errors";
 import type { ProcedureMeta } from "./mcp-metadata";
 import { assistantToolDecision } from "./assistant/tool-policy";
-import { assertSchoolWritableByCaller } from "./school-access/school-access.service";
+import { assertSchoolGatesByCaller, servedSchoolKinds } from "./school-access/school-kind.service";
 import {
   MCP_READ_SCOPE,
   MCP_WRITE_SCOPE,
@@ -68,13 +68,20 @@ function assertAssistantToolPolicy(
 }
 
 /**
- * A suspended school, and a school without an active plan, is read-only
- * (docs/school-suspension.md, docs/school-billing.md): every procedure that
- * is not an explicit read (`mcp.access`; a procedure without metadata is
- * treated as a write, as for OAuth scopes) is refused for the school its
- * input names. Here, on every protected procedure, rather than on each one:
- * a new procedure is covered without remembering to add anything, whichever
- * way it is reached (the apps, an API key, a connected AI app, the in-app
+ * The two school gates of every protected procedure, for the school its
+ * input names, decided from one read (`assertSchoolGatesByCaller`):
+ *
+ * - The school kind gate (docs/personal-space.md): a procedure serves the
+ *   kinds of school its `schoolKinds` names (real schools only when it names
+ *   none), and a school of another kind is refused, reads included.
+ * - The read-only gate (docs/school-suspension.md, docs/school-billing.md): a
+ *   suspended school, and a school without an active plan, refuses every
+ *   procedure that is not an explicit read (`mcp.access`; a procedure without
+ *   metadata is treated as a write, as for OAuth scopes), for its members.
+ *
+ * Here, on every protected procedure, rather than on each one: a new
+ * procedure is covered without remembering to add anything, whichever way it
+ * is reached (the apps, an API key, a connected AI app, the in-app
  * assistant).
  *
  * The school is the input's `schoolId`, the name every school-scoped
@@ -84,33 +91,36 @@ function assertAssistantToolPolicy(
  * it (`z.string().trim()`): otherwise " sch_x" would name no school here and
  * the school the procedure then acts on.
  *
- * Platform administration (`systemAdmin.*`) is not held: it acts on a school
- * from outside it, even when the administrator is also a member (the
- * principal of a demo school they created).
+ * Platform administration (`meta.platformAdministration`, every
+ * `systemAdmin.*` procedure) is held by neither: it acts on a school from
+ * outside it, even when the administrator is also a member (the principal of
+ * a demo school they created). Decided from the procedure's own metadata,
+ * never from its path, which a call through MCP may not carry.
  */
-async function assertSchoolWritableForWrite(
+async function assertSchoolGates(
   context: Context,
   meta: ProcedureMeta,
-  path: readonly string[],
   input: unknown,
 ) {
-  if (meta.mcp?.access === "read") return;
-  if (path[0] === "systemAdmin") return;
+  if (meta.platformAdministration) return;
   const schoolId =
     typeof input === "object" && input !== null
       ? (input as Record<string, unknown>).schoolId
       : undefined;
   if (typeof schoolId !== "string") return;
-  await assertSchoolWritableByCaller(context, schoolId.trim());
+  await assertSchoolGatesByCaller(context, schoolId.trim(), {
+    served: servedSchoolKinds(meta.schoolKinds),
+    write: meta.mcp?.access !== "read",
+  });
 }
 
-const requireAuth = o.middleware(async ({ context, next, procedure, path }, input) => {
+const requireAuth = o.middleware(async ({ context, next, procedure }, input) => {
   if (!context.session?.user) {
     throw rpcError.unauthorized();
   }
   assertOAuthScope(context, procedure["~orpc"].meta);
   assertAssistantToolPolicy(context, procedure["~orpc"].meta, input);
-  await assertSchoolWritableForWrite(context, procedure["~orpc"].meta, path, input);
+  await assertSchoolGates(context, procedure["~orpc"].meta, input);
   return next({
     context: {
       db: context.db,
@@ -120,3 +130,12 @@ const requireAuth = o.middleware(async ({ context, next, procedure, path }, inpu
 });
 
 export const protectedProcedure = publicProcedure.use(requireAuth);
+
+/**
+ * The builder of platform administration (`systemAdmin.*`): a protected
+ * procedure whose metadata says `platformAdministration`, so the school gates
+ * of `requireAuth` do not hold it and every kind of school is served
+ * (`school-kind.integration.test.ts` checks every `systemAdmin` procedure is
+ * built with it and no other is).
+ */
+export const platformAdminProcedure = protectedProcedure.meta({ platformAdministration: true });

@@ -50,7 +50,7 @@ describe('isAuthorized Integration with OPA Container', () => {
             roleAssignments: [
               {
                 role: 'school.principal',
-                scope: { kind: 'school', schoolId: 'school-1' },
+                scope: { kind: 'school', schoolId: 'school-1', schoolKind: 'school' },
                 meta: null,
               },
             ],
@@ -87,7 +87,7 @@ describe('isAuthorized Integration with OPA Container', () => {
         ).toBe(false);
         expect(
           await decide(action, [
-            { role: 'school.principal', scope: { kind: 'school', schoolId: 'school-1' }, meta: null },
+            { role: 'school.principal', scope: { kind: 'school', schoolId: 'school-1', schoolKind: 'school' }, meta: null },
           ]),
         ).toBe(false);
       }
@@ -106,7 +106,7 @@ describe('isAuthorized Integration with OPA Container', () => {
               roleAssignments: [
                 {
                   role,
-                  scope: { kind: 'school', schoolId: 'school-1' },
+                  scope: { kind: 'school', schoolId: 'school-1', schoolKind: 'school' },
                   meta: null,
                 },
               ],
@@ -141,7 +141,7 @@ describe('isAuthorized Integration with OPA Container', () => {
               roleAssignments: [
                 {
                   role: 'school.principal',
-                  scope: { kind: 'school', schoolId: 'school-1' },
+                  scope: { kind: 'school', schoolId: 'school-1', schoolKind: 'school' },
                   meta: null,
                 },
               ],
@@ -158,7 +158,7 @@ describe('isAuthorized Integration with OPA Container', () => {
               roleAssignments: [
                 {
                   role: 'school.principal',
-                  scope: { kind: 'school', schoolId: 'school-1' },
+                  scope: { kind: 'school', schoolId: 'school-1', schoolKind: 'school' },
                   meta: null,
                 },
               ],
@@ -196,7 +196,7 @@ describe('isAuthorized Integration with OPA Container', () => {
             roleAssignments: [
               {
                 role: 'school.principal',
-                scope: { kind: 'school', schoolId: 'school-1' },
+                scope: { kind: 'school', schoolId: 'school-1', schoolKind: 'school' },
                 meta: null,
               },
             ],
@@ -218,7 +218,7 @@ describe('isAuthorized Integration with OPA Container', () => {
             roleAssignments: [
               {
                 role: 'school.principal',
-                scope: { kind: 'school', schoolId: 'school-1' },
+                scope: { kind: 'school', schoolId: 'school-1', schoolKind: 'school' },
                 meta: null,
               },
             ],
@@ -240,7 +240,7 @@ describe('isAuthorized Integration with OPA Container', () => {
             roleAssignments: [
               {
                 role: 'school.teacher',
-                scope: { kind: 'school', schoolId: 'school-1' },
+                scope: { kind: 'school', schoolId: 'school-1', schoolKind: 'school' },
                 meta: { classIds: ['class-1'] },
               },
             ],
@@ -280,7 +280,7 @@ describe('isAuthorized Integration with OPA Container', () => {
             roleAssignments: [
               {
                 role: 'school.manager',
-                scope: { kind: 'school', schoolId: 'school-1' },
+                scope: { kind: 'school', schoolId: 'school-1', schoolKind: 'school' },
                 meta: null,
               },
             ],
@@ -302,7 +302,7 @@ describe('isAuthorized Integration with OPA Container', () => {
             roleAssignments: [
               {
                 role: 'school.principal',
-                scope: { kind: 'school', schoolId: 'school-1' },
+                scope: { kind: 'school', schoolId: 'school-1', schoolKind: 'school' },
                 meta: null,
               },
             ],
@@ -343,7 +343,7 @@ describe('isAuthorized Integration with OPA Container', () => {
               roleAssignments: [
                 {
                   role: 'school.principal',
-                  scope: { kind: 'school', schoolId: 'school-1' },
+                  scope: { kind: 'school', schoolId: 'school-1', schoolKind: 'school' },
                   meta: null,
                 },
               ],
@@ -360,7 +360,7 @@ describe('isAuthorized Integration with OPA Container', () => {
               roleAssignments: [
                 {
                   role: 'school.teacher',
-                  scope: { kind: 'school', schoolId: 'school-1' },
+                  scope: { kind: 'school', schoolId: 'school-1', schoolKind: 'school' },
                   meta: { classIds: [] },
                 },
               ],
@@ -377,7 +377,7 @@ describe('isAuthorized Integration with OPA Container', () => {
               roleAssignments: [
                 {
                   role: 'school.teacher',
-                  scope: { kind: 'school', schoolId: 'school-1' },
+                  scope: { kind: 'school', schoolId: 'school-1', schoolKind: 'school' },
                   meta: { classIds: [] },
                 },
               ],
@@ -403,7 +403,7 @@ describe('isAuthorized Integration with OPA Container', () => {
               roleAssignments: [
                 {
                   role: 'school.teacher',
-                  scope: { kind: 'school', schoolId: 'school-1' },
+                  scope: { kind: 'school', schoolId: 'school-1', schoolKind: 'school' },
                   meta: { classIds: ['class-1'] },
                 },
               ],
@@ -442,7 +442,7 @@ describe('isAuthorized Integration with OPA Container', () => {
             roleAssignments: [
               {
                 role: 'school.teacher',
-                scope: { kind: 'school', schoolId: 'school-1' },
+                scope: { kind: 'school', schoolId: 'school-1', schoolKind: 'school' },
                 meta: { classIds: ['class-1', 'class-2'] },
               },
             ],
@@ -464,7 +464,7 @@ describe('isAuthorized Integration with OPA Container', () => {
             roleAssignments: [
               {
                 role: 'school.teacher',
-                scope: { kind: 'school', schoolId: 'school-1' },
+                scope: { kind: 'school', schoolId: 'school-1', schoolKind: 'school' },
                 meta: { classIds: ['class-2'] },
               },
             ],
@@ -486,7 +486,7 @@ describe('isAuthorized Integration with OPA Container', () => {
             roleAssignments: [
               {
                 role: 'school.teacher',
-                scope: { kind: 'school', schoolId: 'school-1' },
+                scope: { kind: 'school', schoolId: 'school-1', schoolKind: 'school' },
                 meta: null,
               },
             ],

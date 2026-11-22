@@ -1,6 +1,14 @@
 'use client';
 import Link from 'next/link';
 import { Badge } from '@campuspilot/ui/components/badge';
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@campuspilot/ui/components/empty';
 import { ClipboardCheck } from 'lucide-react';
 import { useForm } from '@tanstack/react-form';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
@@ -8,6 +16,7 @@ import { z } from 'zod';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import { RequirePermissions } from '@/components/require-permissions';
 import { orpc } from '@/lib/orpc';
+import { CreateExamAction } from './exam-create';
 import {
   ExamFrame,
   ExamPager,
@@ -31,7 +40,7 @@ export function ExamList({ scope }: { scope: SessionScope }) {
     >
       <ExamFrame
         title="Examinations"
-        description="View the exams configured in session settings, manage plans, and review results."
+        description="View and create this session's examinations, manage plans, and review results."
       >
         <ExamSession scope={scope}>
           {() => <ExamListData scope={scope} />}
@@ -84,9 +93,7 @@ function ExamListPage({
     <>
       {query.isError && <ReadError error={query.error} retry={query.refetch} />}
       {query.data!.items.length === 0 ? (
-        <Notice>
-          No exams configured. Add examinations in session settings.
-        </Notice>
+        <NoExamsYet scope={scope} />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {query.data!.items.map((exam) => (
@@ -134,5 +141,29 @@ function ExamListPage({
         />
       )}
     </>
+  );
+}
+
+/**
+ * The session has no examination yet: one next action, the same Create
+ * examination as the navbar, shown only to those who may create one while the
+ * session is active.
+ */
+function NoExamsYet({ scope }: { scope: SessionScope }) {
+  return (
+    <Empty className="border border-dashed p-10">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <ClipboardCheck />
+        </EmptyMedia>
+        <EmptyTitle>No examinations yet</EmptyTitle>
+        <EmptyDescription>
+          This session has no examinations configured.
+        </EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <CreateExamAction scope={scope} variant="outline" />
+      </EmptyContent>
+    </Empty>
   );
 }

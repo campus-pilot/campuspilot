@@ -92,6 +92,7 @@ export async function processPageDerivatives(db: DatabaseExecutor, pageId: strin
             width: derived.width,
             height: derived.height,
             thumbS3Key: keys.thumb,
+            thumbByteSize: derived.thumb.bytes.byteLength,
             modelS3Key: keys.model,
             modelContentType: derived.model.contentType,
             modelByteSize: derived.model.bytes.byteLength,

@@ -65,6 +65,7 @@ import { KeyRound, MoreVertical, Pencil, UserMinus } from 'lucide-react';
 import { z } from 'zod';
 import { authClient } from '@/lib/auth-client';
 import { client, orpc } from '@/lib/orpc';
+import { InviteStaffAction } from './invite-staff-action';
 import { RequirePermissions } from './require-permissions';
 import { roleLabels, StaffRolePicker } from './staff-role-picker';
 
@@ -441,6 +442,11 @@ function StaffRows({
           controller.query.searchQuery
             ? 'No staff members match this search.'
             : 'No staff members have been invited yet.'
+        }
+        emptyAction={
+          controller.query.searchQuery ? undefined : (
+            <InviteStaffAction schoolId={schoolId} />
+          )
         }
       />
       {memberToEdit ? (

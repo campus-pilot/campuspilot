@@ -10,6 +10,7 @@ import type { PermissionCheck } from '@campuspilot/api/routers/authorization/aut
 // only after they are set.
 process.env.NEXT_PUBLIC_SERVER_URL ??= 'http://localhost:3100';
 process.env.NEXT_PUBLIC_MCP_URL ??= 'http://localhost:3100/mcp';
+process.env.NEXT_PUBLIC_WEBSITE_URL ??= 'http://localhost:5174';
 const { CreatePdfButton, DocumentGenerator } = await import('./document-generator');
 const { documentWorkspacePermissions } = await import('./document-export-link');
 const { documentPermission, SCHOOL_ACTIONS } = await import('./document-common');

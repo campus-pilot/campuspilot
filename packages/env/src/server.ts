@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { DB_ENV_SHAPE } from './server/api-db.env';
 import { ASSISTANT_DELEGATION_ENV_SHAPE } from './server/assistant.env';
 import { AUTH_ENV_SHAPE } from './server/auth.env';
+import { LEAD_ENV_SHAPE, requireLeadChallengeKeyInProduction } from './server/lead.env';
 import { S3_ENV_SHAPE } from './server/s3.env';
 import { requireWorkerControlSecretInProduction, SERVICES_ENV_SHAPE } from './server/services.env';
 import { requireWebPushConfigWhenEnabled, WEB_PUSH_ENV_SHAPE } from './server/web-push.env';
@@ -26,6 +27,7 @@ export const env = createEnv({
     ...ASSISTANT_DELEGATION_ENV_SHAPE,
     ...WEB_PUSH_ENV_SHAPE,
     ...WHATSAPP_ENV_SHAPE,
+    ...LEAD_ENV_SHAPE,
   },
   createFinalSchema: (shape) =>
     z.object(shape).superRefine((value, context) => {
@@ -33,6 +35,7 @@ export const env = createEnv({
       requireWebPushConfigWhenEnabled(value, context);
       requireWhatsAppConfigWhenEnabled(value, context);
       requireSafeWhatsAppGraphBaseUrl(value, context);
+      requireLeadChallengeKeyInProduction(value, context);
     }),
   runtimeEnv: process.env,
   skipValidation: !!process.env.SKIP_ENV_VALIDATION,

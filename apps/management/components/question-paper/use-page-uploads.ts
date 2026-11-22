@@ -6,8 +6,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { planUploads, QUESTION_PAPER_MAX_PAGES } from '@campuspilot/components/question-paper/question-paper-model';
 import type { UploadQueueItem } from '@campuspilot/components/question-paper/paper-source-tray';
-import { client, orpc } from '@/lib/orpc';
-import { storeQuestionPaperPage, type QuestionPaperPage, type QuestionPaperPageKey } from '@/lib/question-paper-pages';
+import { storeQuestionPaperPage, type QuestionPaperPage } from '@/lib/question-paper-pages';
+import { paperCalls, paperDetailQueryKey, type PaperTarget } from './paper-target';
 import { prepareUploadFile } from './prepare-upload-file';
 import { PAGE_UPLOAD_CONCURRENCY, patchStoredPage, releaseFailedUpload, requestErrorMessage, runWithConcurrency, unreservedUploads } from './question-paper-model';
 
@@ -44,7 +44,7 @@ const PREVIEWABLE = new Set(['image/jpeg', 'image/png', 'image/webp']);
  */
 export type PageUploads = ReturnType<typeof usePageUploads>;
 
-export function usePageUploads({ pageKey, refresh }: { pageKey: QuestionPaperPageKey; refresh: () => Promise<void> }) {
+export function usePageUploads({ pageKey, refresh }: { pageKey: PaperTarget; refresh: () => Promise<void> }) {
   const queryClient = useQueryClient();
   const form = useForm({
     defaultValues: { items: [] as UploadQueueItem[], rejections: [] as { name: string; reason: string }[] },
@@ -73,7 +73,7 @@ export function usePageUploads({ pageKey, refresh }: { pageKey: QuestionPaperPag
   };
 
   /** Puts a stored page into the cached paper, where its reservation already stands, so the grid shows it without a read. */
-  const showStoredPage = (page: QuestionPaperPage) => patchStoredPage(queryClient, orpc.school.getQuestionPaperDetail.queryKey({ input: pageKey }), page);
+  const showStoredPage = (page: QuestionPaperPage) => patchStoredPage(queryClient, paperDetailQueryKey(pageKey), page);
 
   async function processEntry(entry: { id: string; file: File; pageId: string }) {
     patch(entry.id, { status: 'converting', error: undefined });
@@ -90,7 +90,7 @@ export function usePageUploads({ pageKey, refresh }: { pageKey: QuestionPaperPag
       remove(entry.id);
     } catch (error) {
       // Its page is given back so the paper holds no empty page; the photos after it keep their own pages.
-      const release = await releaseFailedUpload(() => client.school.releaseQuestionPaperPage({ ...pageKey, pageId: entry.pageId }));
+      const release = await releaseFailedUpload(() => paperCalls.releasePage(pageKey, entry.pageId));
       // The photo was stored and only the answer was lost: the end-of-pick read shows it, nothing to add again.
       if (release === 'stored') return remove(entry.id);
       patch(entry.id, {
@@ -105,7 +105,7 @@ export function usePageUploads({ pageKey, refresh }: { pageKey: QuestionPaperPag
   async function processPick(entries: Array<{ id: string; file: File }>) {
     let reserved: QuestionPaperPage[];
     try {
-      ({ pages: reserved } = await client.school.reserveQuestionPaperPages({ ...pageKey, fileNames: entries.map((entry) => entry.file.name) }));
+      ({ pages: reserved } = await paperCalls.reservePages(pageKey, entries.map((entry) => entry.file.name)));
     } catch (error) {
       for (const entry of entries) patch(entry.id, { status: 'error', error: requestErrorMessage(error, 'The photos could not be added.') });
       return;

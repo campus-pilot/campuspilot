@@ -17,6 +17,7 @@ import {
   SHARED_SESSION_OPTIONS,
   sharedCookieOptions,
 } from './auth-foundation';
+import { afterUserCreated } from './google-sign-up';
 import { log } from './log';
 import {
   AUTH_BASE_PATH,
@@ -229,8 +230,10 @@ export function createAuth(
           before: async (user) => ({
             data: { ...user, role: roleForEmail(user.email) },
           }),
-          after: async (user) => {
+          after: async (user, context) => {
             await persistGoogleProfileImageIfMissing(user.id, user.image);
+            // A new Google sign-up gets its personal space (docs/personal-space.md); decided from the endpoint.
+            await afterUserCreated(user.id, context);
           },
         },
       },

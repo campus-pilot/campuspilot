@@ -7,6 +7,7 @@ import type { SchoolCreationStatusDto } from '@campuspilot/api/routers/school-cr
 // only after they are set.
 process.env.NEXT_PUBLIC_SERVER_URL ??= 'http://localhost:3100';
 process.env.NEXT_PUBLIC_MCP_URL ??= 'http://localhost:3100/mcp';
+process.env.NEXT_PUBLIC_WEBSITE_URL ??= 'http://localhost:5174';
 const { approvalNoteOf } = await import('./school-creation-panel');
 
 const request = {

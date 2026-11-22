@@ -5,7 +5,7 @@ import { SYSTEM_ACTIONS } from '@campuspilot/opa/policies/system';
 import { and, asc, count, desc, eq, ilike, isNull, or, sql, type SQL } from 'drizzle-orm';
 
 import { rpcError, toRpcError } from '../../../errors';
-import { protectedProcedure } from '../../../index';
+import { platformAdminProcedure } from '../../../index';
 import {
   type OAuthClientRegistrationMethod,
   oauthClientRegistrationMethod,
@@ -107,7 +107,7 @@ async function findPreRegisteredClient(
  * secrets.
  */
 export const oauthClientRouter = {
-  listOAuthClients: protectedProcedure
+  listOAuthClients: platformAdminProcedure
     .route({
       summary: 'List OAuth clients',
       description:
@@ -200,7 +200,7 @@ export const oauthClientRouter = {
       }
     }),
 
-  createOAuthClient: protectedProcedure
+  createOAuthClient: platformAdminProcedure
     .route({
       summary: 'Create a pre-registered OAuth client',
       description:
@@ -248,7 +248,7 @@ export const oauthClientRouter = {
       }
     }),
 
-  rotateOAuthClientSecret: protectedProcedure
+  rotateOAuthClientSecret: platformAdminProcedure
     .route({
       summary: 'Rotate an OAuth client secret',
       description:
@@ -277,7 +277,7 @@ export const oauthClientRouter = {
       }
     }),
 
-  deleteOAuthClient: protectedProcedure
+  deleteOAuthClient: platformAdminProcedure
     .route({
       summary: 'Delete a pre-registered OAuth client',
       description:
@@ -303,7 +303,7 @@ export const oauthClientRouter = {
       }
     }),
 
-  setOAuthClientDisabled: protectedProcedure
+  setOAuthClientDisabled: platformAdminProcedure
     .route({
       summary: 'Disable or enable an OAuth client',
       description:

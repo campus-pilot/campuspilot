@@ -32,7 +32,7 @@ describe("Question paper authorization with real OPA", () => {
       resource: { kind: "class", schoolId: "school-1", classId: "class-1" },
     } as AuthorizationInput;
   }
-  const school = { kind: "school", schoolId: "school-1" } as const;
+  const school = { kind: "school", schoolId: "school-1", schoolKind: "school" } as const;
   const allowed = (action: (typeof actions)[number], a: RoleAssignment) =>
     isAuthorized(input(action, a), { client });
 
@@ -66,7 +66,7 @@ describe("Question paper authorization with real OPA", () => {
         expect(
           await allowed(action, {
             role: `school.${role}`,
-            scope: { kind: "school", schoolId: "school-2" },
+            scope: { kind: "school", schoolId: "school-2", schoolKind: "school" },
             meta: null,
           }),
         ).toBe(false);

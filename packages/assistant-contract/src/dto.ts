@@ -5,6 +5,7 @@ import {
   assistantAttachmentRefSchema,
   assistantMessageSeedSchema,
   questionPaperSeedSchema,
+  standaloneQuestionPaperSeedSchema,
 } from './attachments';
 import { assistantViewSchema } from './views';
 
@@ -377,7 +378,7 @@ export const sendAssistantMessageInputSchema = z.object({
   if (value.seed && value.conversationId) {
     ctx.addIssue({ code: 'custom', path: ['seed'], message: 'A seed is only valid when starting a conversation.' });
   }
-  if (value.shareWithPaper && value.seed?.kind !== 'question_paper') {
+  if (value.shareWithPaper && value.seed?.kind !== 'question_paper' && value.seed?.kind !== 'standalone_question_paper') {
     ctx.addIssue({ code: 'custom', path: ['shareWithPaper'], message: 'Only a conversation started from a question paper can be shared with it.' });
   }
 });
@@ -403,11 +404,20 @@ export const stopAssistantRunInputSchema = z.object({
   runId: z.string().min(1),
 });
 
-/** One question paper, by its natural key in the school (the seed's parts). */
-export const listPaperConversationsInputSchema = questionPaperSeedSchema.omit({ kind: true }).extend({
-  ...schoolScopeShape,
-  page: z.number().int().positive().default(1),
-});
+/**
+ * One question paper: an exam paper by its natural key in the school (the
+ * seed's parts), or a standalone paper of a personal space by its `paperId`.
+ */
+export const listPaperConversationsInputSchema = z.union([
+  questionPaperSeedSchema.omit({ kind: true }).extend({
+    ...schoolScopeShape,
+    page: z.number().int().positive().default(1),
+  }),
+  standaloneQuestionPaperSeedSchema.omit({ kind: true }).extend({
+    ...schoolScopeShape,
+    page: z.number().int().positive().default(1),
+  }),
+]);
 
 /** A conversation shared with a question paper, as a row of that paper's history. */
 export const assistantPaperConversationSchema = assistantConversationListItemSchema.extend({

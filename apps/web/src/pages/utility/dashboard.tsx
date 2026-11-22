@@ -77,8 +77,8 @@ export function DashboardPage() {
             <LoginButton className="cp-btn cp-btn-primary cp-btn-lg">
               Log in <ArrowRight aria-hidden="true" />
             </LoginButton>
-            <ButtonLink href="/book-demo" size="lg" tone="light">
-              Book a demo
+            <ButtonLink href="/contact" size="lg" tone="light">
+              Contact us
             </ButtonLink>
           </ButtonRow>
         }

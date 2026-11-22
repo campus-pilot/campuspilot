@@ -2,11 +2,17 @@
 
 import { useCallback, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { Button } from '@campuspilot/ui/components/button';
 import { AuthLoading } from '@/components/auth-loading';
 import { orpc } from '@/lib/orpc';
 import { schoolHref, schoolSessionHref } from './school-route';
+import { onboardingHref, onboardingPermissions } from './school-onboarding/onboarding-route';
+import { RequirePermissions } from './require-permissions';
+import { CreateSessionButton } from './session/create-session-button';
 import { storeSchoolSessionId } from './session-selection';
+import { landingSchoolOf, schoolEntryHrefOf } from './personal-space/personal-space-model';
 
 const ACTIVE_SCHOOL_KEY = 'campuspilot.management.activeSchoolId';
 
@@ -23,7 +29,7 @@ export function clearStoredSchoolId() {
   window.localStorage.removeItem(ACTIVE_SCHOOL_KEY);
 }
 
-function RouteAfterCommit({
+export function RouteAfterCommit({
   href,
   schoolId,
   sessionId,
@@ -106,10 +112,11 @@ export function SchoolAccessBoundary({
 
   const hasAccess = schoolsQuery.data.some((school) => school.id === schoolId);
   if (!hasAccess) {
-    const fallbackSchool = schoolsQuery.data[0];
+    // The same order as the entry page: a school before the personal space (docs/personal-space.md).
+    const fallbackSchool = landingSchoolOf(schoolsQuery.data, undefined);
     return fallbackSchool ? (
       <RouteAfterCommit
-        href={schoolHref(fallbackSchool.id)}
+        href={schoolEntryHrefOf(fallbackSchool)}
         schoolId={fallbackSchool.id}
       />
     ) : (
@@ -124,14 +131,64 @@ export function SchoolAccessBoundary({
   );
 }
 
-export function SchoolEntryRedirect({ schoolId }: { schoolId: string }) {
-  return <RouteAfterCommit href={schoolHref(schoolId)} schoolId={schoolId} />;
+/** Opens one of the user's schools: a school on its entry, a personal space on its papers. */
+export function SchoolEntryRedirect({ school }: { school: { id: string; kind: 'school' | 'personal' } }) {
+  return <RouteAfterCommit href={schoolEntryHrefOf(school)} schoolId={school.id} />;
 }
 
 /**
  * A direct school entry intentionally resets that school's remembered session
  * to the currently active session before opening its dashboard.
  */
+/**
+ * A school without an active session, where every workspace page waits for
+ * one. A guided setup that is neither finished nor set aside opens on its own
+ * for someone who may run it (docs/school-creation.md, "Guided setup");
+ * anyone else, and everyone once it is set aside or finished, is told the
+ * school has no session and offered to create one.
+ */
+function NoActiveSession({ schoolId }: { schoolId: string }) {
+  const onboarding = useQuery(orpc.school.getOnboarding.queryOptions({ input: { schoolId } }));
+  if (onboarding.isPending) return <AuthLoading label="Opening your school…" />;
+  const onboardingState = onboarding.data?.state;
+  const notice = <NoActiveSessionNotice schoolId={schoolId} offerGuide={onboardingState === 'skipped'} />;
+  if (onboardingState !== 'pending') return notice;
+  return (
+    <RequirePermissions permissions={onboardingPermissions(schoolId)} fallback={notice} pending={<AuthLoading label="Opening your school…" />}>
+      <RouteAfterCommit href={onboardingHref(schoolId)} schoolId={schoolId} />
+    </RequirePermissions>
+  );
+}
+
+/**
+ * Says the school has no active session and offers to create one, with the
+ * guided setup beside it while that is set aside. A session created while
+ * none is active becomes active, and the refreshed session query opens it.
+ */
+function NoActiveSessionNotice({ schoolId, offerGuide }: { schoolId: string; offerGuide: boolean }) {
+  return (
+    <main className="grid min-h-[50vh] place-items-center px-6">
+      <section className="flex max-w-md flex-col items-center gap-4 text-center">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-lg font-semibold">No active academic session</h1>
+          <p className="text-sm text-muted-foreground">
+            Classes, examinations and the dashboard belong to an academic session. Create one to start working in this
+            school.
+          </p>
+        </div>
+        <div className="flex flex-wrap justify-center gap-2">
+          {offerGuide ? (
+            <Button asChild variant="outline">
+              <Link href={onboardingHref(schoolId)}>Use the guided setup</Link>
+            </Button>
+          ) : null}
+          <CreateSessionButton schoolId={schoolId} />
+        </div>
+      </section>
+    </main>
+  );
+}
+
 export function SchoolSessionEntryRedirect({ schoolId }: { schoolId: string }) {
   const activeSessionQuery = useQuery(
     orpc.school.listSessions.queryOptions({
@@ -145,14 +202,12 @@ export function SchoolSessionEntryRedirect({ schoolId }: { schoolId: string }) {
 
   const activeSession = activeSessionQuery.data?.items[0];
   if (!activeSession) {
-    return (
+    return activeSessionQuery.isError ? (
       <main className="grid min-h-[50vh] place-items-center px-6">
-        <p className="text-sm text-muted-foreground">
-          {activeSessionQuery.isError
-            ? 'Unable to load the active school session.'
-            : 'This school does not have an active session.'}
-        </p>
+        <p className="text-sm text-muted-foreground">Unable to load the active school session.</p>
       </main>
+    ) : (
+      <NoActiveSession schoolId={schoolId} />
     );
   }
 

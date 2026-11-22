@@ -29,7 +29,8 @@ import {
   type FigureAssets,
   type RenderedBody,
 } from './question-paper.body';
-import { substituteQuestionPaperBody } from './question-paper.slot';
+import { QUESTION_PAPER_SLOT, substituteQuestionPaperBody } from './question-paper.slot';
+import { STANDALONE_QUESTION_PAPER_SHELL } from './question-paper.standalone-shell';
 import { getObjectBytes } from './question-paper.storage';
 
 export type { RenderedBody } from './question-paper.body';
@@ -144,6 +145,29 @@ export function renderQuestionPaperDocument(input: {
 }): string {
   const html = measure('qp.document.render', () =>
     substituteQuestionPaperBody(renderQuestionPaperTemplate(input.template.content, input.context), input.body.html),
+  );
+  if (Buffer.byteLength(html, 'utf8') > QUESTION_PAPER_DOCUMENT_MAX_BYTES) {
+    throw rpcError.badRequest('This document exceeds the 25 MB rendering limit. Use fewer or smaller figures.');
+  }
+  return html;
+}
+
+/**
+ * The full document HTML of a standalone paper: the built-in shell
+ * (`STANDALONE_QUESTION_PAPER_SHELL`) rendered with the constant slot and
+ * sanitised like a school's question paper template, laid out on A4, with the
+ * body substituted into its single slot afterwards; the same 25 MB limit.
+ * There is no school context: the shell reads nothing but the slot.
+ */
+export function renderStandaloneQuestionPaperDocument(body: RenderedBody): string {
+  const html = measure('qp.document.render', () =>
+    substituteQuestionPaperBody(
+      combineDocuments(
+        [renderDocument(STANDALONE_QUESTION_PAPER_SHELL, { questionPaper: { bodyHtml: QUESTION_PAPER_SLOT } }, { maxOutputChars: QUESTION_PAPER_TEMPLATE_RENDER_MAX_CHARS })],
+        'question_paper',
+      ),
+      body.html,
+    ),
   );
   if (Buffer.byteLength(html, 'utf8') > QUESTION_PAPER_DOCUMENT_MAX_BYTES) {
     throw rpcError.badRequest('This document exceeds the 25 MB rendering limit. Use fewer or smaller figures.');

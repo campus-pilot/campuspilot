@@ -15,7 +15,8 @@ import {
   StudentMetricTiles,
   sessionLabel,
 } from './school-stats';
-import { StatTile, formatCount } from './stat-tile';
+import { PersonalSpaceOverview } from './personal-space-overview';
+import { StatTile, StatTileGridSkeleton, StatsError, formatCount } from './stat-tile';
 
 function SchoolHeader({ schoolId }: { schoolId: string }) {
   const schoolQuery = useQuery(
@@ -35,12 +36,16 @@ function SchoolHeader({ schoolId }: { schoolId: string }) {
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="truncate text-2xl font-semibold tracking-tight">{school.name}</h1>
           <SchoolBadges school={school} />
-          <Badge variant={school.hasCompletedOnboarding ? 'secondary' : 'outline'}>
-            {school.hasCompletedOnboarding ? 'Onboarded' : 'Setup pending'}
-          </Badge>
+          {/* A personal space has no guided setup, so onboarding says nothing about it. */}
+          {school.kind === 'personal' ? null : (
+            <Badge variant={school.hasCompletedOnboarding ? 'secondary' : 'outline'}>
+              {school.hasCompletedOnboarding ? 'Onboarded' : 'Setup pending'}
+            </Badge>
+          )}
         </div>
         <p className="truncate text-sm text-muted-foreground">
-          {school.location} · {school.slug}
+          {/* No separator before the slug when there is no location (a personal space has none). */}
+          {[school.location, school.slug].filter((part) => part !== '').join(' · ')}
         </p>
       </div>
     </div>
@@ -87,24 +92,40 @@ function SchoolOverviewSection({
   );
 }
 
-/** School dashboard for platform admins: identity plus aggregate counts. */
+/** The dashboard's body for the school's kind: a personal space's own figures, or a school's counts. */
+function SchoolOverviewBody({ schoolId }: { schoolId: string }) {
+  const schoolQuery = useQuery(orpc.systemAdmin.getSchool.queryOptions({ input: { id: schoolId } }));
+  if (schoolQuery.isPending) return <StatTileGridSkeleton count={8} />;
+  if (schoolQuery.isError) return <StatsError title="School" onRetry={() => void schoolQuery.refetch()} />;
+  if (schoolQuery.data.kind === 'personal') return <PersonalSpaceOverview school={schoolQuery.data} />;
+  return <SchoolCounts schoolId={schoolId} />;
+}
+
+/** A school's aggregate counts: its structure and its students. */
+function SchoolCounts({ schoolId }: { schoolId: string }) {
+  return (
+    <SchoolStatsBoundary schoolId={schoolId} skeletonTiles={8}>
+      {(stats) => (
+        <>
+          <SchoolOverviewSection title="School">
+            <SchoolStructureTiles stats={stats} />
+          </SchoolOverviewSection>
+          <SchoolOverviewSection title="Students">
+            <StudentMetricTiles stats={stats} />
+            <ClassEnrolmentCard stats={stats} />
+          </SchoolOverviewSection>
+        </>
+      )}
+    </SchoolStatsBoundary>
+  );
+}
+
+/** School dashboard for platform admins: identity plus the figures that fit its kind. */
 export function SchoolOverview({ schoolId }: { schoolId: string }) {
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
       <SchoolHeader schoolId={schoolId} />
-      <SchoolStatsBoundary schoolId={schoolId} skeletonTiles={8}>
-        {(stats) => (
-          <>
-            <SchoolOverviewSection title="School">
-              <SchoolStructureTiles stats={stats} />
-            </SchoolOverviewSection>
-            <SchoolOverviewSection title="Students">
-              <StudentMetricTiles stats={stats} />
-              <ClassEnrolmentCard stats={stats} />
-            </SchoolOverviewSection>
-          </>
-        )}
-      </SchoolStatsBoundary>
+      <SchoolOverviewBody schoolId={schoolId} />
     </div>
   );
 }

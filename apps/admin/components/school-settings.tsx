@@ -50,6 +50,9 @@ const schoolDetailsFormSchema = z.object({
   registrationNo: z.string().trim(),
 });
 
+/** A personal space's details: it has no town (docs/personal-space.md), so its form has no location. */
+const personalSpaceDetailsFormSchema = schoolDetailsFormSchema.extend({ location: z.string() });
+
 const schoolLogoFormSchema = z.object({
   logo: z
     .instanceof(File, { message: 'Choose a logo to upload.' })
@@ -314,6 +317,7 @@ function SchoolLogoEditor({ school }: { school: SchoolDto }) {
 
 function SchoolDetailsForm({ school }: { school: SchoolDto }) {
   const queryClient = useQueryClient();
+  const personal = school.kind === 'personal';
   const form = useForm({
     defaultValues: {
       name: school.name,
@@ -321,7 +325,7 @@ function SchoolDetailsForm({ school }: { school: SchoolDto }) {
       location: school.location,
       registrationNo: school.registrationNo ?? '',
     },
-    validators: { onSubmit: schoolDetailsFormSchema },
+    validators: { onSubmit: personal ? personalSpaceDetailsFormSchema : schoolDetailsFormSchema },
     onSubmit: async ({ value }) => {
       form.setErrorMap({});
       try {
@@ -329,7 +333,8 @@ function SchoolDetailsForm({ school }: { school: SchoolDto }) {
           id: school.id,
           name: value.name,
           slug: value.slug,
-          location: value.location,
+          // A personal space has no location to change.
+          ...(personal ? {} : { location: value.location }),
           registrationNo: value.registrationNo || null,
         });
         queryClient.setQueryData(
@@ -407,6 +412,7 @@ function SchoolDetailsForm({ school }: { school: SchoolDto }) {
             </div>
           )}
         </form.Field>
+        {personal ? null : (
         <form.Field name="location">
           {(field) => (
             <div className="flex flex-col gap-2">
@@ -423,6 +429,7 @@ function SchoolDetailsForm({ school }: { school: SchoolDto }) {
             </div>
           )}
         </form.Field>
+        )}
         <form.Field name="registrationNo">
           {(field) => (
             <div className="flex flex-col gap-2">
@@ -655,7 +662,8 @@ function SchoolSettingsContent({ school }: { school: SchoolDto }) {
         </p>
       </div>
       <SchoolProfileCard school={school} />
-      {school.isDemo ? null : <SchoolOwnerCard school={school} />}
+      {/* A personal space's owner is the person it belongs to and is never changed (docs/personal-space.md). */}
+      {school.isDemo || school.kind === 'personal' ? null : <SchoolOwnerCard school={school} />}
       <SchoolSuspensionCard school={school} />
       {/* <DeleteSchoolCard school={school} /> — see the note above deleteSchoolFormSchema. */}
       {school.isDemo ? <DemoSchoolCredentialsCard schoolId={school.id} /> : null}

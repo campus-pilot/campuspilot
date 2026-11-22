@@ -230,6 +230,30 @@ describe('drafts of a conversation', () => {
     expect(draftSaved([...rows, folded], paper, 'dddddddddddd')).toBe(true);
   });
 
+  it('reads the drafts of a standalone paper by its id, apart from exam papers (docs/personal-space.md)', () => {
+    const standaloneCall = (id: string, paperId: string, output: unknown) =>
+      ({
+        kind: 'card',
+        id,
+        card: 'standalone_paper_draft',
+        call: {
+          id,
+          kind: 'tool_call',
+          status: 'succeeded',
+          body: { toolName: 'school.validateStandalonePaperDraft', input: { schoolId: 's', paperId, html: '<p>x</p>' }, output: JSON.stringify(output), outputTruncated: false },
+        },
+      }) as unknown as AssistantTimelineRow;
+    const standaloneRows = [...rows, standaloneCall('p1', 'qp_1', ready('pppppppppppp')), standaloneCall('p2', 'qp_2', ready('qqqqqqqqqqqq'))];
+    expect(unsavedDraftOf(standaloneRows, { paperId: 'qp_1' })).toMatchObject({ callId: 'p1', draftId: 'pppppppppppp' });
+    // An exam paper's draft is not a standalone paper's, nor the other way round.
+    expect(unsavedDraftOf(standaloneRows, { sessionId: 'ss', examSlug: 'e1', classId: 'c', subjectSlug: 'su', modeSlug: 'm' })?.callId).toBe('d');
+    expect(supersededDrafts(standaloneRows).has('p1')).toBe(false);
+    const save = { kind: 'activity', id: 's', calls: [{ id: 's', status: 'succeeded', body: { toolName: 'school.saveStandalonePaperVersion', input: { schoolId: 's', paperId: 'qp_1', draftId: 'pppppppppppp' } } }] } as unknown as AssistantTimelineRow;
+    expect(draftSaved([...standaloneRows, save], { paperId: 'qp_1' }, 'pppppppppppp')).toBe(true);
+    expect(unsavedDraftOf([...standaloneRows, save], { paperId: 'qp_1' })).toBeNull();
+    expect(unsavedDraftOf([...standaloneRows, save], { paperId: 'qp_2' })?.callId).toBe('p2');
+  });
+
   it('finds the ordinal of the newest draft with an id', () => {
     expect(draftOrdinalOf(rows, 'bbbbbbbbbbbb')).toBe(2);
     expect(draftOrdinalOf(rows, 'nope')).toBeNull();

@@ -1,5 +1,6 @@
-import { ArrowRight, Check, ChevronRight, Receipt, Sparkles, UserPlus, Workflow, type LucideIcon } from "lucide-react";
-import { Link } from "react-router";
+import { Check, ChevronRight, Receipt, Sparkles, UserPlus, Workflow, type LucideIcon } from "lucide-react";
+
+import { LoginCta } from "@/site/shell/login-dialog";
 
 /* ----------------------------------------------------- 01 · set up once */
 
@@ -171,9 +172,7 @@ function StepsIntro() {
       <h2 id="cp-steps-title">With CampusPilot, the daily admin is done once</h2>
       <p>Set the school up once. Every admission, payment and mark then flows into the records, documents and answers that depend on it.</p>
       <div className="cp-hero-actions">
-        <Link className="cp-btn cp-btn-primary" to="/book-demo">
-          Book a demo <ArrowRight aria-hidden="true" />
-        </Link>
+        <LoginCta />
         <a className="cp-btn cp-btn-light" href="#faq">
           Read the FAQ <ChevronRight aria-hidden="true" />
         </a>

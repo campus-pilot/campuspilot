@@ -8,7 +8,9 @@
  * - EventStream / EventStreamSection: events in, finished work out (`/product` full, home compact).
  * - DotsNetwork: "everything connected" (people) and permission-aware AI (ai).
  * - Notebook / NotebookSection: handwritten "done once" + AI chats spread.
+ * - AssistantMark: the in-app assistant's face (home hero, AI section, AI art).
  */
+export { AssistantMark } from "./assistant-mark";
 export { WorkflowTabs, WorkflowTabsSection, workflowTabs, type WorkflowTab, type WorkflowTabMotion } from "./workflow-tabs";
 export {
   AcademicsArt,

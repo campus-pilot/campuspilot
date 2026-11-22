@@ -9,7 +9,7 @@ import { Skeleton } from '@campuspilot/ui/components/skeleton';
 import { cn } from '@campuspilot/ui/lib/utils';
 import { ReadError } from '@/components/exam/exam-common';
 import { assistantOrpc } from '@/lib/assistant-client';
-import type { QuestionPaperScope } from './question-paper-model';
+import { isStandaloneTarget, type PaperTarget } from './paper-target';
 
 /** How often an open history is asked again while one of its conversations is working or waiting for approval. */
 const HISTORY_REFRESH_MS = 5000;
@@ -26,11 +26,14 @@ export const paperConversationDetail = (conversation: Pick<AssistantPaperConvers
  * approval the list is asked again every few seconds, as in the assistant's
  * own history.
  */
-function usePaperConversations(scope: QuestionPaperScope) {
-  const { schoolId, sessionId, examSlug, classId, subjectSlug, modeSlug } = scope;
+function usePaperConversations(scope: PaperTarget) {
   return useInfiniteQuery(
     assistantOrpc.listPaperConversations.infiniteOptions({
-      input: (page: number) => ({ schoolId, sessionId, examSlug, classId, subjectSlug, modeSlug, page }),
+      // A standalone paper's history is asked for by its id, an exam paper's by its key.
+      input: (page: number) =>
+        isStandaloneTarget(scope)
+          ? { schoolId: scope.schoolId, paperId: scope.paperId, page }
+          : { schoolId: scope.schoolId, sessionId: scope.sessionId, examSlug: scope.examSlug, classId: scope.classId, subjectSlug: scope.subjectSlug, modeSlug: scope.modeSlug, page },
       initialPageParam: 1,
       getNextPageParam: ({ pagination }) => (pagination.currentPage < pagination.totalPages ? pagination.currentPage + 1 : undefined),
       refetchInterval: (query) =>
@@ -45,7 +48,7 @@ function PaperConversationList({
   currentId,
   onChoose,
 }: {
-  scope: QuestionPaperScope;
+  scope: PaperTarget;
   currentId: string | null;
   onChoose: (conversationId: string) => void;
 }) {
@@ -106,7 +109,7 @@ export function PaperChatHistoryDialog({
   currentId,
   onChoose,
 }: {
-  scope: QuestionPaperScope;
+  scope: PaperTarget;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   currentId: string | null;

@@ -1143,3 +1143,14 @@ describe('conversations shared with a question paper', () => {
     await expect(get(shared.schoolId, shared.conversationId, colleague)).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 });
+
+describe('conversations shared with a standalone paper', () => {
+  it('are refused outside a personal space even to someone holding the standalone paper permission', async () => {
+    // seedTurn's school is a real school (kind `school`); the permission table says the user holds the permission.
+    const owner = await seedTurn();
+    permissions.byUser.set(owner.userId, new Set(['school.standalone_paper.read', 'school.standalone_paper.manage']));
+    await expect(
+      call(assistantRouter.listPaperConversations, { schoolId: owner.schoolId, paperId: 'qp_not_in_a_personal_space', page: 1 }, as(owner.userId)),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+});
