@@ -23,7 +23,8 @@ export const documentTypeEnum = pgEnum("document_type", [
   "notice",
   "question_paper",
 ]);
-export const artifactKindEnum = pgEnum("artifact_kind", ["template", "pdf"]);
+/** What an artifact's object is: a template revision, a generated PDF, or a generated Word file (question paper versions only). */
+export const artifactKindEnum = pgEnum("artifact_kind", ["template", "pdf", "docx"]);
 export const artifactStatusEnum = pgEnum("artifact_status", [
   "ready",
   "deleting",

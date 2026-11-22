@@ -512,6 +512,16 @@ export const examQuestionPaperVersionTable = pgTable(
     pdfArtifactId: text("pdf_artifact_id").references(() => artifactTable.id, {
       onDelete: "set null",
     }),
+    /**
+     * The stored Word (.docx) file of this version, its own fact (never
+     * derived from the PDF). Null until the version's first Word download
+     * makes it from `content_html`, the stored figures and the pinned
+     * revision, and null again when the artifact is deleted: the next Word
+     * download then makes it again (docs/question-papers.md "Word download").
+     */
+    docxArtifactId: text("docx_artifact_id").references(() => artifactTable.id, {
+      onDelete: "set null",
+    }),
     /** A user id with no FK. */
     createdBy: text("created_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -532,6 +542,7 @@ export const examQuestionPaperVersionTable = pgTable(
       table.templateRevisionId,
     ),
     index("exam_question_paper_version_pdf_idx").on(table.pdfArtifactId),
+    index("exam_question_paper_version_docx_idx").on(table.docxArtifactId),
     index("exam_question_paper_version_source_version_idx").on(
       table.sourceVersionId,
     ),
