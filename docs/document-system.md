@@ -691,6 +691,15 @@ by the template. What this document system owns for the type:
   `getDocumentDownload` / `deleteDocumentArtifact` answer NOT_FOUND for one (the
   artifact rows are real: one PDF per saved version, `kind: pdf`,
   `documentType: question_paper`, with the class, session and exam filled).
+- **Word download.** A saved version also downloads as an editable Word file, made on its first
+  Word download from the same fragment, figures and pinned revision, with the heading taken from the
+  template before the slot and its `position:fixed` footer as a Word footer on every page, and
+  stored as an artifact of kind `docx` (`docx_artifact_id` on the version). The canonical description
+  is [Question papers: Word download](question-papers.md#word-download). Like the PDFs, these
+  artifacts are not part of Document history (`listDocumentArtifacts` never returns a
+  `question_paper` artifact, and `getDocumentDownload` serves only `kind: pdf`). A template author
+  gets the best Word heading from plain structure: text, the logo, flex rows and tables, rules as
+  borders; background colours and exact sizes do not carry over.
 - **Who may configure the template.** The usual academic template permissions
   (`READ_/MANAGE_DOCUMENT_TEMPLATES`), plus the school's `assistant` feature
   (`requireDocumentTypePermission`, checked after the permission so a caller

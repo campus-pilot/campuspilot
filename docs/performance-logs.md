@@ -49,6 +49,11 @@ Only names, ids, sizes and durations are logged, never content.
 | `qp.document.render` | template render, document sanitiser and body substitution | sync |
 | `qp.preview.placeholders` | counting figure placeholders for a version preview | sync |
 | `qp.draft.check` | `checkQuestionPaperDraft` | async |
+| `qp.docx.html` | the Word conversion's HTML step: sanitising, the CSS cascade and the mapping (`question-paper.docx-html.ts`) | sync |
+| `qp.docx.svg` | drawing the paper's SVG diagrams to PNG (Gotenberg's Chromium) | async |
+| `qp.docx.images` | turning WebP images (a template's logo) into PNG | async |
+| `qp.docx.convert` | Pandoc conversion (in its own container) | async |
+| `qp.docx.package` | the table fix-ups of the converted package | sync |
 | `doc.template.compile`, `doc.template.render` | Handlebars, for every document type | sync |
 | `doc.sanitize` | the document sanitiser, for every document type | sync |
 | `doc.pdf.convert` | Gotenberg conversion (Chromium in its own container) | async |
@@ -59,7 +64,8 @@ Only names, ids, sizes and durations are logged, never content.
 
 Question paper previews and draft previews also annotate `htmlBytes` (the size of the
 response's document), `paperId` and `versionNo`; the body adds `qpFormulas`, `qpFigures`
-and `qpBodyBytes`; a PDF adds `pdfHtmlBytes` and `pdfBytes`.
+and `qpBodyBytes`; a PDF adds `pdfHtmlBytes` and `pdfBytes`. A Word download that makes its file adds `docxHtmlBytes`,
+`docxBytes`, `docxTables`, `docxImages`, `docxSvgs` and `docxWarnings` (Pandoc's warning count).
 
 ## Reading them
 

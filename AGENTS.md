@@ -155,7 +155,9 @@ model (a paper per class, subject and mode of an exam, immutable versions with a
 PDF each), the permission order and the `assistant` gate (there is no separate
 flag), the data model, the HTML fragment vocabulary, the sanitiser profile and its
 no-animation rule, the renderer contract with its deliberate CSP and
-post-sanitiser insertion exceptions, the job's steps and failure codes,
+post-sanitiser insertion exceptions, the Word (.docx) download (made on a
+version's first Word download by the Pandoc service, `PANDOC_URL`, stored as a
+`docx` artifact, one way only), the job's steps and failure codes,
 how chat attachments, tools, drafts and context pruning work, and the checklist
 for extending papers.
 

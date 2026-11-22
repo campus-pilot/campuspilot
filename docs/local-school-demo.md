@@ -85,6 +85,7 @@ templates, generated PDFs, Redis and Restate data across restarts.
 | RustFS API / console | 59000 / 59001 |
 | OPA | 58181 |
 | Gotenberg | 58781 |
+| Pandoc (Word downloads) | 58782 |
 | Restate ingress / admin / fabric | 58080 / 59070 / 55122 |
 
 RustFS 1.0.0 supplies local S3 storage. The existing demo templates and PDFs were
@@ -105,7 +106,7 @@ without changing the machine's default Node installation.
 From the repository root:
 
 ```sh
-docker compose --env-file apps/server/.env -f docker/local-demo/compose.yml up -d --wait postgres redis opa gotenberg restate rustfs
+docker compose --env-file apps/server/.env -f docker/local-demo/compose.yml up -d --wait postgres redis opa gotenberg pandoc restate rustfs
 docker compose --env-file apps/server/.env -f docker/local-demo/compose.yml run --rm --no-deps rustfs-init
 npx --yes --package=node@24 --package=pnpm@10.33.0 pnpm --filter @campuspilot/db db:migrate
 ```
