@@ -440,12 +440,14 @@ export async function saveQuestionPaperVersion(
     html: string;
     source: SaveSource;
     /**
-     * The details the saved paper states (docs/personal-space.md): required
-     * for a standalone paper, whose four `details_*` columns this save
-     * overwrites in its own transaction; ignored for an exam paper, whose
-     * names come from the exam plan.
+     * What the save does to a standalone paper's details
+     * (docs/personal-space.md), required for one: the details the saved
+     * paper states, which replace all four `details_*` columns in this save's
+     * transaction, or `keep` for a version that states none (the generation
+     * job's answer without a readable details block), which leaves them as
+     * they are. Ignored for an exam paper, whose names come from its plan.
      */
-    details?: QuestionPaperDetails;
+    details?: QuestionPaperDetails | 'keep';
     signal?: AbortSignal;
   },
 ): Promise<SavedVersion> {
@@ -643,7 +645,7 @@ async function renderAndStore(
     userId: string;
     expectedVersionNo: number | null;
     source: SaveSource;
-    details?: QuestionPaperDetails;
+    details?: QuestionPaperDetails | 'keep';
     signal?: AbortSignal;
     versionNo: number;
     assumedLatest: number;
@@ -662,8 +664,9 @@ async function renderAndStore(
   });
   const html = await renderPaperDocument(db, { scope, template: input.template, body, versionNo, planMaxMarks });
   const pdf = await convertDocumentPdf(html, 'question_paper', input.signal);
-  // A standalone paper's PDF is named after the details this very save states.
-  const names: PaperNames = isStandalonePaper(scope) ? { kind: 'standalone', details: input.details! } : { kind: 'exam', scope };
+  // A standalone paper's PDF is named after the details this very save states, or the paper's own when it keeps them.
+  const names: PaperNames =
+    !isStandalonePaper(scope) ? { kind: 'exam', scope } : input.details === 'keep' || !input.details ? await paperNamesOf(db, scope) : { kind: 'standalone', details: input.details };
 
   const artifactId = generateId('artifact');
   return persistDocumentObject(
@@ -735,8 +738,9 @@ async function renderAndStore(
         pdfArtifactId: artifact.id,
         createdBy: input.userId,
       });
-      // A standalone paper's details are not revisioned: this save's details replace all four, in this transaction.
-      const details = isStandalonePaper(scope) ? input.details! : null;
+      // A standalone paper's details are not revisioned: this save's details replace all four, in this transaction
+      // (`keep`: a version that states none leaves them as they are).
+      const details = isStandalonePaper(scope) && input.details && input.details !== 'keep' ? input.details : null;
       await tx
         .update(examQuestionPaperTable)
         .set({

@@ -808,6 +808,8 @@ describe('assistant service view', () => {
     }
     expect(tools.find(({ name }) => name === 'school.listStandalonePapers')?._meta?.[ASSISTANT_TOOL_META.schoolKinds]).toEqual(['personal']);
     expect(tools.find(({ name }) => name === 'school.listStudents')?._meta?.[ASSISTANT_TOOL_META.schoolKinds]).toEqual(['school']);
+    // Account-level tools name no school, so every kind of school is offered them.
+    expect(tools.find(({ name }) => name === 'school.listMySchools')?._meta?.[ASSISTANT_TOOL_META.schoolKinds]).toEqual(['school', 'personal']);
     expect(tools.find(({ name }) => name === 'school.listAdmissions')?._meta?.[ASSISTANT_TOOL_META.features]).toEqual(['studentManagement']);
     expect(allowed.some((tool) => tool.mcp.exposure === 'advanced')).toBe(true);
   });

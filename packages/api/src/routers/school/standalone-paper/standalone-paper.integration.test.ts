@@ -117,41 +117,58 @@ const answer = (text: string): TextResult => ({
 
 const direct: StepRunner = (_name, action) => action();
 
+/** A standalone paper with one photographed page and a queued job over it, as `startStandalonePaperGeneration` makes one. */
+async function queueStandaloneJob() {
+  const { schoolId, userId, session } = await personalSpaceOwner();
+  const context = createHandlerContext(session);
+  const client = createTestClient(session);
+  const { paperId } = await client.school.createStandalonePaper({ schoolId });
+  const { pages } = await client.school.reserveStandalonePaperPages({ schoolId, paperId, fileNames: ['page.jpg'] });
+  const photo = await sharp({ create: { width: 400, height: 300, channels: 3, background: '#ddd' } }).jpeg().toBuffer();
+  const form = new FormData();
+  form.set('page', new Blob([Uint8Array.from(photo)], { type: 'image/jpeg' }), 'page.jpg');
+  const response = await handleStandalonePaperPageStore(new Request('http://localhost/upload', { method: 'POST', body: form }), context, { schoolId, paperId }, pages[0]!.id);
+  expect(response.status).toBe(200);
+  await settleDerivatives();
+  const pageRows = await db.select().from(examQuestionPaperPageTable).where(eq(examQuestionPaperPageTable.paperId, paperId)).orderBy(asc(examQuestionPaperPageTable.position));
+  const [paper] = await db.select().from(examQuestionPaperTable).where(eq(examQuestionPaperTable.id, paperId));
+  const [job] = await db
+    .insert(examQuestionPaperJobTable)
+    .values({ paperId, schoolId, requestedBy: userId, pageIds: pageRows.map((row) => row.id), pageRevision: paper!.pageRevision })
+    .returning();
+  return { schoolId, paperId, client, job: job! };
+}
+
+/** A model that answers each request with the next text, recording the requests. */
+function scriptedModel(texts: string[]) {
+  const requests: Array<Parameters<QuestionPaperModel['generate']>[0]> = [];
+  const model: QuestionPaperModel = {
+    provider: 'gemini',
+    model: 'fake-configured-model',
+    prices: { inputUsdPerMtok: '2', outputUsdPerMtok: '10', cacheReadUsdPerMtok: '0.2', cacheWriteUsdPerMtok: '2.5' },
+    imageMimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
+    generate: async (request) => {
+      requests.push(request);
+      const next = texts.shift();
+      if (next === undefined) throw new Error('The scripted model is exhausted.');
+      return answer(next);
+    },
+    failureKind: () => 'unknown',
+    billedUsageOf: () => null,
+  };
+  return { model, requests };
+}
+
+const runJob = (jobId: string, model: QuestionPaperModel) =>
+  runQuestionPaperGeneration({ jobId, attempt: 1 }, direct, { ...defaultGenerationDeps(), getModel: () => model, sleep: async () => {}, retryDelaysMs: [0, 0] });
+
+const withDetails = (html: string, details: object) => `${html}\n\n\`\`\`paper-details\n${JSON.stringify(details)}\n\`\`\``;
+
 describe('the generation job for a standalone paper', () => {
   it('writes the whole paper with no template and saves the details the model returned', async () => {
-    const { schoolId, userId, session } = await personalSpaceOwner();
-    const context = createHandlerContext(session);
-    const client = createTestClient(session);
-    const { paperId } = await client.school.createStandalonePaper({ schoolId });
-    const { pages } = await client.school.reserveStandalonePaperPages({ schoolId, paperId, fileNames: ['page.jpg'] });
-    const photo = await sharp({ create: { width: 400, height: 300, channels: 3, background: '#ddd' } }).jpeg().toBuffer();
-    const form = new FormData();
-    form.set('page', new Blob([Uint8Array.from(photo)], { type: 'image/jpeg' }), 'page.jpg');
-    const response = await handleStandalonePaperPageStore(new Request('http://localhost/upload', { method: 'POST', body: form }), context, { schoolId, paperId }, pages[0]!.id);
-    expect(response.status).toBe(200);
-    await settleDerivatives();
-    const pageRows = await db.select().from(examQuestionPaperPageTable).where(eq(examQuestionPaperPageTable.paperId, paperId)).orderBy(asc(examQuestionPaperPageTable.position));
-    const [paper] = await db.select().from(examQuestionPaperTable).where(eq(examQuestionPaperTable.id, paperId));
-    const [job] = await db
-      .insert(examQuestionPaperJobTable)
-      .values({ paperId, schoolId, requestedBy: userId, pageIds: pageRows.map((row) => row.id), pageRevision: paper!.pageRevision })
-      .returning();
-
-    const requests: Array<Parameters<QuestionPaperModel['generate']>[0]> = [];
-    const model: QuestionPaperModel = {
-      provider: 'gemini',
-      model: 'fake-configured-model',
-      prices: { inputUsdPerMtok: '2', outputUsdPerMtok: '10', cacheReadUsdPerMtok: '0.2', cacheWriteUsdPerMtok: '2.5' },
-      imageMimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
-      generate: async (request) => {
-        requests.push(request);
-        return answer(`${ENGLISH_SCIENCE}\n\n\`\`\`paper-details\n${JSON.stringify(DETAILS)}\n\`\`\``);
-      },
-      failureKind: () => 'unknown',
-      billedUsageOf: () => null,
-    };
-    const outcome = await runQuestionPaperGeneration({ jobId: job!.id, attempt: 1 }, direct, { ...defaultGenerationDeps(), getModel: () => model, sleep: async () => {}, retryDelaysMs: [0, 0] });
-    expect(outcome).toEqual({ status: 'succeeded', versionNo: 1 });
+    const { paperId, job } = await queueStandaloneJob();
+    const { model, requests } = scriptedModel([withDetails(ENGLISH_SCIENCE, DETAILS)]);
+    expect(await runJob(job.id, model)).toEqual({ status: 'succeeded', versionNo: 1 });
 
     // The standalone prompt, and the (empty) lines printed around the paper: the whole heading is the model's.
     expect(requests[0]!.system).toBe(STANDALONE_PAPER_JOB_SYSTEM_PROMPT);
@@ -164,5 +181,26 @@ describe('the generation job for a standalone paper', () => {
     // The details block is not part of the paper.
     expect(version!.contentHtml).not.toContain('paper-details');
     expect(version).toMatchObject({ source: 'ai_job', templateRevisionId: null });
+  });
+
+  it('asks for the details in the repair, and keeps the paper’s stored details when no answer states them', async () => {
+    const { schoolId, paperId, client, job } = await queueStandaloneJob();
+    // The paper already states details from an earlier version.
+    await client.school.saveStandalonePaperVersion({ schoolId, paperId, expectedVersionNo: 0, html: ENGLISH_SCIENCE, details: DETAILS });
+    const { model, requests } = scriptedModel([ENGLISH_SCIENCE, ENGLISH_SCIENCE]);
+    expect(await runJob(job.id, model)).toEqual({ status: 'succeeded', versionNo: 2 });
+    expect(requests).toHaveLength(2);
+    expect(JSON.stringify(requests[1]!.parts)).toContain('no readable paper-details block');
+    const [saved] = await db.select().from(examQuestionPaperTable).where(eq(examQuestionPaperTable.id, paperId));
+    // A version that states no details does not change them.
+    expect(saved).toMatchObject({ detailsSchoolName: DETAILS.schoolName, detailsClassName: DETAILS.className, detailsSubjectName: DETAILS.subjectName, detailsExamName: DETAILS.examName });
+  });
+
+  it('takes the details of a repair that adds the block', async () => {
+    const { paperId, job } = await queueStandaloneJob();
+    const { model } = scriptedModel([ENGLISH_SCIENCE, withDetails(ENGLISH_SCIENCE, { ...DETAILS, className: 'Class 6' })]);
+    expect(await runJob(job.id, model)).toEqual({ status: 'succeeded', versionNo: 1 });
+    const [saved] = await db.select().from(examQuestionPaperTable).where(eq(examQuestionPaperTable.id, paperId));
+    expect(saved!.detailsClassName).toBe('Class 6');
   });
 });

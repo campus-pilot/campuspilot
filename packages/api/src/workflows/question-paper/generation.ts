@@ -279,7 +279,8 @@ export async function runQuestionPaperGeneration(
     if (first.refusal) throw new QuestionPaperJobFailure('model_rejected', undefined, 'The model declined to answer.');
     if (first.unfinished) throw new QuestionPaperJobFailure('output_too_long', undefined, 'The answer stopped on the output limit.');
 
-    let validation = await run('validate:1', () => validateAnswer(deps, plan, first.text));
+    // The first answer must carry a standalone paper's details (a missing block asks for a repair); a repaired one need not.
+    let validation = await run('validate:1', () => validateAnswer(deps, plan, first.text, { requireDetails: true }));
     // The details of the first answer, for a repaired answer that leaves its details block out.
     const firstDetails = validation.ok ? undefined : detailsOfAnswer(plan, first.text);
     if (!validation.ok && validation.rejected) {
@@ -301,7 +302,7 @@ export async function runQuestionPaperGeneration(
       });
       if (repair.refusal) throw new QuestionPaperJobFailure('model_rejected', undefined, 'The model declined the repair request.');
       if (repair.unfinished) throw new QuestionPaperJobFailure('output_too_long', undefined, 'The repaired answer stopped on the output limit.');
-      validation = await run('validate:2', () => validateAnswer(deps, plan, repair.text));
+      validation = await run('validate:2', () => validateAnswer(deps, plan, repair.text, { requireDetails: false }));
       if (!validation.ok && validation.rejected) {
         throw new QuestionPaperJobFailure('model_rejected', undefined, `The model answered the repair request without an HTML fragment: ${validation.html.slice(0, 200)}`);
       }
@@ -332,14 +333,15 @@ function detailsOfAnswer(plan: Plan, text: string): { details: QuestionPaperDeta
 }
 
 /**
- * The details a standalone paper's version is saved with: those of the
- * answer that passed, or, when that was a repair that left its details block
- * out, those of the first answer. No block at all saves no details.
+ * What a standalone paper's version does to the paper's details: replaces
+ * them with those of the answer that passed, or, when that was a repair that
+ * left its block out, with those of the first answer; `keep` when neither
+ * answer had a readable block (a version that states no details does not
+ * change them, docs/personal-space.md).
  */
-function savedDetails(validation: Validation, first: { details: QuestionPaperDetails; found: boolean } | undefined): QuestionPaperDetails | undefined {
-  if (!validation.ok) return undefined;
-  if (validation.detailsFound) return validation.details;
-  return first?.found ? first.details : validation.details;
+function savedDetails(validation: Validation, first: { details: QuestionPaperDetails; found: boolean } | undefined): QuestionPaperDetails | 'keep' {
+  if (validation.ok && validation.detailsFound && validation.details) return validation.details;
+  return first?.found ? first.details : 'keep';
 }
 
 /**
@@ -661,26 +663,33 @@ async function callModel({
  * the sanitiser removes is not a problem, so the answer that passes is the
  * extracted fragment, which the save cleans again.
  */
-async function validateAnswer(deps: GenerationDeps, plan: Plan, text: string): Promise<Validation> {
+async function validateAnswer(deps: GenerationDeps, plan: Plan, text: string, options: { requireDetails: boolean }): Promise<Validation> {
   // A standalone paper's answer carries its details in their own fenced block, taken out before the fragment is read.
   const standalone = isStandalonePaper(plan.scope);
   const split = standalone ? splitQuestionPaperDetails(text) : null;
+  // A missing or malformed details block is a problem for the repair, never on its own a reason to fail the job.
+  const detailsProblems = split && !split.found && options.requireDetails ? [DETAILS_MISSING_PROBLEM] : [];
   const html = renameReservedClasses(extractQuestionPaperFragment(split ? split.text : text));
   if (html === '') return { ok: false, html, problems: ['The answer is empty. Return the HTML fragment of the paper.'] };
   // The shape comes first: a refusal or a sentence of chatter would otherwise be cleaned to text and printed as the paper.
   const shape = questionPaperFragmentShapeProblem(html);
   if (shape?.kind === 'no_markup') return { ok: false, html, problems: [shape.message], rejected: true };
-  if (shape) return { ok: false, html, problems: [shape.message] };
+  if (shape) return { ok: false, html, problems: [shape.message, ...detailsProblems] };
   const checked = await checkQuestionPaperDraft(deps.db, plan.scope, html, { unresolvedFigures: 'placeholder', strictStructure: true });
-  if (!checked.ok) return { ok: false, html, problems: checked.problems.slice(0, MAX_PROBLEMS) };
+  if (!checked.ok) return { ok: false, html, problems: [...checked.problems.slice(0, MAX_PROBLEMS - detailsProblems.length), ...detailsProblems] };
   if (!hasPaperContent(checked.html)) {
-    return { ok: false, html, problems: ['After cleaning, the answer holds no paper: it needs block elements (p, div, h1-h6, ul, ol, table, figure) with readable text.'] };
+    return { ok: false, html, problems: ['After cleaning, the answer holds no paper: it needs block elements (p, div, h1-h6, ul, ol, table, figure) with readable text.', ...detailsProblems] };
   }
+  if (detailsProblems.length > 0) return { ok: false, html, problems: detailsProblems };
   return split ? { ok: true, html, details: split.details, detailsFound: split.found } : { ok: true, html };
 }
 
+/** The repair problem of a standalone paper's answer without a readable details block. */
+export const DETAILS_MISSING_PROBLEM =
+  'The answer has no readable paper-details block. After the fragment, add the fenced block labelled paper-details with one JSON object: schoolName, className, subjectName and examName as the paper prints them, each null when the paper does not state it.';
+
 /** Saves the version through the one function chat uses; idempotent per job id. */
-async function savePaper(deps: GenerationDeps, input: QuestionPaperJobInput, begun: BegunJob, plan: Plan, html: string, details: QuestionPaperDetails | undefined) {
+async function savePaper(deps: GenerationDeps, input: QuestionPaperJobInput, begun: BegunJob, plan: Plan, html: string, details: QuestionPaperDetails | 'keep' | undefined) {
   if (!(await jobIsLive(deps.db, input))) throw new JobStopped();
   await assertSchoolStillWritable(deps.db, begun.schoolId);
   try {

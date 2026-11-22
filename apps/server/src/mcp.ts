@@ -30,7 +30,7 @@ import {
 import { assistantToolDecision } from '@campuspilot/api/assistant/tool-policy';
 import { featuresOfUserSchools } from '@campuspilot/api/feature-flags/feature-flags.service';
 import { schoolKindsOfUser, servedSchoolKinds } from '@campuspilot/api/school-access/school-kind.service';
-import type { SchoolKind } from '@campuspilot/db/school-kind';
+import { SCHOOL_KINDS, type SchoolKind } from '@campuspilot/db/school-kind';
 import { schoolFeatureGatesOf } from '@campuspilot/api/permissions/feature';
 import { schoolFeatureCatalogue, type SchoolFeatureKey } from '@campuspilot/db/feature-flags/catalogue';
 import { ASSISTANT_TOOL_META } from '@campuspilot/assistant-contract/protocol';
@@ -69,9 +69,12 @@ export type McpToolDefinition = {
    */
   features: readonly SchoolFeatureKey[];
   /**
-   * The kinds of school the procedure serves (`schoolKinds` in its
-   * metadata, real schools only when it names none; docs/personal-space.md),
-   * the same rule `requireAuth` enforces on every call.
+   * The kinds of school the tool serves (docs/personal-space.md), by
+   * {@link toolSchoolKindsOf}: a school-scoped procedure (its input has a
+   * `schoolId`) serves the kinds its `schoolKinds` metadata names (real
+   * schools only when it names none), the rule `requireAuth` enforces on every
+   * call; a procedure that names no school (an account-level one such as
+   * `school.listMySchools`) is not held by the kind gate and serves every kind.
    */
   schoolKinds: readonly SchoolKind[];
   procedure: AnyProcedure;
@@ -363,6 +366,15 @@ function withFeatureNote(description: string, features: readonly SchoolFeatureKe
   return `${description} Only for schools that have ${labels}.`;
 }
 
+/**
+ * The kinds of school a tool serves: for a school-scoped input (a top-level
+ * `schoolId`, the field the kind gate reads) its declared kinds, else every
+ * kind, because nothing in such a call names a school the gate could hold.
+ */
+export function toolSchoolKindsOf(inputSchema: z.ZodObject, declared: readonly SchoolKind[] | undefined): readonly SchoolKind[] {
+  return 'schoolId' in inputSchema.shape ? servedSchoolKinds(declared) : SCHOOL_KINDS;
+}
+
 /** The part of a view whose tools pass `included`. */
 function filterCatalogView(view: McpCatalogView, included: (tool: McpToolDefinition) => boolean): McpCatalogView {
   const advanced = view.advanced.filter(included);
@@ -422,7 +434,7 @@ export async function buildMcpCatalog(router: AnyRouter): Promise<McpCatalog> {
         title: summary,
         description: withFeatureNote(description, features),
         features,
-        schoolKinds: servedSchoolKinds((definition.meta as ProcedureMeta | undefined)?.schoolKinds),
+        schoolKinds: toolSchoolKindsOf(inputSchema, (definition.meta as ProcedureMeta | undefined)?.schoolKinds),
         inputSchema,
         inputJsonSchema: convertMcpInputSchema(name, inputSchema),
         acceptsInput: definition.inputSchema !== undefined,

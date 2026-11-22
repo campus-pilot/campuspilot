@@ -563,13 +563,17 @@ describe('school kinds in the listing', () => {
       .route(route('List papers'))
       .input(schoolInput)
       .handler(() => []);
-    return buildMcpCatalog({ listRooms, listPapers });
+    // An account-level procedure: no schoolId, so no kind gate holds it.
+    const listMine = protectedProcedure.meta(mcpMeta()).route(route('List mine')).handler(() => []);
+    return buildMcpCatalog({ listRooms, listPapers, listMine });
   }
 
   it('records the kinds a tool serves, real schools only when it names none', async () => {
     const byName = new Map((await kindCatalog()).core.map((tool) => [tool.name, tool]));
     expect(byName.get('listRooms')?.schoolKinds).toEqual(['school']);
     expect(byName.get('listPapers')?.schoolKinds).toEqual(['personal']);
+    // A procedure that names no school serves every kind (the kind gate reads the input's schoolId).
+    expect(byName.get('listMine')?.schoolKinds).toEqual(['school', 'personal']);
   });
 
   it("lists a tool only while one of the user's schools is of a kind it serves", async () => {
@@ -583,10 +587,10 @@ describe('school kinds in the listing', () => {
       openConnections.push({ client, close: async () => { await client.close(); await server.close(); } });
       return (await client.listTools()).tools.map(({ name }) => name).sort();
     };
-    // A user whose only school is a personal space sees only its tools.
-    expect(await listed(new Set(['personal']))).toEqual(['listPapers']);
-    expect(await listed(new Set(['school']))).toEqual(['listRooms']);
-    expect(await listed(new Set(['school', 'personal']))).toEqual(['listPapers', 'listRooms']);
-    expect(await listed(undefined)).toEqual(['listPapers', 'listRooms']);
+    // A user whose only school is a personal space still finds their schools (and so their schoolId).
+    expect(await listed(new Set(['personal']))).toEqual(['listMine', 'listPapers']);
+    expect(await listed(new Set(['school']))).toEqual(['listMine', 'listRooms']);
+    expect(await listed(new Set(['school', 'personal']))).toEqual(['listMine', 'listPapers', 'listRooms']);
+    expect(await listed(undefined)).toEqual(['listMine', 'listPapers', 'listRooms']);
   });
 });
