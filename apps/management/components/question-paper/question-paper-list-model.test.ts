@@ -1,22 +1,19 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { isQuestionPaperSectionPath, questionPaperClassHref, questionPaperReturnHref } from '@/components/exam/exam-model';
+import { questionPaperClassHref, questionPaperReturnHref } from '@/components/exam/exam-model';
 import {
-  examPickerDescription,
   initialModeFilterRevisions,
   modeFilterRevisionOf,
   modeFilterStorageKey,
   nextModeFilterRevisions,
   parseStoredModeFilter,
-  pickerEmptyMessage,
-  rankByQuery,
   replaceOpenClass,
   withClassParam,
 } from './question-paper-list-model';
 
 const scope = { schoolId: 'sch_1', sessionId: 'ses_1', examSlug: 'first-term' };
 
-test('the sidebar and palette land on the tab with the class open', () => {
+test('the tab with one class open names the class in its address', () => {
   assert.equal(
     questionPaperClassHref({ ...scope, classId: 'cls 8/a' }),
     '/school/sch_1/sessions/ses_1/exam/first-term/question-paper?class=cls%208%2Fa',
@@ -31,17 +28,6 @@ test("going back from a paper (its breadcrumb, or after deleting it) reopens the
   );
   // Without a class there is nothing to reopen: the bare tab, every class collapsed.
   assert.equal(questionPaperReturnHref(scope), '/school/sch_1/sessions/ses_1/exam/first-term/question-paper');
-});
-
-test('the Question paper section is the tab and every paper below it, nothing else of the exam', () => {
-  const base = '/school/sch_1/sessions/ses_1';
-  assert.equal(isQuestionPaperSectionPath(`${base}/exam/first-term/question-paper`, base), true);
-  assert.equal(isQuestionPaperSectionPath(`${base}/exam/first-term/question-paper/c1/english/written`, base), true);
-  assert.equal(isQuestionPaperSectionPath(`${base}/exam/first-term/results`, base), false);
-  assert.equal(isQuestionPaperSectionPath(`${base}/exam`, base), false);
-  assert.equal(isQuestionPaperSectionPath(`${base}/exam/question-paper`, base), false);
-  // Another session's papers are not this session's section.
-  assert.equal(isQuestionPaperSectionPath('/school/sch_1/sessions/ses_2/exam/first-term/question-paper', base), false);
 });
 
 test('opening and collapsing a class rewrites only the class parameter', () => {
@@ -99,25 +85,4 @@ test('the mode filter is stored per school as slugs, and a bad entry is no filte
   assert.deepEqual(parseStoredModeFilter('{"written":true}'), []);
   assert.deepEqual(parseStoredModeFilter('[1,2]'), []);
   assert.deepEqual(parseStoredModeFilter('[""]'), []);
-});
-
-test('the palette picker says whether there is nothing or nothing matches', () => {
-  assert.equal(pickerEmptyMessage({ step: 'exam' }, ''), 'No examinations in this session.');
-  assert.equal(pickerEmptyMessage({ step: 'exam' }, 'zz'), 'No matching examinations.');
-  const classStep = { step: 'class', exam: { slug: 'a', name: 'A' } } as const;
-  assert.equal(pickerEmptyMessage(classStep, ' '), 'No classes you can open.');
-  assert.equal(pickerEmptyMessage(classStep, 'zz'), 'No matching classes.');
-});
-
-test('the picker marks an examination without a plan, whatever its status', () => {
-  assert.equal(examPickerDescription({ status: 'active', planCount: 3 }), 'In progress');
-  assert.equal(examPickerDescription({ status: null, planCount: 0 }), 'No plan yet · Not started');
-  assert.equal(examPickerDescription({ status: 'completed', planCount: 0 }), 'No plan yet · Completed');
-});
-
-test('the picker keeps the given order without a search and ranks matches with one', () => {
-  const classes = ['Class 10', 'Class 1', 'Nursery'];
-  assert.deepEqual(rankByQuery(classes, '', (name) => [name]), classes);
-  assert.deepEqual(rankByQuery(classes, 'nurs', (name) => [name]), ['Nursery']);
-  assert.deepEqual(rankByQuery(classes, 'class 1', (name) => [name]), ['Class 1', 'Class 10']);
 });

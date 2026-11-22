@@ -1,6 +1,7 @@
 /**
  * The details of a standalone question paper (docs/personal-space.md): the
- * school, class, subject and exam names the paper itself prints. A standalone
+ * school, class, subject and exam names and the maximum marks the paper
+ * itself prints. A standalone
  * paper has no exam plan, so these are what lists, filters and file names
  * show. They are written by whoever writes the paper (the generation job's
  * model, a chat agent) and are untrusted text: every value is normalised and
@@ -14,18 +15,28 @@
 /** The most characters one detail keeps; longer values are cut. */
 export const QUESTION_PAPER_DETAIL_MAX_CHARS = 160;
 
-/** The four details, each null when the paper does not state it. */
+/**
+ * The largest maximum marks a paper's details keep: a bound for a model's
+ * untrusted answer (a larger number is not a detail), equal to the database
+ * CHECK on `exam_question_paper.details_max_marks`.
+ */
+export const QUESTION_PAPER_DETAIL_MAX_MARKS = 10_000;
+
+/** The five details, each null when the paper does not state it. */
 export type QuestionPaperDetails = {
   schoolName: string | null;
   className: string | null;
   subjectName: string | null;
   examName: string | null;
+  /** The paper's maximum marks, a whole number from 1 to {@link QUESTION_PAPER_DETAIL_MAX_MARKS}. */
+  maxMarks: number | null;
 };
 
+/** The four text details (names); {@link QuestionPaperDetails.maxMarks} is a number and listed apart. */
 export const QUESTION_PAPER_DETAIL_KEYS = ['schoolName', 'className', 'subjectName', 'examName'] as const satisfies ReadonlyArray<keyof QuestionPaperDetails>;
 
 /** No detail stated. */
-export const EMPTY_QUESTION_PAPER_DETAILS: QuestionPaperDetails = { schoolName: null, className: null, subjectName: null, examName: null };
+export const EMPTY_QUESTION_PAPER_DETAILS: QuestionPaperDetails = { schoolName: null, className: null, subjectName: null, examName: null, maxMarks: null };
 
 // C0 and C1 control characters and DEL; whitespace runs are collapsed first, so tabs and line breaks become spaces.
 // eslint-disable-next-line no-control-regex
@@ -45,7 +56,18 @@ export function normalizeQuestionPaperDetail(value: unknown): string | null {
   return points.length > QUESTION_PAPER_DETAIL_MAX_CHARS ? points.slice(0, QUESTION_PAPER_DETAIL_MAX_CHARS).join('').trim() : cleaned;
 }
 
-/** All four details from any value (a parsed JSON object, a tool input); unknown keys are ignored. */
+/**
+ * The maximum marks as stored: a whole number from 1 to
+ * {@link QUESTION_PAPER_DETAIL_MAX_MARKS}, given as a number or as text that
+ * is only that number ("80", " 80 "); null for anything else (a fraction, a
+ * range, words, out of bounds), never refused.
+ */
+export function normalizeQuestionPaperMaxMarks(value: unknown): number | null {
+  const number = typeof value === 'number' ? value : typeof value === 'string' && /^\s*\d{1,5}\s*$/.test(value) ? Number(value) : Number.NaN;
+  return Number.isInteger(number) && number >= 1 && number <= QUESTION_PAPER_DETAIL_MAX_MARKS ? number : null;
+}
+
+/** All five details from any value (a parsed JSON object, a tool input); unknown keys are ignored. */
 export function normalizeQuestionPaperDetails(value: unknown): QuestionPaperDetails {
   const record = typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
   return {
@@ -53,6 +75,7 @@ export function normalizeQuestionPaperDetails(value: unknown): QuestionPaperDeta
     className: normalizeQuestionPaperDetail(record.className),
     subjectName: normalizeQuestionPaperDetail(record.subjectName),
     examName: normalizeQuestionPaperDetail(record.examName),
+    maxMarks: normalizeQuestionPaperMaxMarks(record.maxMarks),
   };
 }
 

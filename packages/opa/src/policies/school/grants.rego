@@ -192,12 +192,19 @@ grants contains {"role": role, "action": action} if {
   }
 }
 
-# Standalone question papers: the principal, which is the role a personal
-# space's owner holds (a personal space has no other members today). Granted
-# only in a personal space (`personal_space_actions` in permissions.rego).
-grants contains {"role": "school.principal", "action": action} if {
+# Standalone question papers. Every staff role that writes question papers
+# reads and manages the standalone papers it created (a personal space's owner
+# holds the principal role). The roles that run examinations school-wide also
+# oversee every standalone paper of the school, whoever created it, as they
+# reach every class's exam papers.
+grants contains {"role": role, "action": action} if {
+  some role in {"school.principal", "school.manager", "school.exam_coordinator", "school.teacher"}
   some action in {
     "school.standalone_paper.read",
     "school.standalone_paper.manage",
   }
+}
+
+grants contains {"role": role, "action": "school.standalone_paper.oversee"} if {
+  some role in {"school.principal", "school.manager", "school.exam_coordinator"}
 }

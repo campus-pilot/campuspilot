@@ -14,7 +14,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import type { QuestionPaperNotice } from "@campuspilot/question-paper/hash";
-import { QUESTION_PAPER_DETAIL_MAX_CHARS } from "@campuspilot/question-paper/details";
+import { QUESTION_PAPER_DETAIL_MAX_CHARS, QUESTION_PAPER_DETAIL_MAX_MARKS } from "@campuspilot/question-paper/details";
 import {
   QUESTION_PAPER_PAGE_ROTATIONS,
   type QuestionPaperPageRotation,
@@ -93,15 +93,34 @@ export const questionPaperVersionSourceEnum = pgEnum(
  * row is created and never changed:
  * - `exam`: the paper of one (session, exam, class, subject, mode) of an exam
  *   plan; the five key columns are set and the school's template prints it.
- * - `standalone`: a paper of a personal space, with no session, exam, class,
- *   subject or mode (the five key columns are null) and no template: the AI
- *   writes the whole paper, heading included, and a built-in plain A4 shell
- *   prints it. Its details (school, class, subject and exam names) are the
+ * - `standalone`: a paper not tied to an exam plan, with no exam, class,
+ *   subject or mode. In a personal space it has no session either and prints
+ *   in the plain shell (the AI writes the whole heading); in a real school it
+ *   is a "quick paper": it belongs to the session it was created in and the
+ *   school's template prints its heading ({@link QUESTION_PAPER_PRINT_LAYOUTS}).
+ *   Its details (school, class, subject and exam names, maximum marks) are the
  *   `details_*` columns.
  */
 export const QUESTION_PAPER_KINDS = ["exam", "standalone"] as const;
 export type QuestionPaperKind = (typeof QUESTION_PAPER_KINDS)[number];
 export const questionPaperKindEnum = pgEnum("question_paper_kind", QUESTION_PAPER_KINDS);
+
+/**
+ * How a paper is printed (docs/question-papers.md "Quick papers in a school").
+ * Its own fact, set when the row is created and never changed:
+ * - `school_template`: the school's selected `question_paper` template prints
+ *   the heading around the body, and every version pins the template revision
+ *   it was printed with. Every `exam` paper, and a `standalone` paper of a real
+ *   school (a quick paper).
+ * - `plain`: the built-in plain A4 shell, no template; the paper carries its
+ *   own heading. A `standalone` paper of a personal space.
+ * Chosen by `createStandalonePaper` from the school's kind; never read back
+ * from the kind, the session or the versions.
+ */
+export const QUESTION_PAPER_PRINT_LAYOUTS = ["school_template", "plain"] as const;
+export type QuestionPaperPrintLayout = (typeof QUESTION_PAPER_PRINT_LAYOUTS)[number];
+export const questionPaperPrintLayoutEnum = pgEnum("question_paper_print_layout", QUESTION_PAPER_PRINT_LAYOUTS);
+
 
 
 /** The largest accepted original image (D24). */
@@ -123,7 +142,17 @@ export const examQuestionPaperTable = pgTable(
       .references(() => schoolTable.id),
     /** See {@link QUESTION_PAPER_KINDS}. Never changed after the row is created. */
     kind: questionPaperKindEnum("kind").notNull().default("exam"),
-    /** The five key columns: all set for an `exam` paper, all null for a `standalone` one (CHECK). */
+    /**
+     * See {@link QUESTION_PAPER_PRINT_LAYOUTS}. Never changed after the row is
+     * created. Always `school_template` for an `exam` paper (CHECK).
+     */
+    printLayout: questionPaperPrintLayoutEnum("print_layout").notNull().default("school_template"),
+    /**
+     * The five key columns: all set for an `exam` paper. A `standalone` paper
+     * has no exam, class, subject or mode; its `session_id` is set exactly when
+     * it prints with the school's template (a quick paper of a real school,
+     * created in that session), and null in a personal space (CHECK).
+     */
     sessionId: text("session_id").references(() => schoolSessionTable.id),
     examSlug: text("exam_slug"),
     classId: text("class_id").references(() => classTable.id),
@@ -142,6 +171,13 @@ export const examQuestionPaperTable = pgTable(
     detailsClassName: text("details_class_name"),
     detailsSubjectName: text("details_subject_name"),
     detailsExamName: text("details_exam_name"),
+    /**
+     * The maximum marks the paper states, a detail like the four names (same
+     * lifecycle, not revisioned; null when the paper does not state it, and
+     * always null for an `exam` paper, whose maximum is its plan's). A quick
+     * paper's template prints it as `questionPaper.maxMarks`.
+     */
+    detailsMaxMarks: integer("details_max_marks"),
     /**
      * Counts the saved versions; the `expectedVersionNo` optimistic-concurrency
      * token of `saveQuestionPaperVersion`. Its own column, not `max(version_no)`
@@ -185,6 +221,12 @@ export const examQuestionPaperTable = pgTable(
       .where(sql`${table.kind} = 'standalone'`),
     /** The target of the versions' (paper_id, paper_kind) foreign key. */
     unique("exam_question_paper_id_kind_unique").on(table.id, table.kind),
+    /** The target of the versions' (paper_id, paper_print_layout) foreign key. */
+    unique("exam_question_paper_id_print_layout_unique").on(table.id, table.printLayout),
+    /** A session's quick papers, most recently changed first. */
+    index("exam_question_paper_quick_idx")
+      .on(table.schoolId, table.sessionId, table.updatedAt)
+      .where(sql`${table.kind} = 'standalone' and ${table.sessionId} is not null`),
     check(
       "exam_question_paper_counters_check",
       sql`${table.latestVersionNo} >= 0 and ${table.pageRevision} >= 0`,
@@ -194,9 +236,15 @@ export const examQuestionPaperTable = pgTable(
       "exam_question_paper_kind_key_check",
       sql`case ${table.kind}::text
         when 'exam' then num_nonnulls(${table.sessionId}, ${table.examSlug}, ${table.classId}, ${table.subjectSlug}, ${table.modeSlug}) = 5
-          and num_nonnulls(${table.detailsSchoolName}, ${table.detailsClassName}, ${table.detailsSubjectName}, ${table.detailsExamName}) = 0
-        else num_nulls(${table.sessionId}, ${table.examSlug}, ${table.classId}, ${table.subjectSlug}, ${table.modeSlug}) = 5
+          and num_nonnulls(${table.detailsSchoolName}, ${table.detailsClassName}, ${table.detailsSubjectName}, ${table.detailsExamName}, ${table.detailsMaxMarks}) = 0
+          and ${table.printLayout}::text = 'school_template'
+        else num_nulls(${table.examSlug}, ${table.classId}, ${table.subjectSlug}, ${table.modeSlug}) = 4
+          and (${table.sessionId} is null) = (${table.printLayout}::text = 'plain')
       end`,
+    ),
+    check(
+      "exam_question_paper_details_max_marks_check",
+      sql`${table.detailsMaxMarks} is null or ${table.detailsMaxMarks} between 1 and ${sql.raw(String(QUESTION_PAPER_DETAIL_MAX_MARKS))}`,
     ),
     check(
       "exam_question_paper_details_length_check",
@@ -444,6 +492,13 @@ export const examQuestionPaperVersionTable = pgTable(
      * on (paper_id, paper_kind) keeps it equal to the paper's `kind`.
      */
     paperKind: questionPaperKindEnum("paper_kind").notNull().default("exam"),
+    /**
+     * How the paper this version belongs to prints, held here (like
+     * `paper_kind`) so the version's own CHECK can tie `template_revision_id`
+     * to it. A foreign key on (paper_id, paper_print_layout) keeps it equal to
+     * the paper's `print_layout`.
+     */
+    paperPrintLayout: questionPaperPrintLayoutEnum("paper_print_layout").notNull().default("school_template"),
     schoolId: text("school_id")
       .notNull()
       .references(() => schoolTable.id),
@@ -501,8 +556,8 @@ export const examQuestionPaperVersionTable = pgTable(
       .default([]),
     /**
      * The template revision rendered into the PDF. Null exactly for a version
-     * of a `standalone` paper, which is printed in the built-in plain shell
-     * and has no template (CHECK on `paper_kind`).
+     * of a `plain` paper, which is printed in the built-in plain shell and has
+     * no template (CHECK on `paper_print_layout`).
      */
     templateRevisionId: text("template_revision_id").references(() => artifactTable.id),
     /**
@@ -552,10 +607,15 @@ export const examQuestionPaperVersionTable = pgTable(
       columns: [table.paperId, table.paperKind],
       foreignColumns: [examQuestionPaperTable.id, examQuestionPaperTable.kind],
     }).onDelete("cascade"),
+    foreignKey({
+      name: "exam_question_paper_version_paper_print_layout_fk",
+      columns: [table.paperId, table.paperPrintLayout],
+      foreignColumns: [examQuestionPaperTable.id, examQuestionPaperTable.printLayout],
+    }).onDelete("cascade"),
     // Compared as text, as above.
     check(
       "exam_question_paper_version_template_check",
-      sql`(${table.paperKind}::text = 'standalone') = (${table.templateRevisionId} is null)`,
+      sql`(${table.paperPrintLayout}::text = 'plain') = (${table.templateRevisionId} is null)`,
     ),
     // Only a copy names a source version; a copy may have none once its source was deleted. Compared as text: an
     // enum value added in a migration cannot be used (cast to the enum) in the transaction that adds it, and the

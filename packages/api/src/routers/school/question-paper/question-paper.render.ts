@@ -17,7 +17,7 @@ import {
 import { readDocumentTemplate } from '../document/document.storage';
 import { getSelectedDocumentTemplate, selectedDocumentTemplateTypes } from '../document/document.selected-template';
 import { isAttachmentFigureId, loadAttachmentFigureAssets, type ChatFigures } from './question-paper.attachments';
-import type { QuestionPaperContext } from './question-paper.context';
+import type { QuestionPaperContext, QuestionPaperPrintsContext } from './question-paper.context';
 import { createMathRenderer, type MathRenderer } from './question-paper.math';
 import {
   fragmentFigureIds,
@@ -113,7 +113,7 @@ export async function renderQuestionPaperBody(
  * slot still in it. Exported for `question-paper.template-prints.ts`, which
  * reads the text the template prints around the slot out of this very output.
  */
-export function renderQuestionPaperTemplate(template: string, context: QuestionPaperContext): string {
+export function renderQuestionPaperTemplate(template: string, context: QuestionPaperContext | QuestionPaperPrintsContext): string {
   const logo = context.school.logoUrl;
   if (!logo) {
     return combineDocuments([renderDocument(template, context, { maxOutputChars: QUESTION_PAPER_TEMPLATE_RENDER_MAX_CHARS })], 'question_paper');

@@ -1,5 +1,6 @@
 import { schoolDocumentRouter } from './document/document.router';
 import { schoolStandalonePaperRouter } from "./standalone-paper/standalone-paper.router";
+import { schoolQuestionPaperListRouter } from "./question-paper/question-paper.school-list.router";
 import { schoolDashboardRouter } from './dashboard/dashboard.router';
 import type { DatabaseExecutor } from "@campuspilot/db";
 import { activeBillingPeriodColumns, activeBillingPeriodOf, joinActiveBillingPeriod } from "@campuspilot/db/feature-flags/store";
@@ -95,8 +96,10 @@ async function readSchoolDetails(db: DatabaseExecutor, schoolId: string) {
 }
 
 export const schoolRouter = {
-  // Personal spaces only (docs/personal-space.md); every other procedure here serves real schools only.
+  // Standalone papers serve both kinds (a personal space's papers, a school's quick papers); every other procedure here
+  // serves real schools only (docs/personal-space.md).
   ...schoolStandalonePaperRouter,
+  ...schoolQuestionPaperListRouter,
   ...schoolDashboardRouter,
   ...schoolDocumentRouter,
   ...schoolExamRouter,

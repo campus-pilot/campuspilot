@@ -1,18 +1,15 @@
 import type { Database, DatabaseExecutor } from '@campuspilot/db';
 import { assistantConversationTable } from '@campuspilot/db/schema/assistant';
-import {
-  examQuestionPaperJobTable,
-  examQuestionPaperPageTable,
-  examQuestionPaperTable,
-  examQuestionPaperVersionTable,
-} from '@campuspilot/db/schema/exam-question-paper';
-import { and, asc, count, desc, eq, ilike, inArray, isNotNull, notExists, or, sql, type SQL } from 'drizzle-orm';
+import { examQuestionPaperPageTable, examQuestionPaperTable } from '@campuspilot/db/schema/exam-question-paper';
+import { schoolSessionTable } from '@campuspilot/db/schema/session';
+import { and, asc, count, desc, eq, ilike, isNotNull, isNull, notExists, or, type SQL } from 'drizzle-orm';
 import type { z } from 'zod';
 
 import { lockSchool } from '../../../billing/billing.service';
 import { rpcError } from '../../../errors';
 import { createNextPageCursor, createPaginatedResult, resolvePaginationInput } from '../../../paginations';
 import { conversationRefOf, latestPaperConversationId } from '../question-paper/question-paper.conversations';
+import { paperListFactsOf } from '../question-paper/question-paper.list-facts';
 import {
   activeJobOf,
   findPaperOf,
@@ -23,10 +20,12 @@ import {
   versionsOf,
   type PaperRow,
 } from '../question-paper/question-paper.records';
-import type { StandalonePaperScope } from '../question-paper/question-paper.scope';
-import { STANDALONE_QUESTION_PAPER_PRINTS } from '../question-paper/question-paper.standalone-shell';
+import type { StandalonePaperReach, StandalonePaperScope } from '../question-paper/question-paper.scope';
+import { hasSelectedQuestionPaperTemplate } from '../question-paper/question-paper.render';
+import { readTemplatePrints } from '../question-paper/question-paper.template-prints';
 import { getVersion } from '../question-paper/question-paper.version.service';
 import { personalSpaceLimitError } from '../../../personal-space/personal-space.storage';
+import { readSchoolKind } from '../../../school-access/school-kind.service';
 import { STANDALONE_PAPERS_PER_SPACE_LIMIT } from './standalone-paper.dto';
 import type {
   getStandalonePaperOutputSchema,
@@ -39,43 +38,76 @@ import type {
 } from './standalone-paper.dto';
 
 /**
- * Standalone question papers (docs/personal-space.md): the reads that are
- * their own. Everything that changes a paper (pages, generation, versions,
+ * Standalone question papers (docs/personal-space.md, docs/question-papers.md
+ * "Quick papers in a school"): the reads that are their own. Everything that changes a paper (pages, generation, versions,
  * delete) is the exam papers' shared service with a standalone scope
  * (`ResolvedPaper`), so both kinds are validated, printed and locked the same
  * way.
  */
 
 /** The details of a paper row, as read back. */
-export function detailsOf(paper: Pick<PaperRow, 'detailsSchoolName' | 'detailsClassName' | 'detailsSubjectName' | 'detailsExamName'>): StandalonePaperDetailsDto {
+export function detailsOf(
+  paper: Pick<PaperRow, 'detailsSchoolName' | 'detailsClassName' | 'detailsSubjectName' | 'detailsExamName' | 'detailsMaxMarks'>,
+): StandalonePaperDetailsDto {
   return {
     schoolName: paper.detailsSchoolName,
     className: paper.detailsClassName,
     subjectName: paper.detailsSubjectName,
     examName: paper.detailsExamName,
+    maxMarks: paper.detailsMaxMarks,
   };
 }
 
 /**
+ * The papers of a school a reach covers: every standalone paper with
+ * `oversee`, otherwise only the ones the person created (a paper whose
+ * creator was deleted has a null `created_by` and is left out).
+ */
+export const reachedPapersWhere = (reach: StandalonePaperReach): SQL | undefined =>
+  reach.oversee ? undefined : eq(examQuestionPaperTable.createdBy, reach.userId);
+
+/**
  * A paper for the person to start on (`createStandalonePaper`), in one
- * transaction under the personal space's row lock, so creations sent at once
- * see each other:
+ * transaction under the school's row lock, so creations sent at once see each
+ * other. How it prints is decided here, once, from the school's kind
+ * (`readSchoolKind`) and stored on the row (`print_layout`):
  *
- * - An **unused** paper the space already has is returned instead of a new
- *   one (`reused: true`). Unused is decided from three facts, each read on its
- *   own: the paper has no page (reserved or stored), no saved version
- *   (`latest_version_no = 0`), and no conversation shared with it
- *   (`assistant_conversation.standalone_paper_id`, live or deleted). Such a
- *   paper holds nothing anyone made, so repeated clicks or a looping agent
- *   never pile up empty papers. The oldest unused one is returned.
- * - Otherwise a new paper is created, unless the space already holds
- *   {@link STANDALONE_PAPERS_PER_SPACE_LIMIT} papers (`personalSpaceLimitError('papers')`).
+ * - In a **personal space**: `plain`, no session (`sessionId` must not be
+ *   sent), and at most {@link STANDALONE_PAPERS_PER_SPACE_LIMIT} papers
+ *   (`personalSpaceLimitError('papers')`).
+ * - In a **real school** (a quick paper): `school_template`, in the session
+ *   the caller names (`sessionId`, required, a session of this school), with
+ *   no count limit (docs/question-papers.md "Quick papers in a school").
+ *
+ * An **unused** paper of the caller's in the same place (the same session, or
+ * none) is returned instead of a new one (`reused: true`). Unused is decided
+ * from three facts, each read on its own: the paper has no page (reserved or
+ * stored), no saved version (`latest_version_no = 0`), and no conversation
+ * shared with it (`assistant_conversation.standalone_paper_id`, live or
+ * deleted). Only the caller's own (`created_by`): a paper someone else
+ * created is never handed to another person, even an empty one. Such a paper
+ * holds nothing anyone made, so repeated clicks or a looping agent never pile
+ * up empty papers. The oldest unused one is returned.
  *
  * The caller has checked the school's kind and the permission.
  */
-export async function createStandalonePaper(db: Database, input: { schoolId: string; userId: string }): Promise<{ paperId: string; reused: boolean }> {
+export async function createStandalonePaper(
+  db: Database,
+  input: { schoolId: string; userId: string; sessionId: string | null },
+): Promise<{ paperId: string; reused: boolean }> {
+  const personal = (await readSchoolKind(db, input.schoolId)) === 'personal';
+  if (personal && input.sessionId !== null) throw rpcError.badRequest('A personal space has no academic sessions: create the paper without a sessionId.');
+  if (!personal && input.sessionId === null) throw rpcError.badRequest('Choose the academic session the question paper belongs to (sessionId).');
   return db.transaction(async (tx) => {
     await lockSchool(tx, input.schoolId);
+    if (input.sessionId !== null) {
+      const [session] = await tx
+        .select({ id: schoolSessionTable.id })
+        .from(schoolSessionTable)
+        .where(and(eq(schoolSessionTable.id, input.sessionId), eq(schoolSessionTable.schoolId, input.schoolId)))
+        .limit(1);
+      if (!session) throw rpcError.notFound('Academic session');
+    }
     const standalone = and(eq(examQuestionPaperTable.schoolId, input.schoolId), eq(examQuestionPaperTable.kind, 'standalone'));
     const [unused] = await tx
       .select({ id: examQuestionPaperTable.id })
@@ -83,6 +115,8 @@ export async function createStandalonePaper(db: Database, input: { schoolId: str
       .where(
         and(
           standalone,
+          eq(examQuestionPaperTable.createdBy, input.userId),
+          input.sessionId === null ? isNull(examQuestionPaperTable.sessionId) : eq(examQuestionPaperTable.sessionId, input.sessionId),
           eq(examQuestionPaperTable.latestVersionNo, 0),
           notExists(tx.select({ id: examQuestionPaperPageTable.id }).from(examQuestionPaperPageTable).where(eq(examQuestionPaperPageTable.paperId, examQuestionPaperTable.id))),
           notExists(
@@ -96,13 +130,21 @@ export async function createStandalonePaper(db: Database, input: { schoolId: str
       .orderBy(asc(examQuestionPaperTable.createdAt), asc(examQuestionPaperTable.id))
       .limit(1);
     if (unused) return { paperId: unused.id, reused: true };
-    const [held] = await tx.select({ count: count() }).from(examQuestionPaperTable).where(standalone);
-    if ((held?.count ?? 0) >= STANDALONE_PAPERS_PER_SPACE_LIMIT) {
-      throw personalSpaceLimitError('papers');
+    if (personal) {
+      const [held] = await tx.select({ count: count() }).from(examQuestionPaperTable).where(standalone);
+      if ((held?.count ?? 0) >= STANDALONE_PAPERS_PER_SPACE_LIMIT) {
+        throw personalSpaceLimitError('papers');
+      }
     }
     const [paper] = await tx
       .insert(examQuestionPaperTable)
-      .values({ schoolId: input.schoolId, kind: 'standalone', createdBy: input.userId })
+      .values({
+        schoolId: input.schoolId,
+        kind: 'standalone',
+        printLayout: personal ? 'plain' : 'school_template',
+        sessionId: input.sessionId,
+        createdBy: input.userId,
+      })
       .returning({ id: examQuestionPaperTable.id });
     if (!paper) throw rpcError.internal();
     return { paperId: paper.id, reused: false };
@@ -121,6 +163,7 @@ async function factsOf(db: DatabaseExecutor, paper: PaperRow): Promise<z.infer<t
   const [pages] = await db.select({ count: count() }).from(examQuestionPaperPageTable).where(eq(examQuestionPaperPageTable.paperId, paper.id));
   return {
     paperId: paper.id,
+    printLayout: paper.printLayout,
     details: detailsOf(paper),
     pageCount: pages?.count ?? 0,
     pageRevision: paper.pageRevision,
@@ -141,8 +184,9 @@ const toDetailJob = (job: { id: string; status: 'queued' | 'running' | 'succeede
 
 /**
  * `getStandalonePaper`: the paper, its pages and one version (the latest
- * unless named), for agents. `templatePrints` is always two empty lists: the
- * plain page prints nothing, so the agent writes the whole heading.
+ * unless named), for agents, with what is printed around it
+ * (`readTemplatePrints`): two empty lists on a plain page (the agent writes the
+ * whole heading), the school template's lines for a quick paper.
  */
 export async function getStandalonePaper(
   db: DatabaseExecutor,
@@ -150,7 +194,7 @@ export async function getStandalonePaper(
   versionNo: number | undefined,
 ): Promise<z.infer<typeof getStandalonePaperOutputSchema>> {
   const paper = await paperRowOf(db, scope);
-  const [facts, pages, activeJob] = await Promise.all([factsOf(db, paper), pagesOf(db, paper.id), activeJobOf(db, paper.id)]);
+  const [facts, pages, activeJob, templatePrints] = await Promise.all([factsOf(db, paper), pagesOf(db, paper.id), activeJobOf(db, paper.id), readTemplatePrints(db, scope)]);
   let version: z.infer<typeof getStandalonePaperOutputSchema>['version'] = null;
   if (versionNo !== undefined || paper.latestVersionNo > 0) {
     const row = await getVersion(db, paper.id, versionNo ?? paper.latestVersionNo);
@@ -159,7 +203,7 @@ export async function getStandalonePaper(
   }
   return {
     paper: facts,
-    templatePrints: STANDALONE_QUESTION_PAPER_PRINTS,
+    templatePrints,
     pages: pages.map(toPageDto),
     activeJob: activeJob ? toJob(activeJob) : null,
     version,
@@ -169,13 +213,14 @@ export async function getStandalonePaper(
 /** `getStandalonePaperDetail`: what the paper's screen needs in one call, polled while a job runs. */
 export async function getStandalonePaperDetail(db: DatabaseExecutor, scope: StandalonePaperScope): Promise<z.infer<typeof standalonePaperDetailOutputSchema>> {
   const paper = await paperRowOf(db, scope);
-  const [facts, pages, activeJob, finished, versions, latestConversationId] = await Promise.all([
+  const [facts, pages, activeJob, finished, versions, latestConversationId, templateConfigured] = await Promise.all([
     factsOf(db, paper),
     pagesOf(db, paper.id),
     activeJobOf(db, paper.id),
     lastFinishedJobOf(db, paper.id),
     versionsOf(db, paper.id).then((rows) => toVersionSummaries(db, rows, paper.latestVersionNo)),
     latestPaperConversationId(db, conversationRefOf(scope)),
+    paper.printLayout === 'plain' ? true : hasSelectedQuestionPaperTemplate(db, paper.schoolId),
   ]);
   return {
     paper: facts,
@@ -187,6 +232,7 @@ export async function getStandalonePaperDetail(db: DatabaseExecutor, scope: Stan
         : null,
     versions,
     latestConversationId,
+    templateConfigured,
   };
 }
 
@@ -202,13 +248,15 @@ const DETAIL_COLUMNS = {
 } as const;
 
 /**
- * `listStandalonePapers`: the school's standalone papers, most recently
- * changed first, matching the search (any detail contains it) and every
- * filter (that detail equals it exactly, as the filter options list them).
+ * `listStandalonePapers`: the school's standalone papers the caller reaches
+ * ({@link reachedPapersWhere}), most recently changed first, matching the
+ * search (any detail contains it) and every filter (that detail equals it
+ * exactly, as the filter options list them).
  */
 export async function listStandalonePapers(
   db: DatabaseExecutor,
   input: z.infer<typeof listStandalonePapersInputSchema>,
+  reach: StandalonePaperReach,
 ): Promise<z.infer<typeof listStandalonePapersOutputSchema>> {
   const { currentPage, pageSize, offset } = resolvePaginationInput(input);
   const search = input.searchQuery
@@ -217,7 +265,7 @@ export async function listStandalonePapers(
   const filters = (Object.keys(DETAIL_COLUMNS) as Array<keyof typeof DETAIL_COLUMNS>)
     .map((key): SQL | undefined => (input.filters[key] === undefined ? undefined : eq(DETAIL_COLUMNS[key], input.filters[key]!)))
     .filter((clause): clause is SQL => clause !== undefined);
-  const where = and(eq(examQuestionPaperTable.schoolId, input.schoolId), eq(examQuestionPaperTable.kind, 'standalone'), search, ...filters);
+  const where = and(eq(examQuestionPaperTable.schoolId, input.schoolId), eq(examQuestionPaperTable.kind, 'standalone'), reachedPapersWhere(reach), search, ...filters);
   const [papers, [total]] = await Promise.all([
     db
       .select()
@@ -230,60 +278,18 @@ export async function listStandalonePapers(
   ]);
   const totalItems = total?.count ?? 0;
   const totalPages = Math.ceil(totalItems / pageSize);
-  const paperIds = papers.map((paper) => paper.id);
-  const [pageCounts, latestVersions, activeJobs, lastJobs] = paperIds.length
-    ? await Promise.all([
-        db
-          .select({ paperId: examQuestionPaperPageTable.paperId, count: sql<number>`count(*)::int` })
-          .from(examQuestionPaperPageTable)
-          .where(inArray(examQuestionPaperPageTable.paperId, paperIds))
-          .groupBy(examQuestionPaperPageTable.paperId),
-        db
-          .select({ paperId: examQuestionPaperVersionTable.paperId, warnings: examQuestionPaperVersionTable.warnings, createdAt: examQuestionPaperVersionTable.createdAt })
-          .from(examQuestionPaperVersionTable)
-          .innerJoin(
-            examQuestionPaperTable,
-            and(eq(examQuestionPaperTable.id, examQuestionPaperVersionTable.paperId), eq(examQuestionPaperTable.latestVersionNo, examQuestionPaperVersionTable.versionNo)),
-          )
-          .where(inArray(examQuestionPaperVersionTable.paperId, paperIds)),
-        db
-          .select({ paperId: examQuestionPaperJobTable.paperId, id: examQuestionPaperJobTable.id, status: examQuestionPaperJobTable.status })
-          .from(examQuestionPaperJobTable)
-          .where(and(inArray(examQuestionPaperJobTable.paperId, paperIds), inArray(examQuestionPaperJobTable.status, ['queued', 'running']))),
-        db
-          .selectDistinctOn([examQuestionPaperJobTable.paperId], {
-            paperId: examQuestionPaperJobTable.paperId,
-            status: examQuestionPaperJobTable.status,
-            errorCode: examQuestionPaperJobTable.errorCode,
-            errorMessage: examQuestionPaperJobTable.errorMessage,
-            completedAt: examQuestionPaperJobTable.completedAt,
-          })
-          .from(examQuestionPaperJobTable)
-          .where(inArray(examQuestionPaperJobTable.paperId, paperIds))
-          .orderBy(examQuestionPaperJobTable.paperId, sql`${examQuestionPaperJobTable.createdAt} desc`, sql`${examQuestionPaperJobTable.id} desc`),
-      ])
-    : [[], [], [], []];
-  const pageCountOf = new Map(pageCounts.map((row) => [row.paperId, row.count]));
-  const latestOf = new Map(latestVersions.map((row) => [row.paperId, row]));
-  const activeOf = new Map(activeJobs.map((row) => [row.paperId, row]));
-  const lastOf = new Map(lastJobs.map((row) => [row.paperId, row]));
+  const listFactsOf = await paperListFactsOf(db, papers.map((paper) => paper.id));
   return createPaginatedResult({
     items: papers.map((paper) => {
-      const latest = latestOf.get(paper.id);
-      const active = activeOf.get(paper.id);
-      const last = lastOf.get(paper.id);
+      const facts = listFactsOf(paper.id);
       return {
         paperId: paper.id,
         details: detailsOf(paper),
-        pageCount: pageCountOf.get(paper.id) ?? 0,
+        pageCount: facts.pageCount,
         latestVersionNo: paper.latestVersionNo,
-        warningCount: latest?.warnings.length ?? 0,
-        activeJob: active ? { id: active.id, status: active.status as 'queued' | 'running' } : null,
-        // As for exam papers: a failure is news only until a version is saved after it.
-        lastJobFailure:
-          last?.status === 'failed' && last.errorCode && !(latest && last.completedAt && latest.createdAt >= last.completedAt)
-            ? { errorCode: last.errorCode, message: last.errorMessage ?? 'AI generation failed.' }
-            : null,
+        warningCount: facts.warningCount,
+        activeJob: facts.activeJob,
+        lastJobFailure: facts.lastJobFailure,
         createdAt: paper.createdAt,
         updatedAt: paper.updatedAt,
       };
@@ -299,16 +305,17 @@ export async function listStandalonePapers(
 /** The most values each filter offers; a personal space with more distinct details than this is not expected. */
 const FILTER_OPTIONS_LIMIT = 200;
 
-/** `listStandalonePaperFilterOptions`: the distinct details of the school's own standalone papers, each list sorted. */
+/** `listStandalonePaperFilterOptions`: the distinct details of the school's standalone papers the caller reaches, each list sorted. */
 export async function listStandalonePaperFilterOptions(
   db: DatabaseExecutor,
   schoolId: string,
+  reach: StandalonePaperReach,
 ): Promise<z.infer<typeof listStandalonePaperFilterOptionsOutputSchema>> {
   const optionsOf = async (column: (typeof DETAIL_COLUMNS)[keyof typeof DETAIL_COLUMNS]) => {
     const rows = await db
       .selectDistinct({ value: column })
       .from(examQuestionPaperTable)
-      .where(and(eq(examQuestionPaperTable.schoolId, schoolId), eq(examQuestionPaperTable.kind, 'standalone'), isNotNull(column)))
+      .where(and(eq(examQuestionPaperTable.schoolId, schoolId), eq(examQuestionPaperTable.kind, 'standalone'), reachedPapersWhere(reach), isNotNull(column)))
       .orderBy(asc(column))
       .limit(FILTER_OPTIONS_LIMIT);
     return rows.map((row) => row.value).filter((value): value is string => value !== null);

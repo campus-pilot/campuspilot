@@ -7,24 +7,26 @@ import { rpcError, rpcErrorResponse } from '../../../errors';
 import { parseImageUpload, QUESTION_PAPER_IMAGE_FAMILY } from '../../../files/image-upload';
 import { assertPermission } from '../../../permissions/authorization';
 import { assertSchoolWritableByCaller } from '../../../school-access/school-access.service';
-import { assertSchoolKindServedByCaller, PERSONAL_SPACES_ONLY } from '../../../school-access/school-kind.service';
+import { assertSchoolKindServedByCaller, EVERY_SCHOOL_KIND } from '../../../school-access/school-kind.service';
 import { assertQuestionPaperAssistantAccess } from '../question-paper/question-paper.access';
 import { QUESTION_PAPER_MAX_PAGE_BYTES, versionNoInputSchema } from '../question-paper/question-paper.dto';
 import { QUESTION_PAPER_PAGE_FIELD_NAME } from '../question-paper/question-paper.http';
-import { resolveStandalonePaper, type StandalonePaperScope } from '../question-paper/question-paper.scope';
+import type { StandalonePaperScope } from '../question-paper/question-paper.scope';
 import { storeQuestionPaperPage } from '../question-paper/question-paper.service';
 import { getObjectStream, pageImageUrl, QUESTION_PAPER_IMAGE_CACHE_SECONDS } from '../question-paper/question-paper.storage';
 import { getVersion, storedVersionPdfKey } from '../question-paper/question-paper.version.service';
 import { standalonePaperRefSchema } from './standalone-paper.dto';
+import { resolveReachedStandalonePaper } from './standalone-paper.reach';
 
 /**
- * The HTTP routes of standalone question papers (docs/personal-space.md):
- * storing a reserved page's photo, reading page images and a version's PDF.
- * The same handling as the exam paper routes (`question-paper.http.ts`), with
- * the standalone checks in their order: the school is a personal space (as
- * `requireAuth` holds procedures), the school permission, the assistant gate,
- * and for an upload the school's read-only gate; then the paper must be a
- * standalone paper of that school.
+ * The HTTP routes of standalone question papers (docs/personal-space.md, and
+ * a real school's quick papers): storing a reserved page's photo, reading page
+ * images and a version's PDF. The same handling as the exam paper routes
+ * (`question-paper.http.ts`), with the standalone checks in their order: the
+ * school kind (both kinds are served, as `requireAuth` holds the procedures),
+ * the school permission, the assistant gate, and for an upload the school's
+ * read-only gate; then the paper must be a standalone paper of that school
+ * that the caller reaches (their own, or any with `oversee`).
  */
 
 type HttpErrorReporter = (error: unknown) => void;
@@ -44,7 +46,7 @@ function requireUser(context: Context): string {
 /** The checks of every standalone route, before anything is read: kind, permission, assistant, then the paper itself. */
 async function authorize(context: Context, rawRef: unknown, action: 'read' | 'manage'): Promise<{ scope: StandalonePaperScope; userId: string }> {
   const ref = parseRef(rawRef);
-  await assertSchoolKindServedByCaller(context, ref.schoolId, PERSONAL_SPACES_ONLY);
+  await assertSchoolKindServedByCaller(context, ref.schoolId, EVERY_SCHOOL_KIND);
   await assertPermission(context, {
     action: action === 'read' ? SCHOOL_ACTIONS.READ_STANDALONE_PAPERS : SCHOOL_ACTIONS.MANAGE_STANDALONE_PAPERS,
     resource: { kind: 'school', schoolId: ref.schoolId },
@@ -53,7 +55,7 @@ async function authorize(context: Context, rawRef: unknown, action: 'read' | 'ma
   await assertQuestionPaperAssistantAccess(context.db, { schoolId: ref.schoolId, userId });
   // An upload is a change: refused while the school is read-only (suspended, or without an active plan).
   if (action === 'manage') await assertSchoolWritableByCaller(context, ref.schoolId);
-  return { scope: await resolveStandalonePaper(context.db, ref), userId };
+  return { scope: await resolveReachedStandalonePaper(context, ref), userId };
 }
 
 /**
