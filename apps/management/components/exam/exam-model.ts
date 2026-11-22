@@ -215,8 +215,8 @@ export const examResultsHref = (scope: ExamScope) => `${examHref(scope, scope.ex
 export const questionPaperHref = (scope: ExamScope) => `${examHref(scope, scope.examSlug)}/question-paper`;
 /**
  * The Question paper tab with one class open: the tab's accordion opens the
- * class its `class` parameter names (a class id), so the sidebar's Question
- * papers entry and the command palette land on that class.
+ * class its `class` parameter names (a class id), so going back from a paper
+ * lands on that class.
  */
 export const questionPaperClassHref = (scope: ExamScope & { classId: string }) =>
   `${questionPaperHref(scope)}?class=${encodeURIComponent(scope.classId)}`;
@@ -230,18 +230,6 @@ export const questionPaperClassHref = (scope: ExamScope & { classId: string }) =
 export const questionPaperReturnHref = (scope: ExamScope & { classId?: string }) =>
   scope.classId ? questionPaperClassHref({ ...scope, classId: scope.classId }) : questionPaperHref(scope);
 
-/**
- * Whether a pathname is inside an examination's Question paper section (the
- * tab or one paper) of the session whose address is `sessionBase`
- * (`schoolSessionHref(schoolId, sessionId)`). The sidebar highlights its
- * Question papers entry there, and Examinations everywhere else below `/exam`.
- */
-export function isQuestionPaperSectionPath(pathname: string, sessionBase: string): boolean {
-  const prefix = `${sessionBase}/exam/`;
-  if (!pathname.startsWith(prefix)) return false;
-  const [examSlug, section] = pathname.slice(prefix.length).split('/');
-  return Boolean(examSlug) && section === 'question-paper';
-}
 /**
  * One paper (a class, subject and assessment mode). The query says what the
  * screen shows, so a reload or a shared link lands in the same place: `start`

@@ -38,6 +38,7 @@ export const SCHOOL_ACTIONS = {
   MANAGE_DOCUMENT_TEMPLATES: 'school.document.templates.manage',
   MANAGE_FINANCE_DOCUMENT_TEMPLATES: 'school.finance.document.templates.manage',
   MANAGE_STANDALONE_PAPERS: 'school.standalone_paper.manage',
+  OVERSEE_STANDALONE_PAPERS: 'school.standalone_paper.oversee',
   POST_BILLING_RUN: 'school.billing.run.post',
   PREVIEW_BILLING_RUN: 'school.billing.run.preview',
   PUBLISH_EXAM_TIMETABLE: 'school.exam.timetable.publish',

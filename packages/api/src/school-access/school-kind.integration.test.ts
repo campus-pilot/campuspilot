@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { expectPermissionDenied } from '../../test/feature-flags';
 import { createAdminSession, createSchoolStaffSession, createTestClient, createTestSchool } from '../../test/fixtures';
 import { googleNewcomer, personalSpaceOwner } from '../../test/personal-space';
+import { switchAssistantRoles } from '../../test/question-paper';
 import { db } from '@campuspilot/db';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
 
@@ -39,11 +40,11 @@ describe('the school kind gate', () => {
     await expect(client.school.listStandalonePapers({ schoolId })).resolves.toMatchObject({ items: [] });
   });
 
-  it('refuses a personal space procedure for a real school', async () => {
+  it('serves a real school the standalone paper procedures too: its quick papers', async () => {
     const school = await createTestSchool({ features: [{ feature: 'assistant', config: { monthlyLimitUsd: 20 } }] });
+    await switchAssistantRoles(school.id, ['principal']);
     const principal = await createSchoolStaffSession(school.id, [{ role: 'principal', meta: null }]);
-    const error = await refusalOf(createTestClient(principal.session).school.listStandalonePapers({ schoolId: school.id }));
-    expect(schoolKindRefusalOf(error)).toBe('school');
+    await expect(createTestClient(principal.session).school.listStandalonePapers({ schoolId: school.id })).resolves.toMatchObject({ items: [] });
   });
 
   it('tells an outsider nothing: a plain permission denial', async () => {
@@ -128,30 +129,32 @@ describe('every procedure is classified by the kinds of school it serves', () =>
    * The procedures that serve personal spaces. Serving one more is a
    * deliberate product decision (docs/personal-space.md): add it here and to
    * the guide. Every other procedure serves real schools only, the default.
+   * The standalone paper procedures serve real schools too: a school's quick
+   * papers (docs/question-papers.md "Quick papers in a school").
    */
   const PERSONAL_SPACE_PROCEDURES = {
     'school.getFeatureFlags': ['school', 'personal'],
-    'school.listStandalonePapers': ['personal'],
-    'school.listStandalonePaperFilterOptions': ['personal'],
-    'school.createStandalonePaper': ['personal'],
-    'school.getStandalonePaper': ['personal'],
-    'school.getStandalonePaperDraft': ['personal'],
-    'school.listStandalonePaperVersions': ['personal'],
-    'school.learn_standalone_question_paper': ['personal'],
-    'school.validateStandalonePaperDraft': ['personal'],
-    'school.saveStandalonePaperVersion': ['personal'],
-    'school.editStandalonePaper': ['personal'],
-    'school.startStandalonePaperGeneration': ['personal'],
-    'school.getStandalonePaperDetail': ['personal'],
-    'school.reorderStandalonePaperPages': ['personal'],
-    'school.reserveStandalonePaperPages': ['personal'],
-    'school.releaseStandalonePaperPage': ['personal'],
-    'school.deleteStandalonePaperPage': ['personal'],
-    'school.rotateStandalonePaperPage': ['personal'],
-    'school.deleteStandalonePaper': ['personal'],
-    'school.getStandalonePaperPreview': ['personal'],
-    'school.previewStandalonePaperDraft': ['personal'],
-    'school.getStandalonePaperDownload': ['personal'],
+    'school.listStandalonePapers': ['school', 'personal'],
+    'school.listStandalonePaperFilterOptions': ['school', 'personal'],
+    'school.createStandalonePaper': ['school', 'personal'],
+    'school.getStandalonePaper': ['school', 'personal'],
+    'school.getStandalonePaperDraft': ['school', 'personal'],
+    'school.listStandalonePaperVersions': ['school', 'personal'],
+    'school.learn_standalone_question_paper': ['school', 'personal'],
+    'school.validateStandalonePaperDraft': ['school', 'personal'],
+    'school.saveStandalonePaperVersion': ['school', 'personal'],
+    'school.editStandalonePaper': ['school', 'personal'],
+    'school.startStandalonePaperGeneration': ['school', 'personal'],
+    'school.getStandalonePaperDetail': ['school', 'personal'],
+    'school.reorderStandalonePaperPages': ['school', 'personal'],
+    'school.reserveStandalonePaperPages': ['school', 'personal'],
+    'school.releaseStandalonePaperPage': ['school', 'personal'],
+    'school.deleteStandalonePaperPage': ['school', 'personal'],
+    'school.rotateStandalonePaperPage': ['school', 'personal'],
+    'school.deleteStandalonePaper': ['school', 'personal'],
+    'school.getStandalonePaperPreview': ['school', 'personal'],
+    'school.previewStandalonePaperDraft': ['school', 'personal'],
+    'school.getStandalonePaperDownload': ['school', 'personal'],
   } as const;
 
   it('lists exactly the procedures that serve personal spaces, and leaves every other one to real schools', () => {

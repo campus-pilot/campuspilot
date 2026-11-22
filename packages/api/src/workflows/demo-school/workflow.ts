@@ -35,6 +35,7 @@ import {
   seedFinanceConfiguration,
   seedNotice,
   seedQuestionPaper,
+  seedQuickPaper,
   seedSchoolLogo,
   seedSession,
   seedStaffMember,
@@ -188,6 +189,9 @@ export async function runDemoSeedSteps(options: {
     const classIdsBySlug = Object.fromEntries([...placements].map(([slug, placement]) => [slug, placement.classId]));
     for (const paper of plan.questionPapers) {
       await step(`question-paper:${paper.key}`, async () => seedQuestionPaper(await seed(), { sessionId, classIdsBySlug, paper }));
+    }
+    for (const paper of plan.quickPapers) {
+      await step(`quick-paper:${paper.key}`, async () => seedQuickPaper(await seed(), { paper }));
     }
   });
 

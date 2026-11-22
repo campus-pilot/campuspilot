@@ -5,13 +5,19 @@ import {
   EMPTY_QUESTION_PAPER_DETAILS,
   normalizeQuestionPaperDetail,
   normalizeQuestionPaperDetails,
+  normalizeQuestionPaperMaxMarks,
   QUESTION_PAPER_DETAIL_MAX_CHARS,
+  QUESTION_PAPER_DETAIL_MAX_MARKS,
   splitQuestionPaperDetails,
 } from './details';
 
 describe('normalizeQuestionPaperDetail', () => {
   it('collapses whitespace, drops control characters and trims', () => {
     expect(normalizeQuestionPaperDetail('  Class\n  5 \u0007 ')).toBe('Class 5');
+  });
+  it('removes angle brackets, so a name never carries markup into a template', () => {
+    expect(normalizeQuestionPaperDetail('<div class="qp-body" id="qp-body-slot"></div>Class 5')).toBe('div class="qp-body" id="qp-body-slot"/divClass 5');
+    expect(normalizeQuestionPaperDetail('<>')).toBeNull();
   });
   it('treats empty and non-string values as not stated', () => {
     expect(normalizeQuestionPaperDetail('   ')).toBeNull();
@@ -22,6 +28,19 @@ describe('normalizeQuestionPaperDetail', () => {
     const long = '𝔸'.repeat(QUESTION_PAPER_DETAIL_MAX_CHARS + 10);
     const cut = normalizeQuestionPaperDetail(long)!;
     expect(Array.from(cut)).toHaveLength(QUESTION_PAPER_DETAIL_MAX_CHARS);
+  });
+});
+
+describe('normalizeQuestionPaperMaxMarks', () => {
+  it('keeps a whole number in bounds, given as a number or as text that is only that number', () => {
+    expect(normalizeQuestionPaperMaxMarks(80)).toBe(80);
+    expect(normalizeQuestionPaperMaxMarks(' 80 ')).toBe(80);
+    expect(normalizeQuestionPaperMaxMarks(QUESTION_PAPER_DETAIL_MAX_MARKS)).toBe(QUESTION_PAPER_DETAIL_MAX_MARKS);
+  });
+  it('treats anything else as not stated, never refusing', () => {
+    for (const value of [0, -5, 2.5, QUESTION_PAPER_DETAIL_MAX_MARKS + 1, '80 marks', '2.5', '', null, undefined, Number.NaN, '1e3']) {
+      expect(normalizeQuestionPaperMaxMarks(value)).toBeNull();
+    }
   });
 });
 
@@ -37,7 +56,7 @@ describe('splitQuestionPaperDetails', () => {
   it('reads the details block and removes it from the answer', () => {
     const answer = `${html}\n\n\`\`\`paper-details\n{"schoolName":"Sunrise School","className":"Class 3","subjectName":"Maths","examName":"Half yearly"}\n\`\`\``;
     const split = splitQuestionPaperDetails(answer);
-    expect(split.details).toEqual({ schoolName: 'Sunrise School', className: 'Class 3', subjectName: 'Maths', examName: 'Half yearly' });
+    expect(split.details).toEqual({ schoolName: 'Sunrise School', className: 'Class 3', subjectName: 'Maths', examName: 'Half yearly', maxMarks: null });
     expect(extractQuestionPaperFragment(split.text)).toBe(html);
   });
   it('keeps a fenced html block as the fragment', () => {

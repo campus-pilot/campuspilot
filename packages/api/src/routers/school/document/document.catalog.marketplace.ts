@@ -426,7 +426,9 @@ const noticeTemplates: CatalogTemplate[] = [
  *   is a CSS `direction:` value read from the context, not a `dir`
  *   attribute. The questions carry their own `dir`/`lang`/script fonts;
  * - the optional facts (location, time allowed, maximum marks, registration
- *   number) are guarded by `{{#if}}`, because the context may carry null.
+ *   number) are guarded by `{{#if}}`, because the context may carry null;
+ *   so are the mode and the exam name in the footer, which a quick paper
+ *   (docs/question-papers.md "Quick papers in a school") leaves empty.
  */
 const questionPaperClassicTemplate = `<style>.qpc{font-family:'Noto Serif','Noto Serif Devanagari','Noto Sans','Noto Sans Devanagari',serif;color:#111;font-size:12pt;line-height:1.4}.qpc *{box-sizing:border-box}.qpc-head{text-align:center;padding-bottom:3mm;border-bottom:1.5px solid #111}.qpc-head img{display:block;width:18mm;height:18mm;margin:0 auto 2mm;object-fit:contain}.qpc-head h1{margin:0;font-size:20pt;line-height:1.2;letter-spacing:.5px}.qpc-head p{margin:1mm 0 0;font-size:10pt}.qpc-exam{margin:3mm 0 0;font-size:13pt;font-weight:bold}.qpc-subject{margin:1mm 0 0;font-size:12pt}.qpc-rule{display:flex;justify-content:space-between;gap:6mm;margin:3mm 0 4mm;padding:1.5mm 0;border-top:1px solid #111;border-bottom:1px solid #111;font-weight:bold}.qpc-foot{position:fixed;bottom:0;left:0;right:0;display:flex;justify-content:space-between;gap:6mm;padding-top:1.5mm;border-top:1px solid #555;font-size:9pt;color:#444}</style>
 <div class="qpc" style="direction:{{questionPaper.direction}}">
@@ -435,7 +437,7 @@ const questionPaperClassicTemplate = `<style>.qpc{font-family:'Noto Serif','Noto
     <h1>{{school.name}}</h1>
     {{#if school.location}}<p>{{school.location}}</p>{{/if}}
     <p class="qpc-exam">{{exam.name}} ({{session.startYear}}-{{session.endYear}})</p>
-    <p class="qpc-subject">{{questionPaper.className}} &middot; {{questionPaper.subjectName}} ({{questionPaper.modeName}})</p>
+    <p class="qpc-subject">{{questionPaper.className}} &middot; {{questionPaper.subjectName}}{{#if questionPaper.modeName}} ({{questionPaper.modeName}}){{/if}}</p>
   </header>
   <div class="qpc-rule">
     <span>{{#if questionPaper.timeAllowed}}Time: {{questionPaper.timeAllowed}}{{/if}}</span>
@@ -444,7 +446,7 @@ const questionPaperClassicTemplate = `<style>.qpc{font-family:'Noto Serif','Noto
   {{{questionPaper.bodyHtml}}}
   <footer class="qpc-foot">
     <span>{{school.name}}</span>
-    <span>{{exam.name}} - {{questionPaper.subjectName}}</span>
+    <span>{{#if exam.name}}{{exam.name}} - {{/if}}{{questionPaper.subjectName}}</span>
   </footer>
 </div>`;
 
@@ -459,7 +461,7 @@ const questionPaperCompactTemplate = `<style>.qpk{font-family:'Noto Sans','Noto 
   </header>
   <table class="qpk-meta">
     <tr><td><b>Examination:</b> {{exam.name}} ({{session.startYear}}-{{session.endYear}})</td><td><b>Class:</b> {{questionPaper.className}}</td></tr>
-    <tr><td><b>Subject:</b> {{questionPaper.subjectName}} ({{questionPaper.modeName}})</td><td>{{#if questionPaper.timeAllowed}}<b>Time:</b> {{questionPaper.timeAllowed}}{{/if}}</td></tr>
+    <tr><td><b>Subject:</b> {{questionPaper.subjectName}}{{#if questionPaper.modeName}} ({{questionPaper.modeName}}){{/if}}</td><td>{{#if questionPaper.timeAllowed}}<b>Time:</b> {{questionPaper.timeAllowed}}{{/if}}</td></tr>
     <tr><td colspan="2">{{#if questionPaper.maxMarks}}<b>Maximum marks:</b> {{questionPaper.maxMarks}}{{/if}}</td></tr>
   </table>
   {{{questionPaper.bodyHtml}}}

@@ -11,9 +11,9 @@ import { client, orpc } from '@/lib/orpc';
 import type { QuestionPaperScope } from './question-paper-model';
 
 /**
- * The paper a question paper screen works on (docs/personal-space.md): an exam
- * paper by its plan's key (`QuestionPaperScope`), or a standalone paper of a
- * personal space by its id. The two are told apart by their own fact, the
+ * The paper a question paper screen works on: an exam paper by its plan's key
+ * (`QuestionPaperScope`), or a standalone paper (a personal space's paper,
+ * docs/personal-space.md, or a school's quick paper) by its id. The two are told apart by their own fact, the
  * `paperId` a standalone target names, never by which other fields are set.
  *
  * Both kinds share the studio (photos, generation, chat, versions, preview,
@@ -38,13 +38,17 @@ type StandaloneDetail = z.infer<typeof standalonePaperDetailOutputSchema>;
 
 /**
  * The facts the studio reads about a paper, for either kind. An exam paper's
- * detail is one as it is. A standalone paper has no exam that could end and
- * no session that could stop being active, so its lock facts are
+ * detail is one as it is. A standalone paper has no exam that could end, and
+ * the server does not lock it with its session (a school's quick paper stays
+ * writable after its session is no longer the active one;
+ * docs/question-papers.md "Quick papers in a school"), so its lock facts are
  * `examCompleted: false` and `sessionActive: true` (nothing locks it but the
  * school's own read-only state, which the server refuses with its own
- * message); it has no plan, so `planMaxMarks` is null; and it needs no
- * template (`templateConfigured`). `details` is the standalone paper's own
- * details; null for an exam paper, whose names come from its plan.
+ * message); it has no plan, so `planMaxMarks` is null; and whether it can
+ * print is the server's `templateConfigured` (always for a personal space's
+ * plain paper, a selected template for a school's quick paper). `details` is
+ * the standalone paper's own details; null for an exam paper, whose names
+ * come from its plan.
  */
 export type StudioPaperFacts = {
   paperId: string | null;
@@ -64,7 +68,6 @@ export const studioDetailOfExam = (detail: ExamDetail): StudioDetail => ({ ...de
 /** A standalone paper's detail as the studio reads it (see {@link StudioPaperFacts}). */
 export const studioDetailOfStandalone = (detail: StandaloneDetail): StudioDetail => ({
   ...detail,
-  templateConfigured: true,
   paper: {
     paperId: detail.paper.paperId,
     pageCount: detail.paper.pageCount,
@@ -96,7 +99,11 @@ export function paperDetailQueryOptions(target: PaperTarget, refetchInterval?: (
   };
 }
 
-/** The school permission a personal space's papers need: to read them (`read`) or to change them and create new ones (`manage`). */
+/**
+ * The school permission standalone papers need: to read them (`read`) or to
+ * change them and create new ones (`manage`). Which papers it reaches (the
+ * person's own, or every one with `oversee`) is the server's decision.
+ */
 export function standalonePaperPermission(schoolId: string, kind: 'read' | 'manage'): PermissionCheck {
   return {
     action: kind === 'read' ? SCHOOL_ACTIONS.READ_STANDALONE_PAPERS : SCHOOL_ACTIONS.MANAGE_STANDALONE_PAPERS,

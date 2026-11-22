@@ -6,7 +6,7 @@ import { SCHOOL_ACTIONS, type PermissionCheck } from '@campuspilot/api/routers/a
 import { RequireFeature, useSchoolFeatureCheck } from '@/components/require-feature';
 import type { SchoolFeatureKey } from '@campuspilot/api/routers/school/feature-flags/feature-flags.dto';
 import { RequirePermissions } from '@/components/require-permissions';
-import type { AppShellNavigationDisclosure, AppShellNavigationEntry, AppShellNavigationItem } from '@campuspilot/components/app-shell';
+import type { AppShellNavigationEntry, AppShellNavigationItem } from '@campuspilot/components/app-shell';
 import {
   Files,
   ClipboardCheck,
@@ -40,8 +40,6 @@ import { SchoolDocumentHead } from '@/components/school-document-head';
 import { RealSchoolOnly } from '@/components/personal-space/school-kind-gates';
 import { SessionSwitcher } from '@/components/session-switcher';
 import { AssistantAccess } from '@/components/assistant/assistant-access';
-import { isQuestionPaperSectionPath } from '@/components/exam/exam-model';
-import { QuestionPaperNav } from '@/components/question-paper/question-paper-nav';
 import { admissionPage } from './admission/_route';
 import { assistantPage } from './assistant/_route';
 import { admissionDetailsPage } from './admission/[admissionId]/_route';
@@ -55,6 +53,7 @@ import {
 import { dashboardPage } from './sessions/[sessionId]/_route';
 import { examPage, examDetailsPage, questionPaperPages } from './sessions/[sessionId]/exam/_route';
 import { noticePages } from './sessions/[sessionId]/notices/_route';
+import { questionPapersPages } from './sessions/[sessionId]/question-papers/_route';
 import { notificationsPage } from './notifications/_route';
 import { staffPage } from './staff/_route';
 
@@ -69,6 +68,7 @@ const pages: ManagementPageDescriptor<any>[] = [
   staffPage,
   notificationsPage,
   ...noticePages,
+  ...questionPapersPages,
   admissionPage,
   admissionDetailsPage,
   classroomPage,
@@ -197,12 +197,8 @@ function navigationFor(
           wrap: children => <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.READ_EXAMS, resource: { kind: 'school', schoolId } }}>{children}</RequirePermissions>,
           href: sessionHref('/exam'),
           icon: ClipboardCheck,
-          // The Question paper section highlights its own entry below instead.
-          isActive: (path) =>
-            (path === sessionHref('/exam') || path.startsWith(`${sessionHref('/exam')}/`)) &&
-            !(sessionId && isQuestionPaperSectionPath(path, sessionHref())),
         },
-        ...(sessionId ? [questionPapersEntry(schoolId, sessionId, sessionHref())] : []),
+        ...(sessionId ? [questionPapersEntry(schoolId, sessionHref('/question-papers'))] : []),
       ],
     },
     // Shown when the school has at least one of its items' features, so the
@@ -230,28 +226,26 @@ function navigationFor(
 }
 
 /**
- * The sidebar's Question papers entry: it opens in place to the session's
- * examinations and then their classes (`QuestionPaperNav`), a fold rather
- * than popovers so the same steps work in the desktop sidebar and the mobile
- * sheet. Left out without a selected session. Its gates are separate facts,
- * each checked on its own: `READ_EXAMS` (as Examinations), `READ_EXAM_PLANS`
- * (what the Question paper tab needs) and the assistant (question papers are
- * part of the `assistant` feature, so the entry shows only where the tab does).
+ * The sidebar's Question papers entry: the session's Question papers page
+ * (docs/question-papers.md "The Question papers page"), the quick papers and
+ * the session's exam papers in one list. Left out without a selected session
+ * (the page is a session's). Its gates are separate facts, each checked on its
+ * own: `MANAGE_STANDALONE_PAPERS`, because the entry is for the people who
+ * write question papers (someone who cannot create one, an accountant, is not
+ * offered it; the page itself still answers anyone its procedures serve), and
+ * the assistant (question papers are part of the `assistant` feature, so the
+ * entry shows only where the school has AI and the person's role may use it).
+ * An exam's own Question paper pages stay under Examinations.
  */
-function questionPapersEntry(schoolId: string, sessionId: string, sessionBase: string): AppShellNavigationDisclosure {
+function questionPapersEntry(schoolId: string, href: string): AppShellNavigationItem {
   return {
-    type: 'disclosure',
+    type: 'item',
     id: 'question-papers',
     label: 'Question papers',
+    href,
     icon: NotebookPen,
-    isActive: (path) => isQuestionPaperSectionPath(path, sessionBase),
-    content: <QuestionPaperNav schoolId={schoolId} sessionId={sessionId} />,
     wrap: (children) => (
-      <RequirePermissions
-        permissions={[SCHOOL_ACTIONS.READ_EXAMS, SCHOOL_ACTIONS.READ_EXAM_PLANS].map(
-          (action) => ({ action, resource: { kind: 'school', schoolId } }) as PermissionCheck,
-        )}
-      >
+      <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.MANAGE_STANDALONE_PAPERS, resource: { kind: 'school', schoolId } }}>
         <AssistantAccess schoolId={schoolId}>{children}</AssistantAccess>
       </RequirePermissions>
     ),

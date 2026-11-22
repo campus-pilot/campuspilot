@@ -1,4 +1,9 @@
-import { QUESTION_PAPER_DETAIL_MAX_CHARS, normalizeQuestionPaperDetail } from '@campuspilot/question-paper/details';
+import {
+  QUESTION_PAPER_DETAIL_MAX_CHARS,
+  QUESTION_PAPER_DETAIL_MAX_MARKS,
+  normalizeQuestionPaperDetail,
+  normalizeQuestionPaperMaxMarks,
+} from '@campuspilot/question-paper/details';
 import { z } from 'zod';
 
 import { createListInputSchema, createPaginatedOutputSchema } from '../../../paginations';
@@ -25,8 +30,10 @@ import {
 } from '../question-paper/question-paper.dto';
 
 /**
- * The contract of standalone question papers (docs/personal-space.md): the
- * papers of a personal space, with no session, exam, class, subject or mode.
+ * The contract of standalone question papers: the papers of a personal space
+ * (docs/personal-space.md) and a real school's quick papers
+ * (docs/question-papers.md "Quick papers in a school"), with no exam, class,
+ * subject or mode.
  * Every input is flat (`{ schoolId, paperId, ... }`) so MCP clients and the
  * assistant can call the tools directly. The page, draft and version shapes
  * are the exam paper tools' own: only the key differs.
@@ -36,7 +43,7 @@ const id = z.string().trim().min(1).max(100);
 
 /** One standalone paper: its school and its id (from listStandalonePapers or createStandalonePaper). */
 export const standalonePaperRefSchema = z.object({
-  schoolId: id.describe('School id of the personal space.'),
+  schoolId: id.describe('School id (a school or a personal space).'),
   paperId: id.describe('Question paper id from listStandalonePapers or createStandalonePaper.'),
 });
 export type StandalonePaperRef = z.infer<typeof standalonePaperRefSchema>;
@@ -54,9 +61,22 @@ const detailInput = (what: string) =>
     .describe(`${what} exactly as the paper prints it, or null when the paper does not state it. At most ${QUESTION_PAPER_DETAIL_MAX_CHARS} characters are kept.`);
 
 /**
+ * The maximum marks as a writer sends them: a whole number (or text that is
+ * only one), kept when it is from 1 to the cap and null otherwise, never
+ * refused, like the names.
+ */
+const maxMarksInput = z
+  .union([z.number(), z.string().max(20)])
+  .nullable()
+  .transform((value) => normalizeQuestionPaperMaxMarks(value))
+  .describe(
+    `The paper's maximum marks as a whole number exactly as it states them, or null when it states none. Never add up the questions' marks. A value that is not a whole number from 1 to ${QUESTION_PAPER_DETAIL_MAX_MARKS} is kept as null.`,
+  );
+
+/**
  * The details a saved version states (school, class, subject and exam names
- * the paper prints). Every save sends all four: they are not revisioned, so
- * the save replaces what the paper had with exactly these.
+ * and maximum marks the paper states). Every save sends all five: they are
+ * not revisioned, so the save replaces what the paper had with exactly these.
  */
 export const standalonePaperDetailsInputSchema = z
   .object({
@@ -64,17 +84,19 @@ export const standalonePaperDetailsInputSchema = z
     className: detailInput('The class (for example "Class 5" or "VII-B")'),
     subjectName: detailInput('The subject'),
     examName: detailInput('The examination (for example "Half Yearly Examination 2026")'),
+    maxMarks: maxMarksInput,
   })
   .describe(
-    'What the paper itself prints about its school, class, subject and examination. Every save replaces all four with these, so send all of them each time, updated whenever the paper changes one of them.',
+    "What the paper states about its school, class, subject, examination and maximum marks. Every save replaces all five with these, so send all of them each time, updated whenever the paper changes one of them. In a school, the school's template prints the class, subject, examination and maximum marks from them.",
   );
 
-/** The four details as they are read back. */
+/** The five details as they are read back. */
 export const standalonePaperDetailsSchema = z.object({
   schoolName: z.string().nullable(),
   className: z.string().nullable(),
   subjectName: z.string().nullable(),
   examName: z.string().nullable(),
+  maxMarks: z.number().int().nullable(),
 });
 export type StandalonePaperDetailsDto = z.infer<typeof standalonePaperDetailsSchema>;
 
@@ -85,7 +107,7 @@ export type StandalonePaperDetailsDto = z.infer<typeof standalonePaperDetailsSch
  */
 export { STANDALONE_PAPERS_PER_SPACE_LIMIT } from '../../../personal-space/personal-space.limits';
 
-export const createStandalonePaperInputSchema = z.object({ schoolId: id.describe('School id of the personal space.') });
+export const createStandalonePaperInputSchema = z.object({ schoolId: id.describe('School id (a school or a personal space).') });
 export const createStandalonePaperOutputSchema = z.object({
   paperId: z.string(),
   /** An unused paper the space already had was returned instead of a new one (`createStandalonePaper`). */
@@ -104,7 +126,7 @@ export const standalonePaperFiltersSchema = z
 export type StandalonePaperFilters = z.infer<typeof standalonePaperFiltersSchema>;
 
 export const listStandalonePapersInputSchema = createListInputSchema({
-  schoolId: id.describe('School id of the personal space.'),
+  schoolId: id.describe('School id (a school or a personal space).'),
   searchQuery: z.string().trim().max(100).default('').describe('Matches any of the four details.'),
   filters: standalonePaperFiltersSchema.describe('Exact values from listStandalonePaperFilterOptions.'),
 });
@@ -126,7 +148,7 @@ export const standalonePaperListItemSchema = z.object({
 export type StandalonePaperListItemDto = z.infer<typeof standalonePaperListItemSchema>;
 export const listStandalonePapersOutputSchema = createPaginatedOutputSchema(standalonePaperListItemSchema);
 
-export const listStandalonePaperFilterOptionsInputSchema = z.object({ schoolId: id.describe('School id of the personal space.') });
+export const listStandalonePaperFilterOptionsInputSchema = z.object({ schoolId: id.describe('School id (a school or a personal space).') });
 /** The distinct details of the school's own papers, sorted: what the list's filters offer. */
 export const listStandalonePaperFilterOptionsOutputSchema = z.object({
   schoolNames: z.array(z.string()),
@@ -138,6 +160,8 @@ export const listStandalonePaperFilterOptionsOutputSchema = z.object({
 /** The facts of one standalone paper, the `paper` block of its reads. */
 export const standalonePaperFactsSchema = z.object({
   paperId: z.string(),
+  /** How the paper prints: with the school's template (a school's quick paper), or on the plain page (a personal space's). */
+  printLayout: z.enum(['school_template', 'plain']),
   details: standalonePaperDetailsSchema,
   pageCount: z.number().int(),
   pageRevision: z.number().int(),
@@ -145,13 +169,17 @@ export const standalonePaperFactsSchema = z.object({
 });
 
 /**
- * What a standalone paper's plain page prints around its body: always two
- * empty lists (known to print nothing), so the whole heading of the source
- * belongs in the paper.
+ * What is printed around a standalone paper's body (`readTemplatePrints`): two
+ * empty lists on a personal space's plain page (so the whole heading of the
+ * source belongs in the paper); the school template's lines for a quick paper,
+ * or null when they are not known (no template selected, or it does not
+ * render), as for an exam paper.
  */
-const standaloneTemplatePrintsField = templatePrintsSchema.describe(
-  'What is printed around the paper: always nothing for a standalone paper, so write its whole heading (school, examination, class, subject, time, marks, instructions) yourself.',
-);
+const standaloneTemplatePrintsField = templatePrintsSchema
+  .nullable()
+  .describe(
+    "The text lines printed around the paper. Both lists empty (a personal space): nothing is printed, so write the paper's whole heading yourself. Lines (a school's quick paper): the school's template prints them as heading and footer, a value in square brackets being a detail the paper does not state yet; leave every fact they print out of the fragment. Null: not known (no question paper template selected).",
+  );
 
 export const getStandalonePaperInputSchema = standalonePaperRefSchema.extend({
   versionNo: z.number().int().min(1).optional().describe('A saved version; the latest when omitted.'),
@@ -173,6 +201,12 @@ export const standalonePaperDetailOutputSchema = z.object({
   versions: z.array(versionSummarySchema),
   /** The paper's most recently active conversation shared with it; null when it has none. */
   latestConversationId: z.string().nullable(),
+  /**
+   * Whether the paper can print: always for a plain paper; for a quick paper,
+   * whether the school has selected a question paper template (generating and
+   * saving are refused until it has), as on an exam paper's screen.
+   */
+  templateConfigured: z.boolean(),
 });
 
 export const getStandalonePaperDraftInputSchema = getQuestionPaperDraftInputSchema.omit(examKeyFields).extend(standalonePaperRefSchema.shape);
@@ -233,4 +267,4 @@ export const deleteStandalonePaperPageInputSchema = deletePageInputSchema.omit(e
 export const rotateStandalonePaperPageInputSchema = rotatePageInputSchema.omit(examKeyFields).extend(standalonePaperRefSchema.shape);
 export const standalonePaperVersionNoInputSchema = versionNoInputSchema.omit(examKeyFields).extend(standalonePaperRefSchema.shape);
 export const standalonePaperDownloadInputSchema = standalonePaperVersionNoInputSchema.extend({ format: downloadFormatSchema });
-export const learnStandalonePaperInputSchema = z.object({ schoolId: id.describe('School id of the personal space.') });
+export const learnStandalonePaperInputSchema = z.object({ schoolId: id.describe('School id (a school or a personal space).') });

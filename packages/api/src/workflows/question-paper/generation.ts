@@ -13,14 +13,16 @@ import { SCHOOL_SUSPENDED_REASON, schoolWriteRefusalMessageOf } from '../../scho
 import { readSchoolWriteFacts, resolveSchoolWriteRefusal, schoolKindForRefusal } from '../../school-access/school-access.service';
 import type { PaperKey, TemplatePrints } from '../../routers/school/question-paper/question-paper.dto';
 import { hasSelectedQuestionPaperTemplate } from '../../routers/school/question-paper/question-paper.render';
+import { currentQuickPaperPrintedDetails, isQuickPaperNoActiveSessionError } from '../../routers/school/question-paper/question-paper.print-context';
 import { readTemplatePrints } from '../../routers/school/question-paper/question-paper.template-prints';
 import {
   assertPaperWritable,
   isPaperLockedError,
   isPlanModeRemovedError,
+  findStandalonePaperScope,
   isStandalonePaper,
+  printLayoutOf,
   resolvePaperScope,
-  resolveStandalonePaper,
   type ResolvedPaper,
 } from '../../routers/school/question-paper/question-paper.scope';
 import { examKeyPart } from '../../routers/school/question-paper/question-paper.records';
@@ -434,8 +436,9 @@ async function planInputs(deps: GenerationDeps, begun: BegunJob, model: Question
   let scope: ResolvedPaper;
   try {
     if (isStandaloneJob(begun) || begun.key === null) {
-      // A standalone paper has no plan, session or exam to lock: the paper itself must still exist in its school.
-      scope = await resolveStandalonePaper(db, { schoolId: begun.schoolId, paperId: begun.paperId });
+      // A standalone paper has no plan or exam to lock: the paper itself must still exist in its school. The job runs
+      // for a person whose permission the start procedure checked, so the paper is read without a reach check.
+      scope = await findStandalonePaperScope(db, { schoolId: begun.schoolId, paperId: begun.paperId });
     } else {
       const exam = await resolvePaperScope(db, begun.key);
       assertPaperWritable(exam);
@@ -445,8 +448,19 @@ async function planInputs(deps: GenerationDeps, begun: BegunJob, model: Question
     if (error instanceof ORPCError) throw new QuestionPaperJobFailure('paper_locked', undefined, `${error.status}: ${error.message}`);
     throw error;
   }
-  // A standalone paper prints in the built-in plain shell: no template is needed, and it prints nothing around the body.
-  if (!isStandalonePaper(scope) && !(await hasSelectedQuestionPaperTemplate(db, begun.schoolId))) throw new QuestionPaperJobFailure('template_missing');
+  // A plain paper (a personal space's) prints in the built-in shell: no template is needed, and it prints nothing around
+  // the body. Every other paper, a school's quick paper included, prints with the school's selected template.
+  if (printLayoutOf(scope) !== 'plain' && !(await hasSelectedQuestionPaperTemplate(db, begun.schoolId))) throw new QuestionPaperJobFailure('template_missing');
+  // A quick paper's heading prints the school's active session: without one the version could not be saved, so the
+  // job ends here, before any model cost (the start procedure refused it too; this covers a school that lost it since).
+  if (isStandalonePaper(scope) && printLayoutOf(scope) === 'school_template') {
+    try {
+      await currentQuickPaperPrintedDetails(db, scope);
+    } catch (error) {
+      if (isQuickPaperNoActiveSessionError(error)) throw new QuestionPaperJobFailure('no_active_session', undefined, (error as Error).message);
+      throw error;
+    }
+  }
 
   const rows = await db
     .select()
@@ -474,7 +488,7 @@ async function planInputs(deps: GenerationDeps, begun: BegunJob, model: Question
   }
   return {
     scope,
-    templatePrints: isStandalonePaper(scope) ? STANDALONE_QUESTION_PAPER_PRINTS : await readTemplatePrints(db, scope),
+    templatePrints: await readTemplatePrints(db, scope),
     pages: stored.map((page): PlannedPage => ({
       id: page.id,
       position: page.position,
@@ -572,7 +586,12 @@ async function callModel({
     parts ??
     buildGenerationParts(
       isStandalonePaper(plan.scope)
-        ? { kind: 'standalone', templatePrints: templatePrintsOfPlan(plan) ?? STANDALONE_QUESTION_PAPER_PRINTS }
+        ? {
+            kind: 'standalone',
+            // A plain page prints nothing (a plan journaled before the lines were journaled has none); a quick paper's
+            // unknown lines stay unknown.
+            templatePrints: printLayoutOf(plan.scope) === 'plain' ? (templatePrintsOfPlan(plan) ?? STANDALONE_QUESTION_PAPER_PRINTS) : templatePrintsOfPlan(plan),
+          }
         : {
             className: plan.scope.className,
             subjectName: plan.scope.subjectName,
@@ -600,7 +619,11 @@ async function callModel({
     let result: TextResult;
     try {
       result = await model.generate({
-        system: questionPaperJobSystemPrompt(instructions, { redrawFigures, standalone: isStandalonePaper(plan.scope) }),
+        system: questionPaperJobSystemPrompt(instructions, {
+          redrawFigures,
+          standalone: isStandalonePaper(plan.scope),
+          schoolTemplate: printLayoutOf(plan.scope) === 'school_template',
+        }),
         parts: requestParts,
         maxOutputTokens: deps.maxOutputTokens,
       });
@@ -698,7 +721,7 @@ async function validateAnswer(deps: GenerationDeps, plan: Plan, text: string, op
 
 /** The repair problem of a standalone paper's answer without a readable details block. */
 export const DETAILS_MISSING_PROBLEM =
-  'The answer has no readable paper-details block. After the fragment, add the fenced block labelled paper-details with one JSON object: schoolName, className, subjectName and examName as the paper prints them, each null when the paper does not state it.';
+  'The answer has no readable paper-details block. After the fragment, add the fenced block labelled paper-details with one JSON object: schoolName, className, subjectName and examName as the paper prints them, and maxMarks as a whole number, each null when the paper does not state it.';
 
 /** Saves the version through the one function chat uses; idempotent per job id. */
 async function savePaper(deps: GenerationDeps, input: QuestionPaperJobInput, begun: BegunJob, plan: Plan, html: string, details: QuestionPaperDetails | 'keep' | undefined) {
@@ -725,6 +748,8 @@ async function savePaper(deps: GenerationDeps, input: QuestionPaperJobInput, beg
     const limit = personalSpaceLimitOf(error);
     if (limit === 'storage') throw new QuestionPaperJobFailure('storage_full', undefined, (error as Error).message);
     if (limit === 'versions') throw new QuestionPaperJobFailure('version_limit', undefined, (error as Error).message);
+    // A quick paper prints the school's active session: the school has none any more (checked when the job started).
+    if (isQuickPaperNoActiveSessionError(error)) throw new QuestionPaperJobFailure('no_active_session', undefined, (error as Error).message);
     if (error instanceof ORPCError && error.code === 'BAD_REQUEST') {
       // Four different BAD_REQUESTs reach here: the paper was locked meanwhile (session or exam ended), the plan lost the
       // paper's mode meanwhile, the document failed the shared check, or the render refused it (too large or too complex).

@@ -53,12 +53,14 @@ import {
   type PageRow,
   type PaperRow,
 } from './question-paper.records';
+import { currentQuickPaperPrintedDetails } from './question-paper.print-context';
 import { hasSelectedQuestionPaperTemplate } from './question-paper.render';
 import {
   assertResolvedPaperWritable,
   assertResolvedPaperWritableLocked,
   isStandalonePaper,
   paperSchoolIdOf,
+  printLayoutOf,
   type PaperScope,
   type ResolvedPaper,
 } from './question-paper.scope';
@@ -1048,8 +1050,11 @@ export async function startQuestionPaperGeneration(
   assertResolvedPaperWritable(scope);
   const model = getQuestionPaperModel();
   if (!model) throw providerUnavailableError();
-  // A standalone paper prints in the built-in plain shell: it needs no template.
-  if (!isStandalonePaper(scope) && !(await hasSelectedQuestionPaperTemplate(db, scope.key.schoolId))) throw templateMissingError();
+  // A plain paper (a personal space's) prints in the built-in shell: it needs no template. Every other paper, a quick
+  // paper of a school included, prints with the school's selected template.
+  if (printLayoutOf(scope) !== 'plain' && !(await hasSelectedQuestionPaperTemplate(db, paperSchoolIdOf(scope)))) throw templateMissingError();
+  // A quick paper's heading prints the school's active session: refused now, before any model cost, without one.
+  if (isStandalonePaper(scope) && printLayoutOf(scope) === 'school_template') await currentQuickPaperPrintedDetails(db, scope);
   const jobId = await db.transaction(async (tx) => {
     await assertResolvedPaperWritableLocked(tx, scope);
     const paper = await lockPaperOf(tx, scope).catch((error: unknown) => {
@@ -1065,7 +1070,8 @@ export async function startQuestionPaperGeneration(
     if (await activeJobOf(tx, paper.id)) throw rpcError.conflict('A generation is already running for this paper.');
     await assertSchoolJobCapacity(tx, paperSchoolIdOf(scope));
     if (isStandalonePaper(scope)) {
-      // The job saves a version and its PDF: refused now, before any model cost, when it could not be saved.
+      // The job saves a version and its PDF: refused now, before any model cost, when it could not be saved (a
+      // personal space's limits; both return at once for a real school, which has none).
       await assertStandaloneVersionRoom(tx, { schoolId: paperSchoolIdOf(scope), paperId: paper.id, countsTowardRate: false, lock: true });
       await assertPersonalSpaceStorageRoom(tx, { schoolId: paperSchoolIdOf(scope), addedBytes: 0, lock: true });
     }

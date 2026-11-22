@@ -38,14 +38,14 @@ vi.mock('../../../workflows/image-derivatives/outbox', async (importOriginal) =>
 
 const { 'english-science': ENGLISH_SCIENCE } = QUESTION_PAPER_EXAMPLES;
 
-const DETAILS = { schoolName: 'Sunrise Public School', className: 'Class 8', subjectName: 'Science', examName: 'Half Yearly Examination' };
+const DETAILS = { schoolName: 'Sunrise Public School', className: 'Class 8', subjectName: 'Science', examName: 'Half Yearly Examination', maxMarks: 80 };
 
 describe('standalone question papers', () => {
   it('creates a paper, saves versions with their details and lists, filters and searches by them', async () => {
     const { client, schoolId } = await personalSpaceOwner();
     const { paperId } = await client.school.createStandalonePaper({ schoolId });
     const empty = await client.school.getStandalonePaper({ schoolId, paperId });
-    expect(empty).toMatchObject({ paper: { paperId, latestVersionNo: 0, details: { schoolName: null, className: null, subjectName: null, examName: null } }, version: null });
+    expect(empty).toMatchObject({ paper: { paperId, latestVersionNo: 0, details: { schoolName: null, className: null, subjectName: null, examName: null, maxMarks: null } }, version: null });
     // The plain page prints nothing, and that is known: two empty lists, never null.
     expect(empty.templatePrints).toEqual({ above: [], below: [] });
 
@@ -53,23 +53,23 @@ describe('standalone question papers', () => {
     expect(saved).toMatchObject({ versionNo: 1, paperId, hasPdf: true });
     expect(saved).not.toHaveProperty('planMaxMarks');
     const [paper] = await db.select().from(examQuestionPaperTable).where(eq(examQuestionPaperTable.id, paperId));
-    expect(paper).toMatchObject({ kind: 'standalone', sessionId: null, examSlug: null, classId: null, detailsSchoolName: 'Sunrise Public School', detailsClassName: 'Class 8' });
+    expect(paper).toMatchObject({ kind: 'standalone', sessionId: null, examSlug: null, classId: null, detailsSchoolName: 'Sunrise Public School', detailsClassName: 'Class 8', detailsMaxMarks: 80, printLayout: 'plain' });
     const [version] = await db.select().from(examQuestionPaperVersionTable).where(eq(examQuestionPaperVersionTable.paperId, paperId));
-    expect(version).toMatchObject({ paperKind: 'standalone', templateRevisionId: null, planMaxMarks: null });
+    expect(version).toMatchObject({ paperKind: 'standalone', paperPrintLayout: 'plain', templateRevisionId: null, planMaxMarks: null });
     const [artifact] = await db.select().from(artifactTable).where(eq(artifactTable.id, version!.pdfArtifactId!));
     expect(artifact).toMatchObject({ templateRevisionId: null, sessionId: null, classId: null, name: 'Question paper: Science - Class 8 - Half Yearly Examination - v1' });
 
-    // Not revisioned: the next save's details replace all four (a detail it leaves out is null).
+    // Not revisioned: the next save's details replace all five (a detail it leaves out is null).
     const edited = await client.school.editStandalonePaper({
       schoolId,
       paperId,
       expectedVersionNo: 1,
       edits: [{ find: 'All questions are compulsory.', replace: 'All questions are compulsory. Class 9.' }],
-      details: { schoolName: DETAILS.schoolName, className: 'Class 9', subjectName: 'Science', examName: null },
+      details: { schoolName: DETAILS.schoolName, className: 'Class 9', subjectName: 'Science', examName: null, maxMarks: null },
     });
     expect(edited.versionNo).toBe(2);
     const detail = await client.school.getStandalonePaperDetail({ schoolId, paperId });
-    expect(detail.paper.details).toEqual({ schoolName: DETAILS.schoolName, className: 'Class 9', subjectName: 'Science', examName: null });
+    expect(detail.paper.details).toEqual({ schoolName: DETAILS.schoolName, className: 'Class 9', subjectName: 'Science', examName: null, maxMarks: null });
     expect(detail.versions.map((row) => row.versionNo)).toEqual([2, 1]);
 
     const other = await client.school.createStandalonePaper({ schoolId });
@@ -104,7 +104,7 @@ describe('standalone question papers', () => {
 
     // At the cap, nothing more is created.
     await db.insert(examQuestionPaperTable).values(
-      Array.from({ length: STANDALONE_PAPERS_PER_SPACE_LIMIT - 2 }, () => ({ schoolId, kind: 'standalone' as const, latestVersionNo: 1 })),
+      Array.from({ length: STANDALONE_PAPERS_PER_SPACE_LIMIT - 2 }, () => ({ schoolId, kind: 'standalone' as const, printLayout: 'plain' as const, latestVersionNo: 1 })),
     );
     await expect(client.school.createStandalonePaper({ schoolId })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });

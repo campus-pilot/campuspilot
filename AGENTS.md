@@ -144,7 +144,10 @@ Cadet visibility rule, and the checklist for extending notices.
 ## Question papers
 
 Before changing anything question-paper-related (the `exam_question_paper_*`
-tables, `routers/school/question-paper` and its MCP tools, the HTML fragment
+tables, `routers/school/question-paper` and its MCP tools, a school's quick
+papers (standalone papers of a real school, their `print_layout`, printed
+heading snapshot, details and `school.standalone_paper.oversee`), the Question papers page and
+its sidebar entry, the HTML fragment
 rules and limits in `packages/question-paper`, the `question_paper_body`
 sanitiser, the renderer and the `question_paper`
 document type and its template slot, the durable generation job in
@@ -158,8 +161,10 @@ no-animation rule, the renderer contract with its deliberate CSP and
 post-sanitiser insertion exceptions, the Word (.docx) download (made on a
 version's first Word download by the Pandoc service, `PANDOC_URL`, stored as a
 `docx` artifact, one way only), the job's steps and failure codes,
-how chat attachments, tools, drafts and context pruning work, and the checklist
-for extending papers.
+how chat attachments, tools, drafts and context pruning work, quick papers
+(printed with the school's template, reached by their creator or with
+`oversee`, none of a personal space's limits, only with AI), the Question
+papers page, and the checklist for extending papers.
 
 ## Performance logs
 
@@ -249,7 +254,8 @@ Before changing who gets a personal space (`school.kind = 'personal'`, the
 Google sign-up hook, `personalSpace.*`), the school kind gate (`schoolKinds`
 in procedure metadata, `requireAuth`, `assertSchoolKindServedByCaller`),
 standalone question papers (`exam_question_paper.kind = 'standalone'`, their
-details, procedures, plain shell and job branch), the personal space screens
+details, procedures, plain shell and job branch; a real school's are its quick
+papers, see the Question papers guide), the personal space screens
 in `apps/management`, or before letting another procedure serve personal
 spaces, read [Personal space](docs/personal-space.md). A procedure serves
 real schools only unless it says otherwise, reads included; the eligibility

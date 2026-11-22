@@ -181,33 +181,40 @@ export function buildLearnPayload() {
 }
 
 /**
- * Where a standalone paper (a personal space's, docs/personal-space.md)
- * prints, for the chat guide: on a plain page with nothing of its own. The
- * shared rule is the same text as for an exam paper; its lists are empty.
+ * Where a standalone paper prints, for the chat guide. It depends on the
+ * paper, and getStandalonePaper's `templatePrints` says which: a personal
+ * space's paper prints on a plain page with nothing of its own (both lists
+ * empty, docs/personal-space.md); a school's quick paper prints with the
+ * school's template like an exam paper (docs/question-papers.md "Quick papers
+ * in a school"), whose lines show a detail the paper does not state yet as a
+ * placeholder in square brackets. The shared rule is the same text as for an
+ * exam paper.
  */
 export const STANDALONE_QUESTION_PAPER_CHAT_PRINT_RULES = `## Where this paper prints
-- This paper belongs to the user's personal space, not to a school's examination: it prints on a plain A4 page that adds NOTHING above or below your fragment (no school name, logo, heading or footer). Where the rules below speak of "the school's template", for this paper it prints nothing. getStandalonePaper returns templatePrints with both lists empty.
-- So write the paper's whole heading yourself, as the first lines of the fragment: the school's name and address, the examination, the class, the subject, the time allowed, the maximum marks, the date, the blanks for name and roll number and the general instructions, exactly as your source has them (or as the user asks).
+- Read templatePrints from getStandalonePaper (and getStandalonePaperDraft) before you write: it is the text printed around your fragment, "above" it and "below" it. "Your source" below is whatever you write the paper from: photographs, a PDF, a saved paper or the user's description.
+- Both lists empty: the paper belongs to the user's personal space and prints on a plain A4 page that adds NOTHING above or below your fragment (no school name, logo, heading or footer). Write the paper's whole heading yourself, as the first lines of the fragment: the school's name and address, the examination, the class, the subject, the time allowed, the maximum marks, the date, the blanks for name and roll number and the general instructions, exactly as your source has them (or as the user asks).
+- Lines in the lists: the paper is a quick paper of a school and prints with the school's template, which prints those lines as its heading and footer. The class, subject, examination and maximum marks in them come from the paper's details (see "The paper's details"); a value in square brackets, such as [class] or [maximum marks], is a detail the paper does not state yet, which the template prints once a save sends it. A line with a value or a placeholder already prints that fact: leave it out of the fragment.
+- templatePrints null: the lines are not known (for example the school has not selected a question paper template yet): ${QUESTION_PAPER_TEMPLATE_PRINTS_UNKNOWN_RULE}.
 ${QUESTION_PAPER_TEMPLATE_PRINTS_RULES}`;
 
 /** The paper's details: what every save of a standalone paper sends. */
 export const STANDALONE_QUESTION_PAPER_DETAILS_RULES = `## The paper's details
-- Every save (saveStandalonePaperVersion and editStandalonePaper) sends details: the school's name, the class, the subject and the examination exactly as the paper prints them in its heading, each null when the paper does not state it. They are how the user finds the paper in their list. Never invent one.
-- The details are not kept per version: each save replaces all four with what it sends. So send all four every time, read from the paper as it will be saved.
-- Whenever the user changes the school, class, subject or examination in the paper ("make it for class 7", "rename the exam to Unit Test 2"), change the heading in the html AND send the new value in details in the same save.`;
+- Every save (saveStandalonePaperVersion and editStandalonePaper) sends details: the school's name, the class, the subject, the examination and the maximum marks (a whole number) exactly as the paper states them, each null when it does not state it. They are how the user finds the paper in their list, and for a school's quick paper they are what the school's template prints in the heading. Never invent one, and never add up the questions' marks to get the maximum.
+- The details are not kept per version: each save replaces all five with what it sends. So send all five every time, read from the paper as it will be saved.
+- Whenever the user changes the school, class, subject, examination or maximum marks ("make it for class 7", "rename the exam to Unit Test 2"), send the new value in details in the same save, and change it in the html too where the fragment prints it (a personal space's heading).`;
 
 /**
  * The guide of the standalone paper tools: the same rules and vocabulary as
  * {@link QUESTION_PAPER_GUIDE}, with the standalone tools in the workflow, the
  * plain page instead of a school's template, and the details every save sends.
  */
-export const STANDALONE_QUESTION_PAPER_GUIDE = `# Writing a standalone question paper
+export const STANDALONE_QUESTION_PAPER_GUIDE = `# Writing a quick question paper
 
 ${QUESTION_PAPER_NO_MOTION_RULE}
 
 ## Workflow
-1. Call getStandalonePaper for the paper, also for a new paper that has no version yet: it returns the paper's details and, for an existing paper, the fragment's html. Read the attached images and PDFs. In a chat shared with the paper, its photographed pages are shown to you before the first message ("[Page 1 of 3 of this question paper as photographed ...]"): they are the source, so copy what they show rather than what the answer should be. With no attachment and no saved paper, the user is asking you to create a paper from a description: write the questions yourself (step 2), with a heading that states the school, class, subject and examination they gave.
-2. Write the WHOLE paper as an HTML fragment, heading included (see "Where this paper prints"), following the rules below and the example returned with this guide.
+1. Call getStandalonePaper for the paper, also for a new paper that has no version yet: it returns the paper's details, templatePrints (see "Where this paper prints") and, for an existing paper, the fragment's html. Read the attached images and PDFs. In a chat shared with the paper, its photographed pages are shown to you before the first message ("[Page 1 of 3 of this question paper as photographed ...]"): they are the source, so copy what they show rather than what the answer should be. With no attachment and no saved paper, the user is asking you to create a paper from a description: write the questions yourself (step 2), with the school, class, subject, examination and marks they gave in the heading and the details.
+2. Write the paper as an HTML fragment (on a plain page with its whole heading, with a school's template without the lines it prints; see "Where this paper prints"), following the rules below and the example returned with this guide. Before you validate it, read its first lines against templatePrints and remove any that repeats one.
 3. Call validateStandalonePaperDraft with the html until it reports valid. Fix every problem it lists. "stripped" lists what the sanitiser removed from your html: fix your html so nothing is stripped, or tell the user.
 4. In the in-app chat, save a valid draft straight away (step 5): do not ask the user whether to save. They see the draft as a preview card and then the saved version, and the previous version stays. Other clients save only when the user asks.
 5. To save, call saveStandalonePaperVersion with the draftId from the validate result (in-app chat) or the full html (other clients), expectedVersionNo from getStandalonePaper, and the paper's details (see "The paper's details"). Saving always creates a new version. Then tell the user in one or two sentences what the version contains or what changed. To show a saved version (with Preview and Download), use the show_view tool with a standalone_question_paper view: its paperId and versionNo.

@@ -1,5 +1,5 @@
 import type { DatabaseExecutor } from '@campuspilot/db';
-import { DEFAULT_SCHOOL_KINDS, type SchoolKind } from '@campuspilot/db/school-kind';
+import { DEFAULT_SCHOOL_KINDS, SCHOOL_KINDS, type SchoolKind } from '@campuspilot/db/school-kind';
 import { getSchoolKind } from '@campuspilot/db/school-kind-store';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
@@ -37,8 +37,12 @@ import { assertSchoolWritableByCaller } from './school-access.service';
 /** The kinds an upload route of real-school data serves (admissions, the logo, exam question papers). */
 export const REAL_SCHOOLS_ONLY: readonly SchoolKind[] = DEFAULT_SCHOOL_KINDS;
 
-/** The kinds an upload route of personal space data serves (standalone question papers). */
-export const PERSONAL_SPACES_ONLY: readonly SchoolKind[] = ['personal'];
+/**
+ * The kinds an upload route serves that holds the data of either kind:
+ * standalone question papers (a personal space's papers, a real school's quick
+ * papers; docs/question-papers.md "Quick papers in a school").
+ */
+export const EVERY_SCHOOL_KIND: readonly SchoolKind[] = SCHOOL_KINDS;
 
 /** The kinds a procedure serves: its own `schoolKinds`, or real schools only when it declares none. */
 export function servedSchoolKinds(declared: readonly SchoolKind[] | undefined): readonly SchoolKind[] {

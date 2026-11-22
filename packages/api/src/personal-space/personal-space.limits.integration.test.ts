@@ -43,7 +43,7 @@ vi.mock('../workflows/question-paper/restate', () => ({
 /** The limits of a personal space (docs/personal-space.md "Limits"). */
 
 const { 'english-science': ENGLISH_SCIENCE } = QUESTION_PAPER_EXAMPLES;
-const DETAILS = { schoolName: 'Sunrise Public School', className: 'Class 8', subjectName: 'Science', examName: 'Half Yearly Examination' };
+const DETAILS = { schoolName: 'Sunrise Public School', className: 'Class 8', subjectName: 'Science', examName: 'Half Yearly Examination', maxMarks: null };
 
 type Owner = GoogleNewcomer & { schoolId: string };
 
@@ -86,6 +86,7 @@ async function addVersions(owner: Owner, paperId: string, count: number, created
     Array.from({ length: count }, (_, index) => ({
       paperId,
       paperKind: 'standalone' as const,
+      paperPrintLayout: 'plain' as const,
       schoolId: owner.schoolId,
       versionNo: from + index + 1,
       contentHtml: '<p>Old</p>',

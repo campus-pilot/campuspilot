@@ -13,6 +13,8 @@ import {
   assistantRunTable,
   assistantTranscriptEntryTable,
 } from '@campuspilot/db/schema/assistant';
+import { user as userTable } from '@campuspilot/db/schema/auth';
+import { examQuestionPaperTable } from '@campuspilot/db/schema/exam-question-paper';
 import { call, ORPCError } from '@orpc/server';
 import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -59,7 +61,9 @@ vi.mock('@campuspilot/api/assistant/token', () => ({
 /** Object storage is not part of this test project; attachment rows are enough for the router. */
 const storage = vi.hoisted(() => ({ deleted: [] as string[], failing: false }));
 /** The paper a seed names exists only when its session id is `ss` (the real lookup is tested with the question paper procedures). */
-vi.mock('@campuspilot/api/routers/school/question-paper/question-paper.scope', () => ({
+vi.mock('@campuspilot/api/routers/school/question-paper/question-paper.scope', async (importOriginal) => ({
+  // The standalone paper reach check runs for real against the test database (`conversation-access.ts`).
+  resolveStandalonePaper: (await importOriginal<typeof import('@campuspilot/api/routers/school/question-paper/question-paper.scope')>()).resolveStandalonePaper,
   resolvePaperScope: vi.fn(async (_db: unknown, key: { sessionId: string }) => {
     if (key.sessionId !== 'ss') {
       const { ORPCError } = await import('@orpc/server');
@@ -1145,12 +1149,38 @@ describe('conversations shared with a question paper', () => {
 });
 
 describe('conversations shared with a standalone paper', () => {
-  it('are refused outside a personal space even to someone holding the standalone paper permission', async () => {
-    // seedTurn's school is a real school (kind `school`); the permission table says the user holds the permission.
+  const user = () => `usr_${randomUUID()}`;
+  /** A standalone paper of the school created by `createdBy` (a quick paper of a real school, or a personal space's). */
+  async function standalonePaper(schoolId: string, createdBy: string) {
+    await db.insert(userTable).values({ id: createdBy, name: 'Paper creator', email: `${createdBy}@example.test` }).onConflictDoNothing();
+    const [paper] = await db
+      .insert(examQuestionPaperTable)
+      .values({ schoolId, kind: 'standalone', printLayout: 'plain', createdBy })
+      .returning({ id: examQuestionPaperTable.id });
+    return paper!.id;
+  }
+  const STANDALONE = ['school.standalone_paper.read', 'school.standalone_paper.manage'];
+
+  it("reach the paper's creator, and someone else only when they oversee the school's standalone papers", async () => {
     const owner = await seedTurn();
-    permissions.byUser.set(owner.userId, new Set(['school.standalone_paper.read', 'school.standalone_paper.manage']));
+    const paperId = await standalonePaper(owner.schoolId, owner.userId);
+    const history = (userId: string) => call(assistantRouter.listPaperConversations, { schoolId: owner.schoolId, paperId, page: 1 }, as(userId));
+    permissions.byUser.set(owner.userId, new Set(STANDALONE));
+    await expect(history(owner.userId)).resolves.toBeDefined();
+
+    // A colleague holding the same permissions, without oversee: refused, as if the paper did not exist.
+    const colleague = user();
+    permissions.byUser.set(colleague, new Set(STANDALONE));
+    await expect(history(colleague)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    permissions.byUser.set(colleague, new Set([...STANDALONE, 'school.standalone_paper.oversee']));
+    await expect(history(colleague)).resolves.toBeDefined();
+  });
+
+  it('are refused for a paper that is not one of the school, even to someone holding every standalone paper permission', async () => {
+    const owner = await seedTurn();
+    permissions.byUser.set(owner.userId, new Set([...STANDALONE, 'school.standalone_paper.oversee']));
     await expect(
-      call(assistantRouter.listPaperConversations, { schoolId: owner.schoolId, paperId: 'qp_not_in_a_personal_space', page: 1 }, as(owner.userId)),
+      call(assistantRouter.listPaperConversations, { schoolId: owner.schoolId, paperId: 'qp_not_of_this_school', page: 1 }, as(owner.userId)),
     ).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 });

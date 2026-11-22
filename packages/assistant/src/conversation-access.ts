@@ -1,7 +1,8 @@
 import { assertPermission, checkPermissions } from '@campuspilot/api/permissions/authorization';
 import { rpcError } from '@campuspilot/api/errors';
 import { CLASS_ACTIONS, SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
-import { readSchoolKind } from '@campuspilot/api/school-access/school-kind.service';
+import { resolveStandalonePaper } from '@campuspilot/api/routers/school/question-paper/question-paper.scope';
+import { ORPCError } from '@orpc/server';
 
 import { db } from './db';
 import type { AssistantSession } from './session';
@@ -35,29 +36,49 @@ const PAPER_ACTION = {
  * Seeing the assistant in the school at all (`assertCanSee`) is checked by
  * the caller first, for every need; continuing also needs use access.
  */
-/** The school permission that a need asks for in a conversation shared with a standalone paper (docs/personal-space.md). */
+/**
+ * The school permission that a need asks for in a conversation shared with a
+ * standalone paper (a personal space's paper, docs/personal-space.md, or a
+ * school's quick paper, docs/question-papers.md "Quick papers in a school").
+ */
 const STANDALONE_PAPER_ACTION = {
   read: SCHOOL_ACTIONS.READ_STANDALONE_PAPERS,
   continue: SCHOOL_ACTIONS.MANAGE_STANDALONE_PAPERS,
 } as const;
 
 /**
- * Whether the school is a personal space (`school.kind`, docs/personal-space.md): standalone papers exist only
- * there, so a conversation shared with one is reached, and one is started, only in a personal space. Its own check,
- * next to the permission (which OPA also grants only in a personal space), never inferred from it.
+ * Whether the user may `action` the standalone paper, in both kinds of school:
+ * the school permission, and the paper must be one they reach (their own, or
+ * any with `school.standalone_paper.oversee`), the rule the standalone paper
+ * procedures apply (`resolveStandalonePaper`). Both permissions are decided in
+ * one OPA round; a paper they do not reach (or that is gone) is a no.
  */
-async function isPersonalSpace(schoolId: string): Promise<boolean> {
-  return (await readSchoolKind(db, schoolId)) === 'personal';
+export async function mayReachStandalonePaper(
+  session: AssistantSession,
+  schoolId: string,
+  paperId: string,
+  action: (typeof STANDALONE_PAPER_ACTION)[ConversationNeed],
+): Promise<boolean> {
+  const resource = { kind: 'school', schoolId } as const;
+  const [allowed, oversee] = await checkPermissions(session.context, [
+    { action, resource },
+    { action: SCHOOL_ACTIONS.OVERSEE_STANDALONE_PAPERS, resource },
+  ]);
+  if (allowed !== true) return false;
+  try {
+    await resolveStandalonePaper(db, { schoolId, paperId }, { userId: session.user.id, oversee: oversee === true });
+    return true;
+  } catch (error) {
+    if (error instanceof ORPCError && error.code === 'NOT_FOUND') return false;
+    throw error;
+  }
 }
 
 export async function mayReachConversation(session: AssistantSession, row: ConversationRow, need: ConversationNeed): Promise<boolean> {
-  // A conversation shared with a standalone paper is reached through the paper's school permission, like an exam paper's,
-  // and only in a personal space.
-  if (sharedStandalonePaperOf(row) !== null) {
-    if (!(await isPersonalSpace(row.schoolId))) return false;
-    const [allowed] = await checkPermissions(session.context, [{ action: STANDALONE_PAPER_ACTION[need], resource: { kind: 'school', schoolId: row.schoolId } }]);
-    return allowed === true;
-  }
+  // A conversation shared with a standalone paper is reached as the paper is: its school permission for the need, on a
+  // paper the user reaches. For everyone, its starter included, like an exam paper's.
+  const standalonePaperId = sharedStandalonePaperOf(row);
+  if (standalonePaperId !== null) return mayReachStandalonePaper(session, row.schoolId, standalonePaperId, STANDALONE_PAPER_ACTION[need]);
   const paper = sharedPaperOf(row);
   if (!paper) return row.userId === session.user.id;
   const [allowed] = await checkPermissions(session.context, [
@@ -78,14 +99,10 @@ export async function assertMayManagePaper(session: AssistantSession, schoolId: 
 }
 
 /**
- * Throws FORBIDDEN unless the school is a personal space and the user may
- * manage its standalone papers: the right to start a conversation shared
- * with one, or to read its history.
+ * Throws FORBIDDEN unless the user may manage this standalone paper
+ * ({@link mayReachStandalonePaper}): the right to start a conversation shared
+ * with it, or to read its history.
  */
-export async function assertMayManageStandalonePaper(session: AssistantSession, schoolId: string): Promise<void> {
-  if (!(await isPersonalSpace(schoolId))) throw rpcError.forbidden();
-  await assertPermission(session.context, {
-    action: SCHOOL_ACTIONS.MANAGE_STANDALONE_PAPERS,
-    resource: { kind: 'school', schoolId },
-  });
+export async function assertMayManageStandalonePaper(session: AssistantSession, schoolId: string, paperId: string): Promise<void> {
+  if (!(await mayReachStandalonePaper(session, schoolId, paperId, SCHOOL_ACTIONS.MANAGE_STANDALONE_PAPERS))) throw rpcError.forbidden();
 }

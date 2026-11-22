@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import { Camera, ChevronLeft, History, MoreVertical, Trash2 } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Badge } from '@campuspilot/ui/components/badge';
@@ -22,8 +22,7 @@ import { VersionList } from '@campuspilot/components/question-paper/version-list
 import { LatestVersionDownloadItems } from '@campuspilot/components/question-paper/version-download';
 import { DirtyGuard, LoadingExam, Notice, ReadError } from '@/components/exam/exam-common';
 import { RequirePermissions } from '@/components/require-permissions';
-import { orpc } from '@/lib/orpc';
-import { paperCalls, paperPermission, standalonePaperLabelOf, type StandalonePaperTarget, type StudioDetail } from '@/components/question-paper/paper-target';
+import { paperCalls, paperPermission, standalonePaperLabelOf, type StandalonePaperTarget, type StudioDetail } from './paper-target';
 import {
   compareAsked,
   currentJobFailure,
@@ -35,39 +34,50 @@ import {
   resolveView,
   uploadsInFlight,
   type QuestionPaperStart as QuestionPaperStartKind,
-} from '@/components/question-paper/question-paper-model';
-import { QuestionPaperAssistantGate } from '@/components/question-paper/question-paper-assistant-gate';
-import { QuestionPaperStart } from '@/components/question-paper/question-paper-start';
-import { QuestionPaperStudio } from '@/components/question-paper/question-paper-studio';
-import { usePageUploads, type PageUploads } from '@/components/question-paper/use-page-uploads';
+} from './question-paper-model';
+import { QuestionPaperAssistantGate } from './question-paper-assistant-gate';
+import { QuestionPaperStart } from './question-paper-start';
+import { QuestionPaperStudio } from './question-paper-studio';
+import { QuestionPaperTemplateAlert } from './question-paper-template-alert';
+import { usePageUploads, type PageUploads } from './use-page-uploads';
 import {
   useCanManageQuestionPaper,
   downloadFailedMessage,
   useDownloadQuestionPaper,
   useQuestionPaperDetail,
   useRefreshQuestionPaper,
-} from '@/components/question-paper/use-question-paper-detail';
-import { personalPaperHref, personalPapersHref } from './personal-space-model';
+  useStandalonePaperListsInvalidation,
+} from './use-question-paper-detail';
+
+/**
+ * Where a standalone paper's screen lives, which its shell decides: a personal
+ * space's papers (`/papers`) or a school's Question papers page
+ * (`/sessions/{id}/question-papers`). `paperHref` is the paper's own address
+ * without a query; `listHref` is where deleting it returns to.
+ */
+export type StandalonePaperPlace = { paperHref: string; listHref: string };
 
 /** A standalone paper's address with the studio's facts (`?start=`, `?version=`, `?chat=`, `?compare=1`), as for an exam paper. */
-function standalonePaperHref(target: StandalonePaperTarget, query?: { start?: QuestionPaperStartKind; version?: number; chat?: string; compare?: boolean }) {
+function standalonePaperHref(place: StandalonePaperPlace, query?: { start?: QuestionPaperStartKind; version?: number; chat?: string; compare?: boolean }) {
   const params = new URLSearchParams();
   if (query?.start) params.set('start', query.start);
   if (query?.version) params.set('version', String(query.version));
   if (query?.chat) params.set('chat', query.chat);
   if (query?.compare) params.set('compare', '1');
   const search = params.toString();
-  return `${personalPaperHref(target.schoolId, target.paperId)}${search ? `?${search}` : ''}`;
+  return `${place.paperHref}${search ? `?${search}` : ''}`;
 }
 
 /**
- * One standalone paper of a personal space (docs/personal-space.md): the same
- * screen as an exam paper's (`QuestionPaperWorkspace`), the first screen until
- * the paper has something to show and then the studio, fed by the standalone
- * paper procedures. It has no exam to end and no template to choose, and it
- * cannot be copied from an earlier paper.
+ * One standalone paper: a personal space's paper (docs/personal-space.md) or a
+ * school's quick paper (docs/question-papers.md "Quick papers in a school").
+ * The same screen as an exam paper's (`QuestionPaperWorkspace`), the first
+ * screen until the paper has something to show and then the studio, fed by
+ * the standalone paper procedures. It has no exam to end and cannot be copied
+ * from an earlier paper. A quick paper prints with the school's template, so
+ * while the school has none the template warning shows, as on an exam paper.
  */
-export function StandalonePaperWorkspace({ target }: { target: StandalonePaperTarget }) {
+export function StandalonePaperWorkspace({ target, place }: { target: StandalonePaperTarget; place: StandalonePaperPlace }) {
   return (
     <RequirePermissions
       permissions={paperPermission(target, 'read')}
@@ -75,20 +85,25 @@ export function StandalonePaperWorkspace({ target }: { target: StandalonePaperTa
       pending={<LoadingExam />}
     >
       <QuestionPaperAssistantGate schoolId={target.schoolId}>
-        <WorkspaceData target={target} />
+        <WorkspaceData target={target} place={place} />
       </QuestionPaperAssistantGate>
     </RequirePermissions>
   );
 }
 
-function WorkspaceData({ target }: { target: StandalonePaperTarget }) {
+function WorkspaceData({ target, place }: { target: StandalonePaperTarget; place: StandalonePaperPlace }) {
   const query = useQuestionPaperDetail(target);
   const canManage = useCanManageQuestionPaper(target);
   // Held data wins over a failed refetch, so a poll that fails never replaces a paper on screen.
   if (query.data === undefined) {
     return query.isPending ? <LoadingExam /> : <ReadError error={query.error} retry={query.refetch} />;
   }
-  return <PaperLayout target={target} detail={query.data} canManage={canManage} />;
+  return (
+    <>
+      {query.data.templateConfigured ? null : <QuestionPaperTemplateAlert schoolId={target.schoolId} />}
+      <PaperLayout target={target} place={place} detail={query.data} canManage={canManage} />
+    </>
+  );
 }
 
 /** The paper's name as its details state it, and its state as a badge in the studio. */
@@ -168,19 +183,21 @@ function VersionsDialog({
 /** The paper's actions that are not its main task: its versions, its latest PDF, adding photos and deleting it. */
 function PaperMenu({
   target,
+  place,
   detail,
   canManage,
   onStart,
   onShowVersion,
 }: {
   target: StandalonePaperTarget;
+  place: StandalonePaperPlace;
   detail: StudioDetail;
   canManage: boolean;
   onStart: (start: QuestionPaperStartKind) => void;
   onShowVersion: (versionNo: number) => void;
 }) {
   const router = useRouter();
-  const queryClient = useQueryClient();
+  const invalidateLists = useStandalonePaperListsInvalidation();
   const [confirming, setConfirming] = useState(false);
   const [showingVersions, setShowingVersions] = useState(false);
   const download = useDownloadQuestionPaper();
@@ -188,11 +205,8 @@ function PaperMenu({
     mutationFn: () => paperCalls.deletePaper(target),
     onSuccess: async () => {
       setConfirming(false);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: orpc.school.listStandalonePapers.key() }),
-        queryClient.invalidateQueries({ queryKey: orpc.school.listStandalonePaperFilterOptions.key() }),
-      ]);
-      router.replace(personalPapersHref(target.schoolId));
+      await invalidateLists();
+      router.replace(place.listHref);
     },
     onError: (error) => toast.error(requestErrorMessage(error, 'The paper could not be deleted.')),
   });
@@ -266,7 +280,7 @@ function UploadsGuard({ uploads }: { uploads: PageUploads }) {
   );
 }
 
-function PaperLayout({ target, detail, canManage }: { target: StandalonePaperTarget; detail: StudioDetail; canManage: boolean }) {
+function PaperLayout({ target, place, detail, canManage }: { target: StandalonePaperTarget; place: StandalonePaperPlace; detail: StudioDetail; canManage: boolean }) {
   const router = useRouter();
   const refresh = useRefreshQuestionPaper(target);
   // Owned here, above the views, as on an exam paper's screen.
@@ -279,12 +293,12 @@ function PaperLayout({ target, detail, canManage }: { target: StandalonePaperTar
   const hasStudio = hasStudioOf({ hasVersion, generating, chatId, latestConversationId: detail.latestConversationId });
   const compare = compareAsked(search.get('compare'));
   const show = (query: Parameters<typeof standalonePaperHref>[1], how: 'push' | 'replace' = 'replace') =>
-    router[how](standalonePaperHref(target, { compare, ...query }), { scroll: false });
+    router[how](standalonePaperHref(place, { compare, ...query }), { scroll: false });
   const openStudio = (query: { version?: number; chat?: string } = {}) => show({ chat: query.chat ?? chatId ?? undefined, version: query.version });
   const start = (next: QuestionPaperStartKind) => show({ start: next, chat: chatId ?? undefined }, 'push');
   const back = hasStudio ? () => openStudio() : null;
   const heading = <PaperHeading detail={detail} showStatus={view.kind === 'studio'} />;
-  const menu = <PaperMenu target={target} detail={detail} canManage={canManage} onStart={start} onShowVersion={(version) => openStudio({ version })} />;
+  const menu = <PaperMenu target={target} place={place} detail={detail} canManage={canManage} onStart={start} onShowVersion={(version) => openStudio({ version })} />;
   return (
     <div ref={uploads.rootRef} className="contents">
       <UploadsGuard uploads={uploads} />

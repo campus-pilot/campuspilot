@@ -115,8 +115,7 @@ default for every operational list.
 
 ### Sidebar entries that open in place
 
-A sidebar entry that leads to a choice rather than a page (today the Academics
-group's **Question papers**: examination, then class) is an
+A sidebar entry that leads to a choice rather than a page is an
 `AppShellNavigationDisclosure`: pressing it folds app-owned content open under it
 instead of opening a popover. The same markup then works in the desktop sidebar and
 the mobile sheet (a popover beside the sheet has no room on a phone); the shell's
@@ -124,10 +123,28 @@ sidebar collapses off-canvas, so there is no icon-only state. The content is mou
 only while open, so its reads start then. Render it as a `SidebarMenuSub`; its links
 use `AppShellSidebarSubLink` and code that navigates calls
 `useAppShellCloseMobileSidebar` first, so the sheet closes either way. Long lists
-(classes) are cmdk lists with a search box; short ones (a session's examinations)
-are plain nested folds. Show loading, empty and read-error states in each list, gate
-the entry with the same permissions and features as the page it leads to, and leave
-it out when a fact it needs (the selected session) is missing.
+are cmdk lists with a search box; short ones are plain nested folds. Show loading,
+empty and read-error states in each list, gate the entry with the same permissions
+and features as the page it leads to, and leave it out when a fact it needs (the
+selected session) is missing. No entry uses it today: the Academics group's
+**Question papers** once folded open to examinations and their classes, and the
+product owner replaced it with a plain link to one page that lists the papers
+(below). Prefer a page with filters over a fold when people look for a record.
+
+### Question papers page
+
+`/sessions/<id>/question-papers` lists the school's quick papers (they belong to no
+session, so every session's page has them) and the session's exam papers in one table, the admission pattern: `TableSearchBar` and `TableFilterBar` (Type,
+Status, Exam, Class, Subject) over a compact `DataTable` with server pagination,
+**Create question paper** in the header. It opens on the Type filter set to Quick
+papers (`defaultFilters`), so the filter shows as set and can be cleared. Never call
+them "standalone" in the UI: they are **Quick papers**, the others **Exam papers**.
+A phone keeps the Paper column (with type, class and exam under it) and Status.
+A quick paper's screen is the personal space's `StandalonePaperWorkspace` at
+`/question-papers/<paperId>`, under the management shell with the "Question papers"
+breadcrumb as the way back. The sidebar entry and the palette command are shown only to
+people who may create quick papers (and use the assistant). See
+[Question papers](../../../docs/question-papers.md#the-question-papers-page).
 
 ## Empty states and configuration-driven creation
 

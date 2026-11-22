@@ -91,18 +91,22 @@ export async function assertPersonalSpaceStorageRoom(
 }
 
 /**
- * Refuses another version of a standalone paper: `versions` when the paper
- * already has {@link STANDALONE_PAPER_MAX_VERSIONS}, and, for a save that
- * counts toward the rate (`countsTowardRate`: every save but the AI job's,
- * which is bounded by its own running-job cap and the AI limit, and whose
- * refusal would waste a paid generation), `saveRate` when the school saved
- * {@link STANDALONE_SAVES_PER_WINDOW} versions of standalone papers in the
- * last {@link STANDALONE_SAVE_WINDOW_MS}. Both count stored version rows.
+ * Refuses another version of a standalone paper of a personal space:
+ * `versions` when the paper already has {@link STANDALONE_PAPER_MAX_VERSIONS},
+ * and, for a save that counts toward the rate (`countsTowardRate`: every save
+ * but the AI job's, which is bounded by its own running-job cap and the AI
+ * limit, and whose refusal would waste a paid generation), `saveRate` when
+ * the space saved {@link STANDALONE_SAVES_PER_WINDOW} versions of standalone
+ * papers in the last {@link STANDALONE_SAVE_WINDOW_MS}. Both count stored
+ * version rows. A real school's quick papers have neither limit, like its
+ * exam papers (docs/question-papers.md "Quick papers in a school"): nothing
+ * is read or locked. The kind is the school's own fact (`readSchoolKind`).
  */
 export async function assertStandaloneVersionRoom(
   db: DatabaseExecutor,
   input: { schoolId: string; paperId: string | null; countsTowardRate: boolean; lock: boolean },
 ): Promise<void> {
+  if ((await readSchoolKind(db, input.schoolId)) !== 'personal') return;
   const version = examQuestionPaperVersionTable;
   if (input.lock) await lockPersonalSpaceLimits(db, input.schoolId);
   if (input.paperId !== null) {

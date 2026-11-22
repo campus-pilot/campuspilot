@@ -51,19 +51,38 @@ export function useCanManageQuestionPaper(target: PaperTarget) {
   return query.data?.results[0] === true;
 }
 
-/** Reads the paper and the list it is in again, for example after an upload. Resolves when the paper is fresh. */
-export function useRefreshQuestionPaper(target: PaperTarget) {
+/**
+ * Reads every list a standalone paper shows in again: a personal space's
+ * papers and a school's Question papers page, each with its filter values
+ * (built from the papers' names). Resolves when they are fresh.
+ */
+export function useStandalonePaperListsInvalidation() {
   const queryClient = useQueryClient();
   return async () => {
     await Promise.all([
+      queryClient.invalidateQueries({ queryKey: orpc.school.listStandalonePapers.key() }),
+      queryClient.invalidateQueries({ queryKey: orpc.school.listStandalonePaperFilterOptions.key() }),
+      queryClient.invalidateQueries({ queryKey: orpc.school.listSchoolQuestionPapers.key() }),
+      queryClient.invalidateQueries({ queryKey: orpc.school.listSchoolQuestionPaperFilterOptions.key() }),
+    ]);
+  };
+}
+
+/** Reads the paper and the lists it is in again, for example after an upload. Resolves when the paper is fresh. */
+export function useRefreshQuestionPaper(target: PaperTarget) {
+  const queryClient = useQueryClient();
+  const invalidateStandaloneLists = useStandalonePaperListsInvalidation();
+  return async () => {
+    await Promise.all([
       queryClient.invalidateQueries({ queryKey: paperDetailQueryKey(target) }),
-      // A standalone paper's list and its filter values (built from the papers' details) change with it.
       ...(isStandaloneTarget(target)
-        ? [
-            queryClient.invalidateQueries({ queryKey: orpc.school.listStandalonePapers.key() }),
-            queryClient.invalidateQueries({ queryKey: orpc.school.listStandalonePaperFilterOptions.key() }),
-          ]
-        : [queryClient.invalidateQueries({ queryKey: orpc.school.listQuestionPapers.key() })]),
+        ? [invalidateStandaloneLists()]
+        : [
+            queryClient.invalidateQueries({ queryKey: orpc.school.listQuestionPapers.key() }),
+            // An exam paper shows on the school's Question papers page too.
+            queryClient.invalidateQueries({ queryKey: orpc.school.listSchoolQuestionPapers.key() }),
+            queryClient.invalidateQueries({ queryKey: orpc.school.listSchoolQuestionPaperFilterOptions.key() }),
+          ]),
     ]);
   };
 }

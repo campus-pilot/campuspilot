@@ -48,7 +48,8 @@ export const isAttachmentMarker = (block: unknown): block is AttachmentMarker =>
  */
 function seedText(seed: NonNullable<AssistantUserMessageBody['seed']>): string {
   if (seed.kind === 'standalone_question_paper') {
-    return `<question_paper_context>\nstandalone paper: ${seed.paperId}.\nThe user is working on this question paper of their personal space. Read it with the getStandalonePaper tool.\n</question_paper_context>`;
+    // A personal space's paper or a school's quick paper: the same tools for both (the paper's templatePrints says how it prints).
+    return `<question_paper_context>\nquick paper: ${seed.paperId}.\nThe user is working on this quick question paper, which belongs to no exam plan. Call school_learn_standalone_question_paper first, then read it with the getStandalonePaper tool; never the exam question paper tools.\n</question_paper_context>`;
   }
   return `<question_paper_context>\nexam: ${seed.examSlug}; class: ${seed.classId}; subject: ${seed.subjectSlug}; mode: ${seed.modeSlug}; session: ${seed.sessionId}.\nThe user is working on this question paper. Read it with the getQuestionPaper tool.\n</question_paper_context>`;
 }
