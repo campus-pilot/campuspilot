@@ -29,7 +29,7 @@ import {
 } from '@campuspilot/auth/mcp-oauth-policy';
 import { assistantToolDecision } from '@campuspilot/api/assistant/tool-policy';
 import { featuresOfUserSchools } from '@campuspilot/api/feature-flags/feature-flags.service';
-import { schoolKindsOfUser, servedSchoolKinds } from '@campuspilot/api/school-access/school-kind.service';
+import { listingSchoolKindsOf, servedSchoolKinds } from '@campuspilot/api/school-access/school-kind.service';
 import { SCHOOL_KINDS, type SchoolKind } from '@campuspilot/db/school-kind';
 import { schoolFeatureGatesOf } from '@campuspilot/api/permissions/feature';
 import { schoolFeatureCatalogue, type SchoolFeatureKey } from '@campuspilot/db/feature-flags/catalogue';
@@ -74,9 +74,12 @@ export type McpToolDefinition = {
    * `schoolId`) serves the kinds its `schoolKinds` metadata names (real
    * schools only when it names none), the rule `requireAuth` enforces on every
    * call; a procedure that names no school (an account-level one such as
-   * `school.listMySchools`) is not held by the kind gate and serves every kind.
+   * `school.listMySchools`) or that is platform administration is not held by
+   * the kind gate and serves every kind.
    */
   schoolKinds: readonly SchoolKind[];
+  /** The procedure's path in the router (`name` split at its dots), passed to every call. */
+  path: readonly string[];
   procedure: AnyProcedure;
 };
 
@@ -161,8 +164,10 @@ type CreateCampusPilotMcpServerOptions = McpToolCallOptions & {
    */
   availableFeatures?: ReadonlySet<SchoolFeatureKey>;
   /**
-   * The kinds of the user's schools (`schoolKindsOfUser`). When given, tools
-   * that serve none of them are not listed. Undefined lists every tool.
+   * The kinds of school the listing may narrow by (`listingSchoolKindsOf`):
+   * when given, school-scoped tools that serve none of them are not listed.
+   * Undefined narrows nothing (the assistant's view, Cadet, a platform
+   * administrator, a user with no membership).
    */
   availableSchoolKinds?: ReadonlySet<SchoolKind>;
 };
@@ -367,12 +372,16 @@ function withFeatureNote(description: string, features: readonly SchoolFeatureKe
 }
 
 /**
- * The kinds of school a tool serves: for a school-scoped input (a top-level
- * `schoolId`, the field the kind gate reads) its declared kinds, else every
- * kind, because nothing in such a call names a school the gate could hold.
+ * The kinds of school a tool serves: every kind for platform administration
+ * (`meta.platformAdministration`, which `requireAuth` never holds to a
+ * kind); for a school-scoped input (a top-level `schoolId`, the field the
+ * kind gate reads) its declared kinds; else every kind, because nothing in
+ * such a call names a school the gate could hold.
  */
-export function toolSchoolKindsOf(inputSchema: z.ZodObject, declared: readonly SchoolKind[] | undefined): readonly SchoolKind[] {
-  return 'schoolId' in inputSchema.shape ? servedSchoolKinds(declared) : SCHOOL_KINDS;
+export function toolSchoolKindsOf(inputSchema: z.ZodObject, meta: ProcedureMeta | undefined): readonly SchoolKind[] {
+  // Platform administration acts on a school from outside it: no kind gate holds it.
+  if (meta?.platformAdministration) return SCHOOL_KINDS;
+  return 'schoolId' in inputSchema.shape ? servedSchoolKinds(meta?.schoolKinds) : SCHOOL_KINDS;
 }
 
 /** The part of a view whose tools pass `included`. */
@@ -434,7 +443,8 @@ export async function buildMcpCatalog(router: AnyRouter): Promise<McpCatalog> {
         title: summary,
         description: withFeatureNote(description, features),
         features,
-        schoolKinds: toolSchoolKindsOf(inputSchema, (definition.meta as ProcedureMeta | undefined)?.schoolKinds),
+        schoolKinds: toolSchoolKindsOf(inputSchema, definition.meta as ProcedureMeta | undefined),
+        path: [...path],
         inputSchema,
         inputJsonSchema: convertMcpInputSchema(name, inputSchema),
         acceptsInput: definition.inputSchema !== undefined,
@@ -567,10 +577,11 @@ export async function callMcpTool(
   });
   try {
     const context = await options.createContext();
+    // The catalog path, as an RPC call carries it, for the procedure's middlewares and logs.
     const result = await call(
       tool.procedure,
       tool.acceptsInput ? input : undefined,
-      { context, signal },
+      { context, signal, path: tool.path },
     );
 
     return {
@@ -714,9 +725,10 @@ export function createCampusPilotMcpHandler<TContext extends McpContext>({
           !assistantView && 'session' in context && context.session
             ? await featuresOfUserSchools(context.db, context.session.user.id)
             : undefined,
+        // Narrowed by kind only when the user's memberships prove tools unusable (`listingSchoolKindsOf`).
         availableSchoolKinds:
           !assistantView && 'session' in context && context.session
-            ? await schoolKindsOfUser(context.db, context.session.user.id)
+            ? await listingSchoolKindsOf(context.db, context.session.user)
             : undefined,
         serverName,
         createContext: async () => context,

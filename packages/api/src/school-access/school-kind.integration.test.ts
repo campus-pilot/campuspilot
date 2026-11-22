@@ -5,8 +5,12 @@ import { describe, expect, it } from 'vitest';
 import { expectPermissionDenied } from '../../test/feature-flags';
 import { createAdminSession, createSchoolStaffSession, createTestClient, createTestSchool } from '../../test/fixtures';
 import { googleNewcomer, personalSpaceOwner } from '../../test/personal-space';
+import { db } from '@campuspilot/db';
+import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
+
 import { appRouter } from '../routers/index';
 import { SCHOOL_KIND_UNSUPPORTED_REASON, schoolKindRefusalOf } from './school-access.contract';
+import { listingSchoolKindsOf, readSchoolKind } from './school-kind.service';
 
 /** The school kind gate (docs/personal-space.md). */
 
@@ -49,7 +53,7 @@ describe('the school kind gate', () => {
     await expectPermissionDenied(outsider.client.school.listStandalonePapers({ schoolId }));
   });
 
-  it('decides the read-only gate from the same read: a suspended personal space refuses its own changes', async () => {
+  it('keeps the read-only gate after the kind gate: a suspended personal space refuses its own changes', async () => {
     const { client, schoolId } = await personalSpaceOwner();
     const admin = createTestClient(await createAdminSession());
     await admin.systemAdmin.suspendSchool({ id: schoolId, reason: 'Test' });
@@ -60,14 +64,55 @@ describe('the school kind gate', () => {
     expect(schoolKindRefusalOf(await refusalOf(client.school.listSessions({ schoolId, limit: 1 })))).toBe('personal');
   });
 
-  it('does not hold platform administration', async () => {
+  it('does not hold platform administration, also where its input names the school as schoolId', async () => {
     const { schoolId } = await personalSpaceOwner();
     const admin = createTestClient(await createAdminSession());
     await expect(admin.systemAdmin.getSchool({ id: schoolId })).resolves.toMatchObject({ id: schoolId, kind: 'personal' });
+    // `getSchoolStats` takes `schoolId`, the field the gate reads: only its platform administration meta lets it through.
+    await expect(admin.systemAdmin.getSchoolStats({ schoolId })).resolves.toBeDefined();
   });
 });
 
-type ProcedureLike = { '~orpc': { meta: { schoolKinds?: readonly string[] } } };
+describe('the cached school kind', () => {
+  it("remembers a school's kind, which never changes, and does not remember a missing school", async () => {
+    const { schoolId } = await personalSpaceOwner();
+    await expect(readSchoolKind(db, schoolId)).resolves.toBe('personal');
+    // Served from the process cache: even a reader that would fail is not asked.
+    const failingReader = new Proxy(db, {
+      get: () => {
+        throw new Error('the cached kind should not be read again');
+      },
+    });
+    await expect(readSchoolKind(failingReader, schoolId)).resolves.toBe('personal');
+    await expect(readSchoolKind(db, 'no-such-school')).resolves.toBeNull();
+  });
+});
+
+describe('the school kinds an MCP listing may narrow by', () => {
+  it('narrows by the kinds of the schools a member belongs to', async () => {
+    const owner = await personalSpaceOwner();
+    expect(await listingSchoolKindsOf(db, owner.session.user)).toEqual(new Set(['personal']));
+    const school = await createTestSchool();
+    await db.insert(schoolMemberTable).values({ schoolId: school.id, userId: owner.userId });
+    expect(await listingSchoolKindsOf(db, owner.session.user)).toEqual(new Set(['personal', 'school']));
+  });
+
+  it('never narrows a platform administrator, who acts on any school through platform grants', async () => {
+    const admin = await createAdminSession();
+    expect(await listingSchoolKindsOf(db, admin.user)).toBeUndefined();
+    // Not even one whose only membership is a personal space.
+    const { schoolId } = await personalSpaceOwner();
+    await db.insert(schoolMemberTable).values({ schoolId, userId: admin.user.id });
+    expect(await listingSchoolKindsOf(db, admin.user)).toBeUndefined();
+  });
+
+  it('never narrows a user with no membership: nothing proves a tool unusable', async () => {
+    const newcomer = await googleNewcomer('No School');
+    expect(await listingSchoolKindsOf(db, newcomer.session.user)).toBeUndefined();
+  });
+});
+
+type ProcedureLike = { '~orpc': { meta: { schoolKinds?: readonly string[]; platformAdministration?: true } } };
 
 /** Every leaf of a router with its dotted path. */
 function leavesOf(router: AnyRouter, path: string[] = []): Array<[string, ProcedureLike]> {
@@ -117,5 +162,13 @@ describe('every procedure is classified by the kinds of school it serves', () =>
     expect(declared).toEqual(PERSONAL_SPACE_PROCEDURES);
     // Without a declaration a procedure serves real schools only, so a new one fails closed for a personal space.
     expect(DEFAULT_SCHOOL_KINDS).toEqual(['school']);
+  });
+
+  it('marks exactly the systemAdmin procedures as platform administration, which no school gate holds', () => {
+    const leaves = leavesOf(appRouter as unknown as AnyRouter);
+    const marked = leaves.filter(([, procedure]) => procedure['~orpc'].meta.platformAdministration === true).map(([name]) => name);
+    const systemAdmin = leaves.map(([name]) => name).filter((name) => name.startsWith('systemAdmin.'));
+    expect(systemAdmin.length).toBeGreaterThan(10);
+    expect(marked.sort()).toEqual(systemAdmin.sort());
   });
 });

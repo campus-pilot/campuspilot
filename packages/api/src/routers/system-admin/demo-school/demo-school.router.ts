@@ -16,7 +16,7 @@ import { eventIterator } from "@orpc/server";
 import { and, asc, count, desc, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 
 import { rpcError, toRpcError } from "../../../errors";
-import { protectedProcedure } from "../../../index";
+import { platformAdminProcedure } from "../../../index";
 import {
   createNextPageCursor,
   createPaginatedResult,
@@ -129,7 +129,7 @@ const purgeNeedsAttention = or(
 );
 
 export const demoSchoolRouter = {
-  listDemoClassCatalogue: protectedProcedure
+  listDemoClassCatalogue: platformAdminProcedure
     .route({
       summary: "List demo classes",
       description:
@@ -155,7 +155,7 @@ export const demoSchoolRouter = {
       });
     }),
 
-  createDemoSchool: protectedProcedure
+  createDemoSchool: platformAdminProcedure
     .route({
       summary: "Create a demo school",
       description:
@@ -226,7 +226,7 @@ export const demoSchoolRouter = {
       }
     }),
 
-  startDemoSchoolJob: protectedProcedure
+  startDemoSchoolJob: platformAdminProcedure
     .route({
       summary: "Start a demo school job",
       description:
@@ -267,7 +267,7 @@ export const demoSchoolRouter = {
       }
     }),
 
-  retryDemoSchoolJob: protectedProcedure
+  retryDemoSchoolJob: platformAdminProcedure
     .route({
       summary: "Retry a failed demo school job",
       description:
@@ -307,7 +307,7 @@ export const demoSchoolRouter = {
       }
     }),
 
-  getDemoSchoolJob: protectedProcedure
+  getDemoSchoolJob: platformAdminProcedure
     .route({
       summary: "Get a demo school job",
       description:
@@ -326,7 +326,7 @@ export const demoSchoolRouter = {
       }
     }),
 
-  watchDemoSchoolJob: protectedProcedure
+  watchDemoSchoolJob: platformAdminProcedure
     .route({
       summary: "Watch a demo school job",
       description:
@@ -349,7 +349,7 @@ export const demoSchoolRouter = {
       }
     }),
 
-  getSchoolDemoJob: protectedProcedure
+  getSchoolDemoJob: platformAdminProcedure
     .route({
       summary: "Get a demo school's job",
       description:
@@ -375,7 +375,7 @@ export const demoSchoolRouter = {
       }
     }),
 
-  getDemoCredentialsDownload: protectedProcedure
+  getDemoCredentialsDownload: platformAdminProcedure
     .route({
       summary: "Download demo credentials",
       description:
@@ -420,7 +420,7 @@ export const demoSchoolRouter = {
       }
     }),
 
-  purgeDemoSchool: protectedProcedure
+  purgeDemoSchool: platformAdminProcedure
     .route({
       summary: "Purge a demo school",
       description:
@@ -464,7 +464,7 @@ export const demoSchoolRouter = {
       }
     }),
 
-  retryDemoSchoolPurge: protectedProcedure
+  retryDemoSchoolPurge: platformAdminProcedure
     .route({
       summary: "Retry a failed demo school purge",
       description:
@@ -500,7 +500,7 @@ export const demoSchoolRouter = {
       }
     }),
 
-  getDemoSchoolPurge: protectedProcedure
+  getDemoSchoolPurge: platformAdminProcedure
     .route({
       summary: "Get a demo school purge",
       description: "Get the status and stage of a demo school purge. Requires permission to read demo schools.",
@@ -518,7 +518,7 @@ export const demoSchoolRouter = {
       }
     }),
 
-  watchDemoSchoolPurge: protectedProcedure
+  watchDemoSchoolPurge: platformAdminProcedure
     .route({
       summary: "Watch a demo school purge",
       description:
@@ -541,7 +541,7 @@ export const demoSchoolRouter = {
       }
     }),
 
-  listDemoSchoolPurges: protectedProcedure
+  listDemoSchoolPurges: platformAdminProcedure
     .route({
       summary: "List demo school purges",
       description:

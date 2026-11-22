@@ -9,7 +9,7 @@ import { SYSTEM_ACTIONS } from "@campuspilot/opa/policies/system";
 import { and, asc, count, countDistinct, eq, sql } from "drizzle-orm";
 
 import { rpcError, toRpcError } from "../../../errors";
-import { protectedProcedure } from "../../../index";
+import { platformAdminProcedure } from "../../../index";
 import { requireSystemPermission } from "../../../permissions/system";
 import {
   platformStatsOutputSchema,
@@ -30,7 +30,7 @@ const MCP_META = {
 } as const;
 
 export const statsRouter = {
-  getPlatformStats: protectedProcedure
+  getPlatformStats: platformAdminProcedure
     .route({
       summary: "Read platform statistics (platform admin only)",
       description:
@@ -86,7 +86,7 @@ export const statsRouter = {
       }
     }),
 
-  getSchoolStats: protectedProcedure
+  getSchoolStats: platformAdminProcedure
     .route({
       summary: "Read school statistics (platform admin only)",
       description:

@@ -91,17 +91,18 @@ function assertAssistantToolPolicy(
  * it (`z.string().trim()`): otherwise " sch_x" would name no school here and
  * the school the procedure then acts on.
  *
- * Platform administration (`systemAdmin.*`) is held by neither: it acts on a
- * school from outside it, even when the administrator is also a member (the
- * principal of a demo school they created).
+ * Platform administration (`meta.platformAdministration`, every
+ * `systemAdmin.*` procedure) is held by neither: it acts on a school from
+ * outside it, even when the administrator is also a member (the principal of
+ * a demo school they created). Decided from the procedure's own metadata,
+ * never from its path, which a call through MCP may not carry.
  */
 async function assertSchoolGates(
   context: Context,
   meta: ProcedureMeta,
-  path: readonly string[],
   input: unknown,
 ) {
-  if (path[0] === "systemAdmin") return;
+  if (meta.platformAdministration) return;
   const schoolId =
     typeof input === "object" && input !== null
       ? (input as Record<string, unknown>).schoolId
@@ -113,13 +114,13 @@ async function assertSchoolGates(
   });
 }
 
-const requireAuth = o.middleware(async ({ context, next, procedure, path }, input) => {
+const requireAuth = o.middleware(async ({ context, next, procedure }, input) => {
   if (!context.session?.user) {
     throw rpcError.unauthorized();
   }
   assertOAuthScope(context, procedure["~orpc"].meta);
   assertAssistantToolPolicy(context, procedure["~orpc"].meta, input);
-  await assertSchoolGates(context, procedure["~orpc"].meta, path, input);
+  await assertSchoolGates(context, procedure["~orpc"].meta, input);
   return next({
     context: {
       db: context.db,
@@ -129,3 +130,12 @@ const requireAuth = o.middleware(async ({ context, next, procedure, path }, inpu
 });
 
 export const protectedProcedure = publicProcedure.use(requireAuth);
+
+/**
+ * The builder of platform administration (`systemAdmin.*`): a protected
+ * procedure whose metadata says `platformAdministration`, so the school gates
+ * of `requireAuth` do not hold it and every kind of school is served
+ * (`school-kind.integration.test.ts` checks every `systemAdmin` procedure is
+ * built with it and no other is).
+ */
+export const platformAdminProcedure = protectedProcedure.meta({ platformAdministration: true });

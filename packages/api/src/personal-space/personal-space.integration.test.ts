@@ -9,7 +9,7 @@ import { schoolUserRoleTable } from '@campuspilot/db/schema/school-user-role';
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 
-import { createRegularUserSession, createTestClient, createTestSchool, createTestSchoolMember } from '../../test/fixtures';
+import { createAdminSession, createRegularUserSession, createTestClient, createTestSchool, createTestSchoolMember } from '../../test/fixtures';
 import { createCadetTestClient } from '../../test/cadet';
 import { expectRpcCode } from '../../test/finance/assertions';
 import { googleNewcomer, personalSpaceOwner } from '../../test/personal-space';
@@ -137,5 +137,22 @@ describe('what a personal space shows in public', () => {
     expect((await handleSchoolManifestBlob({ db }, { schoolId })).status).toBe(404);
     expect((await handleCadetManifestBlob({ db }, { schoolId })).status).toBe(404);
     expect((await handleSchoolLogoBlob({ db }, { schoolId, size: '192' }, new Request('http://localhost/logo'))).status).toBe(404);
+  });
+});
+
+describe('what platform administration may change on a personal space', () => {
+  it('keeps its owner: the owner cannot be changed or cleared', async () => {
+    const { schoolId, userId } = await personalSpaceOwner();
+    const admin = createTestClient(await createAdminSession());
+    await expectRpcCode(admin.systemAdmin.updateSchoolOwner({ id: schoolId, ownerUserId: null }), 'BAD_REQUEST');
+    const [row] = await db.select({ ownerUserId: schoolTable.ownerUserId }).from(schoolTable).where(eq(schoolTable.id, schoolId));
+    expect(row?.ownerUserId).toBe(userId);
+  });
+
+  it('gives it no location, while its other details change as for any school', async () => {
+    const { schoolId } = await personalSpaceOwner();
+    const admin = createTestClient(await createAdminSession());
+    await expectRpcCode(admin.systemAdmin.updateSchool({ id: schoolId, location: 'Pune' }), 'BAD_REQUEST');
+    await expect(admin.systemAdmin.updateSchool({ id: schoolId, name: 'Renamed space' })).resolves.toMatchObject({ name: 'Renamed space', kind: 'personal' });
   });
 });

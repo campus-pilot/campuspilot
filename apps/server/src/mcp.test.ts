@@ -1,5 +1,5 @@
 import type { Context } from '@campuspilot/api/context';
-import { protectedProcedure } from '@campuspilot/api';
+import { platformAdminProcedure, protectedProcedure } from '@campuspilot/api';
 import type {
   McpProcedureMeta,
   ProcedureMeta,
@@ -565,7 +565,9 @@ describe('school kinds in the listing', () => {
       .handler(() => []);
     // An account-level procedure: no schoolId, so no kind gate holds it.
     const listMine = protectedProcedure.meta(mcpMeta()).route(route('List mine')).handler(() => []);
-    return buildMcpCatalog({ listRooms, listPapers, listMine });
+    // Platform administration names a school but acts on it from outside: every kind.
+    const schoolStats = platformAdminProcedure.meta(mcpMeta()).route(route('School stats')).input(schoolInput).handler(() => ({}));
+    return buildMcpCatalog({ listRooms, listPapers, listMine, schoolStats });
   }
 
   it('records the kinds a tool serves, real schools only when it names none', async () => {
@@ -574,6 +576,7 @@ describe('school kinds in the listing', () => {
     expect(byName.get('listPapers')?.schoolKinds).toEqual(['personal']);
     // A procedure that names no school serves every kind (the kind gate reads the input's schoolId).
     expect(byName.get('listMine')?.schoolKinds).toEqual(['school', 'personal']);
+    expect(byName.get('schoolStats')?.schoolKinds).toEqual(['school', 'personal']);
   });
 
   it("lists a tool only while one of the user's schools is of a kind it serves", async () => {
@@ -588,9 +591,30 @@ describe('school kinds in the listing', () => {
       return (await client.listTools()).tools.map(({ name }) => name).sort();
     };
     // A user whose only school is a personal space still finds their schools (and so their schoolId).
-    expect(await listed(new Set(['personal']))).toEqual(['listMine', 'listPapers']);
-    expect(await listed(new Set(['school']))).toEqual(['listMine', 'listRooms']);
-    expect(await listed(new Set(['school', 'personal']))).toEqual(['listMine', 'listPapers', 'listRooms']);
-    expect(await listed(undefined)).toEqual(['listMine', 'listPapers', 'listRooms']);
+    expect(await listed(new Set(['personal']))).toEqual(['listMine', 'listPapers', 'schoolStats']);
+    expect(await listed(new Set(['school']))).toEqual(['listMine', 'listRooms', 'schoolStats']);
+    expect(await listed(new Set(['school', 'personal']))).toEqual(['listMine', 'listPapers', 'listRooms', 'schoolStats']);
+    // Not narrowed (a platform administrator, a user with no membership, the assistant's view): every tool.
+    expect(await listed(undefined)).toEqual(['listMine', 'listPapers', 'listRooms', 'schoolStats']);
+  });
+});
+
+describe('the procedure path of an MCP call', () => {
+  it("calls the procedure with its catalogue path, which middleware sees", async () => {
+    const seenPaths: Array<readonly string[]> = [];
+    const ping = os
+      .meta(mcpMeta())
+      .route({ summary: 'Ping', description: 'Ping.', tags: ['Test'] })
+      .use(({ next, path }) => {
+        seenPaths.push(path);
+        return next();
+      })
+      .handler(() => ({ ok: true }));
+    const catalog = await buildMcpCatalog({ system: { nested: { ping } } });
+    const tool = catalog.core[0]!;
+    expect(tool.path).toEqual(['system', 'nested', 'ping']);
+    const { client } = await connectMcp(catalog, asContext({}));
+    await client.callTool({ name: tool.name, arguments: {} });
+    expect(seenPaths).toEqual([['system', 'nested', 'ping']]);
   });
 });
