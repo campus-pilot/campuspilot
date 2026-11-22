@@ -62,7 +62,13 @@ describe('question paper Word downloads', () => {
     expect(textOf(document)).toContain('Question Paper School');
     expect(document).toContain('<w:footerReference');
     expect(strFromU8(files['word/footer1.xml']!)).toContain('Term I Examination - Science');
-    expect(document).toContain('<w:pgSz w:h="16838" w:w="11906" />');
+    // A4 portrait, as the reference document states it (attribute order is Pandoc's, so each value is checked on its own).
+    const pageSize = /<w:pgSz [^>]*>/.exec(document)?.[0] ?? '';
+    expect(pageSize).toMatch(/w:w="11906"/);
+    expect(pageSize).toMatch(/w:h="16838"/);
+    expect(/<w:sectPr>[\s\S]*<w:footerReference [^>]*w:type="default"/.test(document)).toBe(true);
+    // Pandoc fills in the parts the reference document leaves out.
+    for (const part of ['word/settings.xml', 'word/fontTable.xml', 'word/theme/theme1.xml', 'word/numbering.xml']) expect(files[part], part).toBeDefined();
 
     const version = await versionRow(paperId, 1);
     const [artifact] = await db.select().from(artifactTable).where(eq(artifactTable.id, version.docxArtifactId!));

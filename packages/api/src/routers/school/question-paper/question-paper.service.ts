@@ -798,10 +798,15 @@ async function deletePaperRows(tx: DatabaseTransaction, papers: PaperRow[]): Pro
   const [pages, figures, versions] = await Promise.all([
     tx.select().from(examQuestionPaperPageTable).where(inArray(examQuestionPaperPageTable.paperId, paperIds)),
     tx.select().from(examQuestionPaperFigureTable).where(inArray(examQuestionPaperFigureTable.paperId, paperIds)),
+    // FOR UPDATE: a download storing a version's Word file (or restoring its PDF) sets the version's pointer in its own
+    // transaction without the paper lock. Locking the rows here makes the two wait for each other: either that
+    // pointer committed first and its artifact is read (and deleted) here, or it waits, finds the version gone and
+    // rolls back with its upload deleted. Without the lock its artifact and object would outlive the paper.
     tx
       .select({ pdfArtifactId: examQuestionPaperVersionTable.pdfArtifactId, docxArtifactId: examQuestionPaperVersionTable.docxArtifactId })
       .from(examQuestionPaperVersionTable)
-      .where(inArray(examQuestionPaperVersionTable.paperId, paperIds)),
+      .where(inArray(examQuestionPaperVersionTable.paperId, paperIds))
+      .for('update'),
   ]);
   // Each version's PDF and, once one was downloaded, its Word file.
   const artifactIds = versions.flatMap((version) => [version.pdfArtifactId, version.docxArtifactId]).filter((id): id is string => id !== null);

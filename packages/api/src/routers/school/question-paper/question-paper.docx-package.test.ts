@@ -49,6 +49,26 @@ describe('Word package: tables', () => {
     expect(gridOf(xml, 1).reduce((sum, column) => sum + column, 0)).toBe(outer[1]! - 57);
   });
 
+  it('keeps a row Pandoc sized narrower than its space at that share, packed to the left', () => {
+    const xml = rewriteDocxTables(documentXml(pandocTable([1584, 2376])), [table('layout')]);
+    const grid = gridOf(xml);
+    expect(grid.reduce((sum, column) => sum + column, 0)).toBe(Math.round(DOCX_TEXT_WIDTH_TWIPS / 2));
+    expect(xml).toContain(`<w:tblW w:w="${Math.round(DOCX_TEXT_WIDTH_TWIPS / 2)}" w:type="dxa"/>`);
+  });
+
+  it('builds the columns of a grid Pandoc left empty from the first row, so a nested table gets its cell’s width', () => {
+    const inner = pandocTable([3960, 3960]);
+    const outer =
+      '<w:tbl><w:tblPr><w:tblStyle w:val="Table" /><w:tblW w:type="auto" w:w="0" /></w:tblPr><w:tblGrid/>' +
+      `<w:tr><w:tc><w:tcPr /><w:p/></w:tc><w:tc><w:tcPr /><w:p/>${inner}</w:tc></w:tr></w:tbl>`;
+    const xml = rewriteDocxTables(documentXml(outer), [table('data'), table('layout')]);
+    const [first, second] = [gridOf(xml, 0), gridOf(xml, 1)];
+    expect(first).toEqual([5103, 5103]);
+    expect(second.reduce((sum, column) => sum + column, 0)).toBe(5103 - 200);
+    // No column layout from Pandoc: the authored table stays autofit.
+    expect(xml.split('</w:tblPr>')[0]).toContain('<w:tblW w:w="0" w:type="auto"/>');
+  });
+
   it('refuses a document whose tables do not match the recorded list', () => {
     expect(() => rewriteDocxTables(documentXml(pandocTable([7920])), [])).toThrow('more tables than were recorded');
     expect(() => rewriteDocxTables(documentXml(''), [table('layout')])).toThrow('0 tables, 1 were recorded');

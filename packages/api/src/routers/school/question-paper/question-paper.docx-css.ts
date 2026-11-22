@@ -3,8 +3,6 @@ import { parse as parseSelector, type Selector } from 'css-what';
 import { defaultTreeAdapter as tree, type DefaultTreeAdapterMap } from 'parse5';
 import { parse as parseCss, type AtRule, type ChildNode, type Container } from 'postcss';
 
-import { rpcError } from '../../../errors';
-
 /**
  * The CSS cascade the Word (.docx) conversion reads (`question-paper.docx-html.ts`).
  *
@@ -17,15 +15,20 @@ import { rpcError } from '../../../errors';
  *
  * Selectors are matched by a real selector engine (`css-select`, over the parse5
  * tree the sanitiser itself proves the fragment against, through
- * {@link PARSE5_ADAPTER}), never by a hand-written matcher. The values are only
+ * {@link budgetedParse5Adapter}), never by a hand-written matcher. The values are only
  * READ by our own code (a border is there or not, a width in millimetres); no
  * authored CSS is ever written into the Word file.
  *
  * Bounded work: a sheet holds at most {@link MAX_SELECTORS} selectors (the rest is
  * ignored), rules are bucketed by the class or tag of their rightmost compound so
- * an element only meets the rules that could match it, and the matcher calls of
- * one cascade are capped ({@link MAX_MATCHES}); a document over the cap is refused
- * rather than converted slowly.
+ * an element only meets the rules that could match it, and every step of the
+ * work is paid from ONE budget per conversion ({@link DocxWorkBudget}). The
+ * selector engine is charged inside its tree adapter: every parent, sibling,
+ * child or attribute it looks at costs one unit, so a selector whose matching
+ * explodes (a chain of `~` combinators backtracks exponentially, `:has()` walks
+ * the subtree for each element) runs out of budget in a bounded time instead of
+ * blocking the event loop. A document over the budget is refused
+ * ({@link DocxTooComplexError}), never converted slowly.
  */
 
 export type Node = DefaultTreeAdapterMap['node'];
@@ -37,61 +40,129 @@ type Adapter<N, E extends N> = NonNullable<Options<N, E>['adapter']>;
 /** Selectors one style sheet may contribute; a model's sheet is at most 30,000 characters, so this is never reached by a real paper. */
 const MAX_SELECTORS = 5_000;
 /** Selector matcher calls one cascade may make before the document is refused as too complex to convert. */
-const MAX_MATCHES = 3_000_000;
 /** Declarations a single `style=""` attribute may contribute. */
 const MAX_INLINE_DECLARATIONS = 200;
 
 const childNodesOf = (node: Node): Node[] => ('childNodes' in node ? (node.childNodes as Node[]) : []);
 const parentOf = (node: Node): ParentNode | null => ('parentNode' in node ? (node.parentNode ?? null) : null);
 
-/** The text of a node and its descendants, gathered without recursion (a tree can be deeper than the call stack). */
-export function textOf(node: Node): string {
+/** A conversion ran out of its work budget: the document is too complex to convert to Word. */
+export class DocxTooComplexError extends Error {
+  constructor() {
+    super('This paper is too complex to convert to Word.');
+  }
+}
+
+/**
+ * The work one Word conversion may do, in units of one tree step (a node visited,
+ * a parent or sibling looked up, a selector tried on an element). Shared by the
+ * cascades of the template and of the body and by the converter's own walks, so
+ * no part of a conversion can spend more than the whole. Each unit is a constant
+ * amount of work, so the budget bounds the conversion's time on its own (no
+ * worker thread is needed to stop it): {@link DOCX_WORK_BUDGET} units take about
+ * a quarter of a second at worst (measured with selectors built to explode).
+ */
+export class DocxWorkBudget {
+  private used = 0;
+  constructor(private readonly limit: number) {}
+
+  spend(units = 1): void {
+    this.used += units;
+    if (this.used > this.limit) throw new DocxTooComplexError();
+  }
+
+  /** The units spent so far (logged with the conversion, `docxWorkUnits`). */
+  get spent(): number {
+    return this.used;
+  }
+}
+
+/** The units of one conversion. A real paper with its template uses well under a tenth of it. */
+export const DOCX_WORK_BUDGET = 4_000_000;
+
+/** The text of a node and its descendants, gathered without recursion (a tree can be deeper than the call stack), each node paid for. */
+export function textOf(node: Node, budget: DocxWorkBudget): string {
   let text = '';
   const stack: Node[] = [node];
   while (stack.length > 0) {
     const current = stack.pop()!;
-    if (tree.isTextNode(current)) text += current.value;
-    else {
-      const children = childNodesOf(current);
-      for (let index = children.length - 1; index >= 0; index -= 1) stack.push(children[index]!);
+    // A long text costs in proportion to its length (one unit per 64 characters), so reading text repeatedly is paid for too.
+    if (tree.isTextNode(current)) {
+      budget.spend(1 + (current.value.length >> 6));
+      text += current.value;
+      continue;
     }
+    budget.spend();
+    const children = childNodesOf(current);
+    for (let index = children.length - 1; index >= 0; index -= 1) stack.push(children[index]!);
   }
   return text;
 }
 
 export const attributeOf = (element: Element, name: string): string | undefined => element.attrs.find((attribute) => attribute.name === name)?.value;
 
-/** `css-select` over parse5's default tree (the tree the sanitiser compares its output with, `question-paper.tree.ts`). */
-export const PARSE5_ADAPTER: Adapter<Node, Element> = {
-  isTag: (node): node is Element => tree.isElementNode(node),
-  getAttributeValue: attributeOf,
-  getChildren: childNodesOf,
-  getName: (element) => element.tagName,
-  getParent: (element) => parentOf(element) as Node | null,
-  getSiblings: (node) => {
-    const parent = parentOf(node);
-    return parent ? childNodesOf(parent as Node) : [node];
-  },
-  prevElementSibling: (node) => {
-    const parent = parentOf(node);
-    if (!parent) return null;
-    const siblings = childNodesOf(parent as Node);
-    for (let index = siblings.indexOf(node) - 1; index >= 0; index -= 1) {
-      const sibling = siblings[index]!;
-      if (tree.isElementNode(sibling)) return sibling;
-    }
-    return null;
-  },
-  getText: textOf,
-  hasAttrib: (element, name) => element.attrs.some((attribute) => attribute.name === name),
-  removeSubsets: (nodes) => {
-    const set = new Set(nodes);
-    return nodes.filter((node) => {
-      for (let parent = parentOf(node); parent; parent = parentOf(parent as Node)) if (set.has(parent as Node)) return false;
-      return true;
-    });
-  },
-};
+/**
+ * `css-select` over parse5's default tree (the tree the sanitiser compares its
+ * output with, `question-paper.tree.ts`), every call paid from `budget` (see
+ * the file note): the selector engine cannot do more work than the budget
+ * allows, however its selectors backtrack.
+ */
+export function budgetedParse5Adapter(budget: DocxWorkBudget): Adapter<Node, Element> {
+  return {
+    isTag: (node): node is Element => {
+      budget.spend();
+      return tree.isElementNode(node);
+    },
+    getAttributeValue: (element, name) => {
+      budget.spend();
+      return attributeOf(element, name);
+    },
+    getChildren: (node) => {
+      budget.spend();
+      return childNodesOf(node);
+    },
+    getName: (element) => {
+      budget.spend();
+      return element.tagName;
+    },
+    getParent: (element) => {
+      budget.spend();
+      return parentOf(element) as Node | null;
+    },
+    getSiblings: (node) => {
+      budget.spend();
+      const parent = parentOf(node);
+      return parent ? childNodesOf(parent as Node) : [node];
+    },
+    prevElementSibling: (node) => {
+      budget.spend();
+      const parent = parentOf(node);
+      if (!parent) return null;
+      const siblings = childNodesOf(parent as Node);
+      for (let index = siblings.indexOf(node) - 1; index >= 0; index -= 1) {
+        budget.spend();
+        const sibling = siblings[index]!;
+        if (tree.isElementNode(sibling)) return sibling;
+      }
+      return null;
+    },
+    getText: (node) => textOf(node, budget),
+    hasAttrib: (element, name) => {
+      budget.spend();
+      return element.attrs.some((attribute) => attribute.name === name);
+    },
+    removeSubsets: (nodes) => {
+      const set = new Set(nodes);
+      return nodes.filter((node) => {
+        for (let parent = parentOf(node); parent; parent = parentOf(parent as Node)) {
+          budget.spend();
+          if (set.has(parent as Node)) return false;
+        }
+        return true;
+      });
+    },
+  };
+}
 
 type Specificity = readonly [number, number, number];
 
@@ -184,9 +255,12 @@ const EMPTY_STYLE: ElementStyle = { get: () => undefined, ordered: [] };
 export class Cascade {
   private readonly buckets = new Map<string, Rule[]>();
   private readonly cache = new Map<Element, ElementStyle>();
-  private matches = 0;
 
-  constructor(sheets: readonly string[]) {
+  constructor(
+    sheets: readonly string[],
+    private readonly budget: DocxWorkBudget,
+  ) {
+    const adapter = budgetedParse5Adapter(budget);
     let order = 0;
     for (const sheet of sheets) {
       let selectors = 0;
@@ -206,7 +280,7 @@ export class Cascade {
         for (const selector of rule.selectors) {
           selectors += 1;
           if (selectors > MAX_SELECTORS) return;
-          const compiled = compileRule(selector);
+          const compiled = compileRule(selector, adapter);
           if (!compiled) continue;
           const entry: Rule = { matches: compiled.matches, specificity: compiled.specificity, order: (order += 1), declarations };
           const bucket = this.buckets.get(compiled.bucket);
@@ -225,8 +299,7 @@ export class Cascade {
     for (const name of new Set(classes)) candidates.push(...(this.buckets.get(`.${name}`) ?? []));
     const matched: Rule[] = [];
     for (const rule of candidates) {
-      this.matches += 1;
-      if (this.matches > MAX_MATCHES) throw rpcError.badRequest('This paper is too complex to convert to Word. Download the PDF instead.');
+      this.budget.spend();
       if (rule.matches(element)) matched.push(rule);
     }
     matched.sort((x, y) => compareSpecificity(x.specificity, y.specificity) || x.order - y.order);
@@ -246,7 +319,7 @@ export class Cascade {
 }
 
 /** One selector compiled for matching, or null when it cannot match an element we convert (a pseudo-element, a syntax css-select refuses). */
-function compileRule(selector: string): { matches: (element: Element) => boolean; specificity: Specificity; bucket: string } | null {
+function compileRule(selector: string, adapter: Adapter<Node, Element>): { matches: (element: Element) => boolean; specificity: Specificity; bucket: string } | null {
   let parsed: Selector[][];
   try {
     parsed = parseSelector(selector);
@@ -256,7 +329,7 @@ function compileRule(selector: string): { matches: (element: Element) => boolean
   const tokens = parsed[0];
   if (parsed.length !== 1 || !tokens || tokens.some((token) => token.type === 'pseudo-element')) return null;
   try {
-    const matches = compileSelector<Node, Element>(parsed, { adapter: PARSE5_ADAPTER });
+    const matches = compileSelector<Node, Element>(parsed, { adapter });
     return { matches: (element) => matches(element), specificity: specificityOf(tokens), bucket: bucketOf(tokens) };
   } catch {
     return null;

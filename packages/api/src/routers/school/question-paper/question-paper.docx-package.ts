@@ -198,6 +198,35 @@ function scaledGrid(columns: readonly number[], width: number): number[] {
   return rounded;
 }
 
+/** The text width Pandoc sizes every table for, in twips (it does not read the reference document's page). */
+const PANDOC_TEXT_WIDTH_TWIPS = 7920;
+
+/** The element whose start tag ends at `end`: its content and the index after it (a self-closing tag has none). */
+function elementAt(xml: string, end: number, name: string): { inner: string; after: number } {
+  if (xml[end - 1] === '/') return { inner: '', after: end + 1 };
+  const closing = `</${name}>`;
+  const finish = xml.indexOf(closing, end);
+  if (finish < 0) throw new Error(`The converted document has an unclosed <${name}>.`);
+  return { inner: xml.slice(end + 1, finish), after: finish + closing.length };
+}
+
+/** How many grid columns the first row after `from` spans (its cells and their `gridSpan`), at least one. Nested tables are skipped. */
+function firstRowColumns(xml: string, from: number): number {
+  let depth = 0;
+  let columns = 0;
+  for (let at = xml.indexOf('<', from); at >= 0; at = xml.indexOf('<', at + 1)) {
+    if (xml.startsWith('<w:tbl>', at) || xml.startsWith('<w:tbl ', at)) depth += 1;
+    else if (xml.startsWith('</w:tbl>', at)) {
+      if (depth === 0) break;
+      depth -= 1;
+    } else if (depth > 0) continue;
+    else if (xml.startsWith('<w:tc>', at) || xml.startsWith('<w:tc ', at)) columns += 1;
+    else if (xml.startsWith('<w:gridSpan', at)) columns += Math.max(1, Number(/^<w:gridSpan w:val="(\d{1,3})"/.exec(xml.slice(at, at + 40))?.[1] ?? 1)) - 1;
+    else if (xml.startsWith('</w:tr>', at)) break;
+  }
+  return Math.max(1, columns);
+}
+
 type Frame = { table: DocxTable; width: number; grid: number[]; column: number; cell: { start: number; span: number } | null };
 
 /**
@@ -245,23 +274,31 @@ export function rewriteDocxTables(documentXml: string, tables: readonly DocxTabl
       stack.push({ table, width: Math.max(300, Math.round(width)), grid: [], column: 0, cell: null });
     } else if (isClose && name === 'w:tbl') {
       stack.pop();
-    } else if (!isClose && top && (name === 'w:tblPr' || name === 'w:tblGrid') && documentXml[end - 1] !== '/') {
-      const closing = `</${name}>`;
-      const finish = documentXml.indexOf(closing, end);
-      if (finish < 0) throw new Error(`The converted document has an unclosed <${name}>.`);
-      const inner = documentXml.slice(end + 1, finish);
-      copyTo(start);
-      if (name === 'w:tblPr') {
-        // Pandoc writes an autofit table (no fixed layout) for an authored table without column widths; it stays one.
-        const autofit = top.table.kind === 'data' && !inner.includes('w:tblLayout');
-        const indent = stack.length > 1 ? 0 : Math.min(3, top.table.indent) * INDENT_STEP_TWIPS;
-        out.push(tablePropertiesXml(top.table, top.width, indent, autofit));
-      } else {
-        const columns = [...inner.matchAll(/<w:gridCol w:w="(\d{1,7})"/g)].map((match) => Number(match[1]));
-        top.grid = scaledGrid(columns, top.width);
-        out.push(`<w:tblGrid>${top.grid.map((column) => `<w:gridCol w:w="${column}"/>`).join('')}</w:tblGrid>`);
+    } else if (!isClose && top && name === 'w:tblPr') {
+      // The table's properties and the grid Pandoc writes right after them are replaced together: the grid decides how
+      // wide the table is, which its properties state.
+      const properties = elementAt(documentXml, end, name);
+      const gridStart = documentXml.indexOf('<', properties.after);
+      const gridEnd = documentXml.indexOf('>', gridStart);
+      if (gridStart < 0 || gridEnd < 0 || documentXml.slice(properties.after, gridStart).trim() !== '' || !documentXml.startsWith('<w:tblGrid', gridStart)) {
+        throw new Error('The converted document has a table without a column grid after its properties.');
       }
-      copied = finish + closing.length;
+      const grid = elementAt(documentXml, gridEnd, 'w:tblGrid');
+      let columns = [...grid.inner.matchAll(/<w:gridCol w:w="(\d{1,7})"/g)].map((match) => Number(match[1]));
+      // A grid without columns: as many equal columns as the first row has cells.
+      if (columns.length === 0) columns = Array<number>(firstRowColumns(documentXml, grid.after)).fill(PANDOC_TEXT_WIDTH_TWIPS);
+      const total = columns.reduce((sum, column) => sum + column, 0);
+      // Pandoc sizes a table that is narrower than its space (a flex row whose items do not fill it) as that share of 7920 twips.
+      const share = total > 0 ? Math.min(1, total / PANDOC_TEXT_WIDTH_TWIPS) : 1;
+      const width = Math.max(300, Math.round(top.width * share));
+      top.grid = scaledGrid(columns, width);
+      copyTo(start);
+      // Pandoc writes an autofit table (no fixed layout) when the HTML gave no column widths; it stays one.
+      const autofit = !properties.inner.includes('w:tblLayout');
+      const indent = stack.length > 1 ? 0 : Math.min(3, top.table.indent) * INDENT_STEP_TWIPS;
+      out.push(tablePropertiesXml(top.table, width, indent, autofit));
+      out.push(`<w:tblGrid>${top.grid.map((column) => `<w:gridCol w:w="${column}"/>`).join('')}</w:tblGrid>`);
+      copied = grid.after;
       at = copied;
     } else if (top && !isClose && name === 'w:tr') {
       top.column = 0;

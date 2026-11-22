@@ -7,6 +7,9 @@ import {
   attributeOf,
   bordersOf,
   Cascade,
+  DOCX_WORK_BUDGET,
+  DocxTooComplexError,
+  DocxWorkBudget,
   leadingSpacePx,
   lengthPx,
   textOf,
@@ -78,6 +81,13 @@ const MAX_FOOTER_PART_CHARS = 200;
 /** The size an SVG with no size of its own takes in a browser, and the largest side one is rasterised at, in CSS pixels. */
 const SVG_DEFAULT_SIZE: ImageSize = { width: 300, height: 150 };
 const SVG_MAX_SIDE = 2_000;
+/**
+ * The most pixels one image may have, read from its header before anything
+ * decodes it (25 megapixels: far above a figure, which is stored at most
+ * 1800 px, or a logo), and the most distinct images one conversion may carry.
+ */
+export const DOCX_MAX_IMAGE_PIXELS = 25_000_000;
+const MAX_IMAGES = 64;
 /** One indent level of the paragraph styles, in CSS pixels (6 mm). */
 const INDENT_STEP_PX = 22.7;
 
@@ -98,7 +108,15 @@ export type DocxTableKind =
 export type DocxTable = { kind: DocxTableKind; indent: number; rtl: boolean; ruleAbove: boolean; ruleBelow: boolean };
 
 /** An image file of the conversion request, referenced from the HTML by `name`. `type` is what the bytes are now; a WebP must be converted to PNG by the caller (`name` already ends in `.png`). */
-export type DocxImageFile = { name: string; type: DocxImageType; bytes: Buffer };
+export type DocxImageFile = {
+  name: string;
+  type: DocxImageType;
+  bytes: Buffer;
+  /** Its own pixel size, read from the header (never above {@link DOCX_MAX_IMAGE_PIXELS}). */
+  natural: ImageSize;
+  /** The largest size it is shown at in the document, in CSS pixels (a WebP is converted no larger than twice this). */
+  shown: ImageSize;
+};
 
 /** An inline SVG to rasterise to PNG `name` at `width` x `height` CSS pixels (its own size; Word shows it at the size the HTML gives). */
 export type DocxSvg = { name: string; svg: string; width: number; height: number };
@@ -112,6 +130,8 @@ export type QuestionPaperDocxHtml = {
   images: DocxImageFile[];
   svgs: DocxSvg[];
   footer: DocxFooterLine[];
+  /** The work units the conversion spent of its budget (`DocxWorkBudget`), logged as `docxWorkUnits`. */
+  workUnits: number;
 };
 
 type Align = 'center' | 'right';
@@ -164,11 +184,12 @@ const childrenOf = (node: Node): Node[] => ('childNodes' in node ? (node.childNo
 const isElement = (node: Node): node is Element => tree.isElementNode(node);
 const elementChildren = (node: Node) => childrenOf(node).filter(isElement);
 
-/** Every element under `root` (itself included) in document order, without recursion. */
-function elementsOf(root: Node): Element[] {
+/** Every element under `root` (itself included) in document order, without recursion, each node paid for. */
+function elementsOf(root: Node, budget: DocxWorkBudget): Element[] {
   const out: Element[] = [];
   const stack: Node[] = [root];
   while (stack.length > 0) {
+    budget.spend();
     const node = stack.pop()!;
     if (isElement(node)) out.push(node);
     const children = node.nodeName === 'template' ? [] : childrenOf(node);
@@ -178,8 +199,8 @@ function elementsOf(root: Node): Element[] {
 }
 
 /** Whether an element holds a picture or a formula (an empty box that does is not a blank). */
-function holdsPicture(element: Element): boolean {
-  return elementsOf(element).some((node) => node !== element && (node.tagName === 'img' || node.tagName === 'svg' || attributeOf(node, 'data-math') !== undefined));
+function holdsPicture(element: Element, budget: DocxWorkBudget): boolean {
+  return elementsOf(element, budget).some((node) => node !== element && (node.tagName === 'img' || node.tagName === 'svg' || attributeOf(node, 'data-math') !== undefined));
 }
 
 /**
@@ -205,11 +226,13 @@ export function mathHtml(latex: string, display: boolean): Run {
   let before = '';
   let after = '';
   for (const [token, text] of TRAILING_OPERATORS) {
-    if (body.length > token.length && body.endsWith(token) && body[body.length - token.length - 1] !== '\\') {
-      body = body.slice(0, -token.length).trimEnd();
-      after = text;
-      break;
-    }
+    if (body.length <= token.length || !body.endsWith(token) || body[body.length - token.length - 1] === '\\') continue;
+    const rest = body.slice(0, -token.length).trimEnd();
+    // A sign that is a superscript or subscript (Na^+, Cl^-, e_-) is the argument of `^`/`_`, not a bare operator.
+    if (/[\^_]$/.test(rest)) break;
+    body = rest;
+    after = text;
+    break;
   }
   for (const [token, text] of LEADING_OPERATORS) {
     const rest = body.slice(token.length);
@@ -229,14 +252,23 @@ export function mathHtml(latex: string, display: boolean): Run {
 class Converter {
   private depth = 0;
   private readonly blockCache = new Map<Element, boolean>();
-  private cascade: Cascade = new Cascade([]);
+  private cascade: Cascade;
   readonly tables: DocxTable[] = [];
   readonly svgs: DocxSvg[] = [];
   private readonly images = new Map<string, DocxImageFile>();
   /** `position:fixed` elements found while converting the template (they become the footer, not text). */
   readonly fixed: Array<{ element: Element; ctx: Ctx }> = [];
 
-  constructor(private readonly figures: FigureAssets) {}
+  constructor(
+    private readonly figures: FigureAssets,
+    readonly budget: DocxWorkBudget,
+  ) {
+    this.cascade = new Cascade([], budget);
+  }
+
+  private text(node: Node): string {
+    return textOf(node, this.budget);
+  }
 
   imageFiles(): DocxImageFile[] {
     return [...this.images.values()];
@@ -297,6 +329,7 @@ class Converter {
     const order: Element[] = [];
     const stack: Element[] = [node];
     while (stack.length > 0) {
+      this.budget.spend();
       const element = stack.pop()!;
       order.push(element);
       if (element.tagName === 'svg') continue;
@@ -314,7 +347,7 @@ class Converter {
     if (this.hidden(element) || element.tagName === 'svg' || element.tagName === 'img') return false;
     const display = this.display(element);
     if (this.isLayout(element)) return true;
-    if (display === 'inline-block') return this.fullBorder(element) && !isBlankText(textOf(element));
+    if (display === 'inline-block') return this.fullBorder(element) && !isBlankText(this.text(element));
     return display !== 'inline' && display !== 'contents' && display !== 'inline-flex' && display !== 'inline-grid';
   }
 
@@ -359,10 +392,14 @@ class Converter {
     const tag = node.tagName;
     if (tag === 'br') return { html: '<br>', content: false };
     const math = attributeOf(node, 'data-math');
-    if (math !== undefined) return mathHtml(math, attributeOf(node, 'data-display') === 'true');
+    // Displayed exactly when the PDF renderer displays it: the attribute is there (`question-paper.math.ts`).
+    if (math !== undefined) return mathHtml(math, attributeOf(node, 'data-display') !== undefined);
     if (tag === 'svg') return this.svgImage(node, ctx);
     if (tag === 'img') return this.image(node, ctx);
-    if (this.depth > MAX_DEPTH) return { html: this.formatted(textHtml(collapse(textOf(node))), ctx), content: !isBlankText(textOf(node)) };
+    if (this.depth > MAX_DEPTH) {
+      const text = this.text(node);
+      return { html: this.formatted(textHtml(collapse(text)), ctx), content: !isBlankText(text) };
+    }
     const blank = this.blank(node, ctx, 70);
     if (blank) return blank;
     const inner = this.childCtx(node, ctx);
@@ -407,7 +444,7 @@ class Converter {
    * lines all round becomes an empty bracketed space. Null for anything else.
    */
   private blank(element: Element, ctx: Ctx, maxUnderscores: number): Run | null {
-    if (!isBlankText(textOf(element)) || holdsPicture(element)) return null;
+    if (!isBlankText(this.text(element)) || holdsPicture(element, this.budget)) return null;
     const sides = bordersOf(this.style(element));
     const style = this.style(element);
     const width = lengthPx(style.get('width'), ctx.width) ?? lengthPx(style.get('min-width'), ctx.width) ?? (this.display(element) === 'block' ? ctx.width : 120);
@@ -419,11 +456,15 @@ class Converter {
   }
 
   /** Registers an image file once per source (a logo used three times is one file) and returns its name. */
-  private registerImage(key: string, type: DocxImageType, bytes: Buffer): string {
+  private registerImage(key: string, image: Omit<DocxImageFile, 'name'>): string {
     const known = this.images.get(key);
-    if (known) return known.name;
-    const name = `qp-image-${this.images.size + 1}.${type === 'image/jpeg' ? 'jpg' : 'png'}`;
-    this.images.set(key, { name, type, bytes });
+    if (known) {
+      known.shown = { width: Math.max(known.shown.width, image.shown.width), height: Math.max(known.shown.height, image.shown.height) };
+      return known.name;
+    }
+    if (this.images.size >= MAX_IMAGES) throw rpcError.badRequest(`This paper and its template hold more than ${MAX_IMAGES} images, too many to convert to Word.`);
+    const name = `qp-image-${this.images.size + 1}.${image.type === 'image/jpeg' ? 'jpg' : 'png'}`;
+    this.images.set(key, { name, ...image });
     return name;
   }
 
@@ -456,8 +497,11 @@ class Converter {
     if (!decoded || !natural) {
       return figureId !== undefined ? { html: '<em>Figure unavailable</em>', content: true } : EMPTY_RUN;
     }
-    const name = this.registerImage(figureId !== undefined ? `figure:${figureId}` : `src:${source}`, decoded.type, decoded.bytes);
-    return { html: this.imageTag(name, this.shownSize(element, natural, ctx), figureId !== undefined ? 'Figure' : 'Image'), content: true };
+    // Checked from the header before anything decodes the image (a WebP is decoded to become PNG).
+    if (natural.width * natural.height > DOCX_MAX_IMAGE_PIXELS) throw rpcError.badRequest('An image of this paper or its template is too large to convert to Word.');
+    const shown = this.shownSize(element, natural, ctx);
+    const name = this.registerImage(figureId !== undefined ? `figure:${figureId}` : `src:${source}`, { type: decoded.type, bytes: decoded.bytes, natural, shown });
+    return { html: this.imageTag(name, shown, figureId !== undefined ? 'Figure' : 'Image'), content: true };
   }
 
   /** An inline SVG: serialised on its own (styles the cascade gives it written inline) for the caller to rasterise. */
@@ -525,7 +569,7 @@ class Converter {
       return '';
     }
     if (this.depth > MAX_DEPTH) {
-      const text = collapse(textOf(element));
+      const text = collapse(this.text(element));
       return this.paragraph({ html: this.formatted(textHtml(text), ctx), content: !isBlankText(text) }, ctx);
     }
     this.depth += 1;
@@ -541,18 +585,30 @@ class Converter {
     const inner = this.childCtx(element, ctx);
     if (tag === 'hr') return '<hr>';
     if (tag === 'figure' && attributeOf(element, 'data-placeholder') !== undefined && attributeOf(element, 'data-figure-id') === undefined) {
-      return this.placeholderBox(attributeOf(element, 'data-placeholder')!, inner);
+      return this.placeholderBox(attributeOf(element, 'data-placeholder')!, this.tableCtx(element, ctx, inner));
     }
-    if (tag === 'table') return this.dataTable(element, inner);
+    if (tag === 'table') return this.dataTable(element, this.tableCtx(element, ctx, inner));
     if (tag === 'ul' || tag === 'ol') return this.list(element, inner);
     const blank = this.blank(element, ctx, 95);
     if (blank) return this.paragraph(blank, inner);
     const sides = bordersOf(this.style(element));
-    if (this.isLayout(element)) return this.layoutTable(element, inner, { above: sides.top, below: sides.bottom });
-    if (this.fullBorder(element)) return this.box(element, inner);
+    if (this.isLayout(element)) return this.layoutTable(element, this.tableCtx(element, ctx, inner), { above: sides.top, below: sides.bottom });
+    if (this.fullBorder(element)) return this.box(element, this.tableCtx(element, ctx, inner));
     const html = this.flowContent(element, inner);
     // A line above or below a block (a heading's rule) is a horizontal rule; lines at its sides alone carry no meaning in Word.
     return `${html !== '' && sides.top ? '<hr>' : ''}${html}${html !== '' && sides.bottom ? '<hr>' : ''}`;
+  }
+
+  /**
+   * The context a table made of `element` is recorded and laid out in: the
+   * element's own formatting (`inner`), indented by the text around it plus the
+   * element's own left margin only. Its padding is inside the table (the cells'
+   * margins), so it neither indents nor narrows the table.
+   */
+  private tableCtx(element: Element, ctx: Ctx, inner: Ctx): Ctx {
+    const indent = Math.min(3, ctx.indent + (leadingSpacePx(this.style(element), 'margin', ctx.width) >= 8 ? 1 : 0));
+    const ownWidth = lengthPx(this.style(element).get('width'), ctx.width);
+    return { ...inner, indent, width: Math.max(40, Math.min(ctx.width, ownWidth ?? ctx.width) - (indent - ctx.indent) * INDENT_STEP_PX) };
   }
 
   /** A block in normal flow: a heading paragraph, or its children as blocks (a figure's image first). */
@@ -561,7 +617,7 @@ class Converter {
     const hasBlocks = childrenOf(element).some((child) => this.isBlockish(child));
     if (level !== undefined && !hasBlocks) return this.paragraph(joinRuns(childrenOf(element).map((child) => this.inline(child, inner))), inner, level);
     let html = '';
-    if (element.tagName === 'figure' && attributeOf(element, 'data-figure-id') !== undefined && !elementsOf(element).some((node) => node.tagName === 'img')) {
+    if (element.tagName === 'figure' && attributeOf(element, 'data-figure-id') !== undefined && !elementsOf(element, this.budget).some((node) => node.tagName === 'img')) {
       html += this.paragraph(this.image(element, inner), inner);
     }
     return html + this.blocks(element, inner);
@@ -666,8 +722,8 @@ class Converter {
   private flexColumns(style: ElementStyle, items: Node[], ctx: Ctx) {
     const justify = style.get('justify-content')?.toLowerCase() ?? '';
     const textLength = (node: Node) =>
-      collapse(isElement(node) ? textOf(node) : (node as { value: string }).value).trim().length +
-      (isElement(node) ? elementsOf(node).filter((element) => attributeOf(element, 'data-math') !== undefined).length * 3 : 0);
+      collapse(isElement(node) ? this.text(node) : (node as { value: string }).value).trim().length +
+      (isElement(node) ? elementsOf(node, this.budget).filter((element) => attributeOf(element, 'data-math') !== undefined).length * 3 : 0);
     const own = items.map((node) => (isElement(node) ? (lengthPx(this.style(node).get('width'), ctx.width) ?? lengthPx(this.style(node).get('flex-basis'), ctx.width)) : null));
     const grows = items.map((node) => {
       if (!isElement(node)) return false;
@@ -737,17 +793,19 @@ class Converter {
         return `<tr>${cells.join('')}</tr>`;
       })
       .join('');
-    return `${captionHtml}<table><tbody>${body}</tbody></table>`;
+    // Equal columns, written out: a table with column widths is laid out at the width it is given, so a table nested in
+    // one of its cells always has a sized cell to fit (the packaging step reads these widths, `rewriteDocxTables`).
+    const colgroup = `<colgroup>${Array.from({ length: columns }, () => `<col width="${(100 / columns).toFixed(2)}%">`).join('')}</colgroup>`;
+    return `${captionHtml}<table>${colgroup}<tbody>${body}</tbody></table>`;
   }
 
   /** The Word footer lines of the template's `position:fixed` elements, in document order. */
   footer(): DocxFooterLine[] {
     const lines: DocxFooterLine[] = [];
     for (const { element, ctx } of this.fixed) {
-      if (this.fixed.some((other) => other.element !== element && isAncestor(other.element, element))) continue;
       const style = this.style(element);
       const inner = this.childCtx(element, ctx);
-      const textOfPart = (node: Node) => collapse(isElement(node) ? textOf(node) : (node as { value: string }).value).trim().slice(0, MAX_FOOTER_PART_CHARS);
+      const textOfPart = (node: Node) => collapse(isElement(node) ? this.text(node) : (node as { value: string }).value).trim().slice(0, MAX_FOOTER_PART_CHARS);
       let parts: string[];
       if (this.isLayout(element)) {
         parts = childrenOf(element)
@@ -775,14 +833,6 @@ function normalise(widths: number[], fill = true): number[] {
   return fill || total > 100 ? widths.map((width) => (width * 100) / total) : widths;
 }
 
-const parentNodeOf = (node: Node): Node | null => ('parentNode' in node ? ((node.parentNode as Node | null) ?? null) : null);
-
-function isAncestor(ancestor: Element, node: Node): boolean {
-  for (let parent = parentNodeOf(node); parent; parent = parentNodeOf(parent)) {
-    if (parent === ancestor) return true;
-  }
-  return false;
-}
 
 /** SVG presentation properties a rasterised diagram keeps from the cascade, and the only value characters allowed. */
 const SVG_STYLE_PROPERTIES = new Set([
@@ -835,8 +885,8 @@ function serializeSvg(root: Element, size: ImageSize, styleOf: (element: Element
 }
 
 /** Finds the template's body slot (`id="qp-body-slot"`, `QUESTION_PAPER_SLOT`) and the elements around it, outermost first. */
-function slotPath(document: Node): Element[] | null {
-  for (const element of elementsOf(document)) {
+function slotPath(document: Node, budget: DocxWorkBudget): Element[] | null {
+  for (const element of elementsOf(document, budget)) {
     if (attributeOf(element, 'id') === 'qp-body-slot') {
       const path: Element[] = [element];
       for (let parent = element.parentNode as Node | null; parent && isElement(parent); parent = parent.parentNode as Node | null) path.unshift(parent);
@@ -846,10 +896,10 @@ function slotPath(document: Node): Element[] | null {
   return null;
 }
 
-const styleSheetsOf = (root: Node) =>
-  elementsOf(root)
+const styleSheetsOf = (root: Node, budget: DocxWorkBudget) =>
+  elementsOf(root, budget)
     .filter((element) => element.tagName === 'style')
-    .map((element) => textOf(element));
+    .map((element) => textOf(element, budget));
 
 /**
  * The Word-friendly HTML of a saved version (see the file note). `fragment` is
@@ -858,19 +908,29 @@ const styleSheetsOf = (root: Node) =>
  * `loadFigureAssets` loaded (only this paper's own images).
  */
 export function questionPaperDocxHtml(input: { fragment: string; figures: FigureAssets; template: string }): QuestionPaperDocxHtml {
+  try {
+    return convertWithin(input, new DocxWorkBudget(DOCX_WORK_BUDGET));
+  } catch (error) {
+    if (error instanceof DocxTooComplexError) throw rpcError.badRequest('This paper is too complex to convert to Word. Download the PDF instead.');
+    throw error;
+  }
+}
+
+/** {@link questionPaperDocxHtml} within one work budget (`question-paper.docx-css.ts`). */
+function convertWithin(input: { fragment: string; figures: FigureAssets; template: string }, budget: DocxWorkBudget): QuestionPaperDocxHtml {
   const sanitized = sanitizeQuestionPaperBody(input.fragment);
   if (sanitized.refused) throw rpcError.badRequest(`This paper cannot be converted: ${sanitized.problems[0] ?? 'it could not be cleaned safely.'}`);
 
-  const converter = new Converter(input.figures);
+  const converter = new Converter(input.figures, budget);
   const document = parse(input.template, { scriptingEnabled: false });
-  if (elementsOf(document).length > MAX_TEMPLATE_ELEMENTS) throw rpcError.badRequest('The school’s question paper template is too complex to convert to Word.');
-  const path = slotPath(document);
+  if (elementsOf(document, budget).length > MAX_TEMPLATE_ELEMENTS) throw rpcError.badRequest('The school’s question paper template is too complex to convert to Word.');
+  const path = slotPath(document, budget);
   if (!path) throw new Error('The rendered question paper template has no body slot.');
 
   // Heading: down the slot's ancestors, everything before the next ancestor on the way. Trailer: on the way back up,
   // everything after it. Each ancestor's context is kept for its children, so the body inherits direction and alignment.
   // Converted in the order they are written (heading, body, trailer), so the tables are recorded in Pandoc's order.
-  const templateCascade = new Cascade(styleSheetsOf(document));
+  const templateCascade = new Cascade(styleSheetsOf(document, budget), budget);
   converter.use(templateCascade);
   const contexts: Ctx[] = [];
   let ctx = ROOT_CTX;
@@ -886,7 +946,7 @@ export function questionPaperDocxHtml(input: { fragment: string; figures: Figure
   const fragment = parseFragment(`<div class="${QUESTION_PAPER_BODY_CLASS}">${sanitized.html}</div>`, { scriptingEnabled: false });
   const wrapper = elementChildren(fragment)[0];
   if (!wrapper) throw new Error('The sanitised fragment did not parse.');
-  converter.use(new Cascade([questionPaperBodyCss(), ...styleSheetsOf(wrapper)]));
+  converter.use(new Cascade([questionPaperBodyCss(), ...styleSheetsOf(wrapper, budget)], budget));
   const body = converter.blocks(wrapper, bodyCtx);
 
   converter.use(templateCascade);
@@ -903,5 +963,6 @@ export function questionPaperDocxHtml(input: { fragment: string; figures: Figure
     images: converter.imageFiles(),
     svgs: converter.svgs,
     footer,
+    workUnits: budget.spent,
   };
 }

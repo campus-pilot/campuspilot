@@ -50,7 +50,7 @@ import {
   renderStandaloneQuestionPaperShell,
   selectedQuestionPaperTemplate,
 } from './question-paper.render';
-import { convertQuestionPaperDocx, DOCX_CONTENT_TYPE } from './question-paper.docx-convert';
+import { convertQuestionPaperDocx, DOCX_CONTENT_TYPE, sharedDocxConversion } from './question-paper.docx-convert';
 import { questionPaperDocxHtml } from './question-paper.docx-html';
 import { sanitizeQuestionPaperBody, type SanitizedQuestionPaperBody } from './question-paper.sanitize';
 import {
@@ -961,7 +961,9 @@ class DocxAlreadyStoredError extends Error {}
  *
  * A download is a read (a suspended school or a personal space past its
  * trial can still download), and making the file is part of answering it, as
- * restoring a removed PDF is. In a personal space the file counts toward the
+ * restoring a removed PDF is. Concurrent first downloads of one version share
+ * one conversion in this process, within one deadline, at most two
+ * conversions at a time (`sharedDocxConversion`). In a personal space the file counts toward the
  * storage quota like the version's PDF: a full space is refused
  * (`PERSONAL_SPACE_STORAGE_FULL`) before anything is converted, and again in
  * the transaction that records it.
@@ -981,7 +983,12 @@ export async function storedVersionDocxKey(
         .limit(1);
       if (artifact?.status === 'ready') return artifact.s3Key;
     }
-    const made = await makeVersionDocx(db, { ...input, version }).catch((error: unknown) => {
+    const current = version;
+    // Early look: a full personal space is refused before any conversion (any other school has no quota).
+    await assertPersonalSpaceStorageRoom(db, { schoolId: paperSchoolIdOf(scope), addedBytes: 0, lock: false });
+    const made = await sharedDocxConversion(current.id, input.signal, (deadline) =>
+      makeVersionDocx(db, { scope, version: current, userId: input.userId, deadline }),
+    ).catch((error: unknown) => {
       if (error instanceof DocxAlreadyStoredError) return null;
       throw error;
     });
@@ -1016,21 +1023,20 @@ async function storedVersionTemplateHtml(db: DatabaseExecutor, scope: ResolvedPa
   return measure('qp.document.render', () => renderQuestionPaperTemplate(template.content, context));
 }
 
-/** Converts the version to Word and stores the file as its artifact; answers with the new object's key. */
+/** Converts the version to Word and stores the file as its artifact; answers with the new object's key. `deadline` ends the whole of it. */
 async function makeVersionDocx(
   db: Database,
-  input: { scope: ResolvedPaper; version: VersionRow; userId: string; signal?: AbortSignal },
+  input: { scope: ResolvedPaper; version: VersionRow; userId: string; deadline: AbortSignal },
 ): Promise<string> {
   const { scope, version } = input;
   const schoolId = paperSchoolIdOf(scope);
-  // Early look: a full personal space is refused before any conversion (any other school has no quota).
-  await assertPersonalSpaceStorageRoom(db, { schoolId, addedBytes: 0, lock: false });
   const template = await storedVersionTemplateHtml(db, scope, version);
   const figures = await measure('qp.figures.load', () =>
     loadFigureAssets(db, { schoolId, paperId: version.paperId, figureIds: fragmentFigureIds(version.contentHtml) }),
   );
   const html = measure('qp.docx.html', () => questionPaperDocxHtml({ fragment: version.contentHtml, figures, template }));
-  const docx = await convertQuestionPaperDocx(html, input.signal);
+  const docx = await convertQuestionPaperDocx(html, input.deadline);
+  input.deadline.throwIfAborted();
   const artifactId = generateId('artifact');
   const s3Key = `schools/${schoolId}/documents/${artifactId}.docx`;
   await persistDocumentObject(

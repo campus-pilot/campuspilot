@@ -66,8 +66,26 @@ describe('Word conversion: layout', () => {
     expect(result.tables).toEqual([{ kind: 'data', indent: 0, rtl: false, ruleAbove: false, ruleBelow: false }]);
     const body = bodyOf(result.html);
     expect(body).toContain('<td colspan="2"><p><strong>Marks</strong></p></td>');
+    expect(body).toContain('<table><colgroup><col width="50.00%"><col width="50.00%"></colgroup><tbody>');
     const unlined = convert('<style>.plain td,.plain th{border:none}</style><table class="plain"><tbody><tr><td>A</td></tr></tbody></table>');
     expect(unlined.tables[0]!.kind).toBe('layout');
+  });
+
+  it('gives an authored table without widths equal columns, so a flex row nested in a cell has a sized cell', () => {
+    const result = convert(
+      '<table><tbody><tr><td>Q1</td><td><div style="display:flex;justify-content:space-between"><span>(a) one</span><span>(b) two</span></div></td></tr></tbody></table>',
+    );
+    expect(result.tables.map((table) => table.kind)).toEqual(['data', 'layout']);
+    const body = bodyOf(result.html);
+    expect(body.startsWith('<table><colgroup><col width="50.00%"><col width="50.00%"></colgroup>')).toBe(true);
+    expect(body.match(/<colgroup>/g)).toHaveLength(2);
+  });
+
+  it('indents a bordered box or a layout row by its margin only: its padding stays inside', () => {
+    const padded = convert('<div style="border:1px solid #000;padding:4mm">Inside</div>');
+    expect(padded.tables[0]).toMatchObject({ kind: 'box', indent: 0 });
+    const indented = convert('<div style="border:1px solid #000;margin-left:6mm;padding:4mm">Inside</div><div style="display:flex;margin-left:6mm"><span>a</span></div>');
+    expect(indented.tables.map((table) => table.indent)).toEqual([1, 1]);
   });
 
   it('records tables outer before inner, the order Pandoc writes them', () => {
@@ -117,6 +135,14 @@ describe('Word conversion: formulas and text', () => {
     expect(mathHtml('a \\ne', false).html).toBe('\\(a\\)≠');
   });
 
+  it('keeps a sign that is a superscript or subscript inside the formula (ions, charges)', () => {
+    for (const latex of ['Na^+', 'Cl^-', 'OH^-', 'e^-', 'e_-', 'Na^ +']) expect(mathHtml(latex, false).html).toBe(`\\(${latex}\\)`);
+  });
+
+  it('displays a formula whenever data-display is there, as the PDF does', () => {
+    expect(bodyOf(convert('<p><span data-math="x" data-display=""></span></p>').html)).toContain('\\[x\\]');
+  });
+
   it('shows a formula that holds a delimiter of its own as text, so it cannot end the equation early', () => {
     expect(mathHtml('a\\)b', false)).toEqual({ html: 'a<span>\\</span>)b', content: true });
     expect(mathHtml('x\\', false).html).toBe('x<span>\\</span>');
@@ -150,7 +176,7 @@ describe('Word conversion: figures and diagrams', () => {
   it('names a stored figure as a file of the request, never a URL, and prints a missing one as the PDF does', () => {
     const figures: FigureAssets = new Map([[QPF, { dataUri: PIXEL_PNG }]]);
     const result = convert(`<figure><img data-figure-id="${QPF}"><figcaption>A pixel</figcaption></figure><figure><img data-figure-id="qpf_missing00000000000000"></figure>`, figures);
-    expect(result.images).toEqual([{ name: 'qp-image-1.png', type: 'image/png', bytes: dataUriImage(PIXEL_PNG)!.bytes }]);
+    expect(result.images).toEqual([{ name: 'qp-image-1.png', type: 'image/png', bytes: dataUriImage(PIXEL_PNG)!.bytes, natural: { width: 1, height: 1 }, shown: { width: 1, height: 1 } }]);
     const body = bodyOf(result.html);
     expect(body).toContain('<img src="qp-image-1.png" alt="Figure" width="1" height="1">');
     expect(body).toContain('A pixel');
@@ -169,6 +195,22 @@ describe('Word conversion: figures and diagrams', () => {
     expect(svg.svg).toContain('<line x1="0" y1="50" x2="200" y2="50" style="stroke:#000;stroke-width:2"></line>');
     expect(svg.svg).not.toContain('class=');
     expect(bodyOf(result.html)).toContain('<img src="qp-svg-1.png" alt="Diagram" width="200" height="100">');
+  });
+
+  it('refuses an image over the pixel cap from its header, before anything decodes it', () => {
+    // A PNG header claiming 6000 x 6000 pixels (36 megapixels); nothing after the header is needed to refuse it.
+    const header = Buffer.from(dataUriImage(PIXEL_PNG)!.bytes);
+    header.writeUInt32BE(6000, 16);
+    header.writeUInt32BE(6000, 20);
+    const figures: FigureAssets = new Map([[QPF, { dataUri: `data:image/png;base64,${header.toString('base64')}` }]]);
+    expect(() => convert(`<figure><img data-figure-id="${QPF}"></figure>`, figures)).toThrow('too large to convert to Word');
+  });
+
+  it('refuses a document whose selectors would explode (a chain of ~ over many siblings) quickly, with a clear message', () => {
+    const fragment = `<style>.zz~*~*~*~*~*~*{font-weight:bold}</style>${'<p>q</p>'.repeat(200)}`;
+    const started = Date.now();
+    expect(() => convert(fragment)).toThrow('too complex to convert to Word');
+    expect(Date.now() - started).toBeLessThan(2_000);
   });
 
   it('reads image sizes from headers and accepts only data URI images whose bytes match their type', () => {

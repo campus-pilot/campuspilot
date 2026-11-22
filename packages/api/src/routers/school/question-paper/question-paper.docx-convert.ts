@@ -4,8 +4,9 @@ import sharp from 'sharp';
 
 import { rpcError } from '../../../errors';
 import { QUESTION_PAPER_DOCUMENT_MAX_BYTES } from './question-paper.body';
+import { documentContentSecurityPolicy } from '../document/document.render';
 import { imageTypeOf } from './question-paper.docx-images';
-import type { DocxSvg, QuestionPaperDocxHtml } from './question-paper.docx-html';
+import { DOCX_MAX_IMAGE_PIXELS, type DocxSvg, type QuestionPaperDocxHtml } from './question-paper.docx-html';
 import { buildReferenceDocx, isZipPackage, packageQuestionPaperDocx } from './question-paper.docx-package';
 
 /**
@@ -25,13 +26,24 @@ import { buildReferenceDocx, isZipPackage, packageQuestionPaperDocx } from './qu
  * not `sharp`: the API image has no fonts, so `sharp` draws every letter of an
  * SVG's text as an empty box, and Chromium has the same Noto fonts the PDF is
  * printed with.
+ *
+ * Load: conversions are expensive for the shared services (a request of up to
+ * 25 MB to Pandoc, up to 40 diagrams on Gotenberg), so this process runs at most
+ * {@link MAX_CONCURRENT_CONVERSIONS} at a time, one per version
+ * ({@link sharedDocxConversion}), each within one deadline.
  */
 
 export const DOCX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
-/** How long Pandoc may work on one paper (it is told 25 s itself), and how long one diagram may take to draw. */
+/**
+ * The deadline of one whole conversion (waiting for a slot, drawing diagrams, Pandoc, packaging and storing), and how
+ * long Pandoc may work within it (it is told 25 s itself) and one diagram may take to draw.
+ */
+const DOCX_CONVERSION_DEADLINE_MS = 60_000;
 const CONVERSION_TIMEOUT_MS = 30_000;
 const SVG_TIMEOUT_MS = 20_000;
+/** Word conversions this process runs at the same time; more wait their turn. */
+const MAX_CONCURRENT_CONVERSIONS = 2;
 /** The largest .docx accepted back, and the largest converter answer read (base64 and JSON around it). */
 const MAX_DOCX_BYTES = 40_000_000;
 const MAX_RESPONSE_BYTES = Math.ceil((MAX_DOCX_BYTES * 4) / 3) + 1_000_000;
@@ -63,13 +75,15 @@ async function boundedText(response: Response, limit: number): Promise<string> {
 }
 
 /** One diagram as a PNG, drawn by Chromium at up to three times its size so it stays sharp in print. */
-async function rasteriseSvg(svg: DocxSvg, signal?: AbortSignal): Promise<Buffer> {
+async function rasteriseSvg(svg: DocxSvg, signal: AbortSignal): Promise<Buffer> {
   const scale = Math.min(3, MAX_SVG_RASTER_SIDE / Math.max(svg.width, svg.height));
   const width = Math.max(1, Math.round(svg.width * scale));
   const height = Math.max(1, Math.round(svg.height * scale));
-  // The SVG was serialised by our code from sanitiser output (no script, URL or foreign object); Gotenberg runs with
-  // JavaScript off and no network. `zoom` scales a drawing with or without a viewBox.
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#fff}</style></head><body><div style="zoom:${scale.toFixed(3)};width:${svg.width}px;height:${svg.height}px;overflow:hidden;font-family:'Noto Sans','Noto Sans Devanagari',sans-serif">${svg.svg}</div></body></html>`;
+  // The SVG was serialised by our code from sanitiser output (no script, URL or foreign object). What this path relies
+  // on is the page's own Content-Security-Policy, the one every printed document gets (no script, no network, images
+  // and fonts from data URIs only): whether the Gotenberg it reaches also runs with JavaScript off and no egress
+  // depends on that deployment (the dev, local-demo and test stacks do). `zoom` scales a drawing with or without a viewBox.
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${documentContentSecurityPolicy('question_paper')}"><style>html,body{margin:0;background:#fff}</style></head><body><div style="zoom:${scale.toFixed(3)};width:${svg.width}px;height:${svg.height}px;overflow:hidden;font-family:'Noto Sans','Noto Sans Devanagari',sans-serif">${svg.svg}</div></body></html>`;
   const form = new FormData();
   form.append('files', new Blob([html], { type: 'text/html' }), 'index.html');
   form.append('width', String(width));
@@ -79,7 +93,7 @@ async function rasteriseSvg(svg: DocxSvg, signal?: AbortSignal): Promise<Buffer>
   const response = await fetch(`${env.GOTENBERG_URL.replace(/\/$/, '')}/forms/chromium/screenshot/html`, {
     method: 'POST',
     body: form,
-    signal: AbortSignal.any([AbortSignal.timeout(SVG_TIMEOUT_MS), ...(signal ? [signal] : [])]),
+    signal: AbortSignal.any([AbortSignal.timeout(SVG_TIMEOUT_MS), signal]),
   });
   if (!response.ok) throw new Error(`Diagram rasterising failed (${response.status}).`);
   const bytes = Buffer.from(await response.arrayBuffer());
@@ -87,7 +101,7 @@ async function rasteriseSvg(svg: DocxSvg, signal?: AbortSignal): Promise<Buffer>
   return bytes;
 }
 
-async function rasteriseAll(svgs: readonly DocxSvg[], signal?: AbortSignal): Promise<Array<[string, Buffer]>> {
+async function rasteriseAll(svgs: readonly DocxSvg[], signal: AbortSignal): Promise<Array<[string, Buffer]>> {
   const out: Array<[string, Buffer]> = [];
   for (let start = 0; start < svgs.length; start += SVG_CONCURRENCY) {
     const batch = svgs.slice(start, start + SVG_CONCURRENCY);
@@ -99,20 +113,54 @@ async function rasteriseAll(svgs: readonly DocxSvg[], signal?: AbortSignal): Pro
 type PandocAnswer = { output?: unknown; base64?: unknown; error?: unknown; messages?: unknown };
 
 /**
- * Converts the Word-friendly HTML of a version to the finished .docx: diagrams
- * rasterised, WebP images (a template's logo may be one; Word cannot show it)
- * turned into PNG, Pandoc with this paper's reference document, then the
- * package fix-ups. The input (HTML and images) is held to the document system's
- * 25 MB budget, like a PDF's.
+ * The image files of the request: stored figures and template images as they
+ * are, a WebP (a template's logo may be one; Word cannot show it) turned into
+ * PNG no larger than twice the size it is shown at. One at a time, each decode
+ * held to {@link DOCX_MAX_IMAGE_PIXELS} (already checked from the header), the
+ * running total held to the 25 MB budget so nothing more is converted once the
+ * request could not be sent anyway.
  */
-export async function convertQuestionPaperDocx(input: QuestionPaperDocxHtml, signal?: AbortSignal): Promise<Buffer> {
+async function imageFilesOf(input: QuestionPaperDocxHtml, budget: { bytes: number }, signal: AbortSignal): Promise<Array<[string, Buffer]>> {
+  const files: Array<[string, Buffer]> = [];
+  for (const image of input.images) {
+    signal.throwIfAborted();
+    const bytes =
+      image.type === 'image/webp'
+        ? await sharp(image.bytes, { limitInputPixels: DOCX_MAX_IMAGE_PIXELS })
+            .resize({ width: Math.max(1, Math.ceil(image.shown.width * 2)), withoutEnlargement: true })
+            .png()
+            .toBuffer()
+        : image.bytes;
+    spendInputBytes(budget, bytes.length);
+    files.push([image.name, bytes]);
+  }
+  return files;
+}
+
+const TOO_LARGE = 'This paper is too large to convert to Word. Use fewer or smaller figures.';
+
+/** Adds to the request's running size and refuses once it passes the document budget. */
+function spendInputBytes(budget: { bytes: number }, bytes: number) {
+  budget.bytes += bytes;
+  if (budget.bytes > QUESTION_PAPER_DOCUMENT_MAX_BYTES) throw rpcError.badRequest(TOO_LARGE);
+}
+
+/**
+ * Converts the Word-friendly HTML of a version to the finished .docx: images
+ * ({@link imageFilesOf}) and diagrams, Pandoc with this paper's reference
+ * document, then the package fix-ups. The input (HTML and images) is held to
+ * the document system's 25 MB budget, like a PDF's. `signal` is the
+ * conversion's deadline ({@link sharedDocxConversion}); it is checked between
+ * the steps and given to every request.
+ */
+export async function convertQuestionPaperDocx(input: QuestionPaperDocxHtml, signal: AbortSignal): Promise<Buffer> {
+  const budget = { bytes: 0 };
+  spendInputBytes(budget, Buffer.byteLength(input.html, 'utf8'));
+  const imageFiles = await measure('qp.docx.images', () => imageFilesOf(input, budget, signal));
   const svgFiles = await measure('qp.docx.svg', () => rasteriseAll(input.svgs, signal));
-  const imageFiles = await measure('qp.docx.images', () =>
-    Promise.all(input.images.map(async (image) => [image.name, image.type === 'image/webp' ? await sharp(image.bytes).png().toBuffer() : image.bytes] as [string, Buffer])),
-  );
+  for (const [, bytes] of svgFiles) spendInputBytes(budget, bytes.length);
   const files = [...imageFiles, ...svgFiles];
-  const inputBytes = Buffer.byteLength(input.html, 'utf8') + files.reduce((sum, [, bytes]) => sum + bytes.length, 0);
-  if (inputBytes > QUESTION_PAPER_DOCUMENT_MAX_BYTES) throw rpcError.badRequest('This paper is too large to convert to Word. Use fewer or smaller figures.');
+  signal.throwIfAborted();
   const reference = buildReferenceDocx(input.footer);
   const body = JSON.stringify({
     text: input.html,
@@ -127,7 +175,7 @@ export async function convertQuestionPaperDocx(input: QuestionPaperDocxHtml, sig
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body,
-      signal: AbortSignal.any([AbortSignal.timeout(CONVERSION_TIMEOUT_MS), ...(signal ? [signal] : [])]),
+      signal: AbortSignal.any([AbortSignal.timeout(CONVERSION_TIMEOUT_MS), signal]),
     });
     if (!response.ok) throw new Error(`Word conversion failed (${response.status}).`);
     return JSON.parse(await boundedText(response, MAX_RESPONSE_BYTES)) as PandocAnswer;
@@ -136,6 +184,7 @@ export async function convertQuestionPaperDocx(input: QuestionPaperDocxHtml, sig
   if (answer.base64 !== true || typeof answer.output !== 'string') throw new Error('The Word converter returned an unexpected answer.');
   const converted = Buffer.from(answer.output, 'base64');
   if (converted.length > MAX_DOCX_BYTES || !isZipPackage(converted)) throw new Error('The Word converter returned an invalid or oversized document.');
+  signal.throwIfAborted();
   const docx = Buffer.from(measure('qp.docx.package', () => packageQuestionPaperDocx(converted, input.tables)));
   annotateTiming({
     docxHtmlBytes: Buffer.byteLength(input.html, 'utf8'),
@@ -143,7 +192,103 @@ export async function convertQuestionPaperDocx(input: QuestionPaperDocxHtml, sig
     docxTables: input.tables.length,
     docxImages: input.images.length,
     docxSvgs: input.svgs.length,
+    docxWorkUnits: input.workUnits,
     docxWarnings: Array.isArray(answer.messages) ? answer.messages.filter((message) => (message as { verbosity?: unknown })?.verbosity === 'WARNING').length : 0,
   });
   return docx;
+}
+
+/** A counting semaphore whose waiters can give up (their signal aborts) and leave the queue. */
+class Slots {
+  private free: number;
+  private readonly waiting: Array<() => void> = [];
+
+  constructor(count: number) {
+    this.free = count;
+  }
+
+  async acquire(signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
+    if (this.free > 0) {
+      this.free -= 1;
+      return;
+    }
+    await new Promise<void>((resolve, reject) => {
+      const take = () => {
+        signal.removeEventListener('abort', leave);
+        resolve();
+      };
+      const leave = () => {
+        const index = this.waiting.indexOf(take);
+        if (index >= 0) this.waiting.splice(index, 1);
+        reject(signal.reason);
+      };
+      this.waiting.push(take);
+      signal.addEventListener('abort', leave, { once: true });
+    });
+  }
+
+  release(): void {
+    const next = this.waiting.shift();
+    if (next) next();
+    else this.free += 1;
+  }
+}
+
+const conversionSlots = new Slots(MAX_CONCURRENT_CONVERSIONS);
+type SharedConversion = { promise: Promise<string>; controller: AbortController; waiters: number };
+const inFlight = new Map<string, SharedConversion>();
+
+/**
+ * Runs `work` (a version's whole Word conversion, storing included) once per
+ * `key` in this process: a request that asks while the same version is being
+ * converted waits for that conversion instead of starting a second one. At
+ * most {@link MAX_CONCURRENT_CONVERSIONS} conversions run at a time; the others
+ * wait for a slot. The work gets ONE signal, its deadline: aborted after
+ * {@link DOCX_CONVERSION_DEADLINE_MS} from its start (the wait for a slot
+ * included), or when every request waiting for it has given up (`signal`).
+ * Each request still leaves as soon as its own signal aborts.
+ *
+ * The dedupe is per process (the API runs one replica today). Several replicas
+ * would each convert once; the version row's compare-and-set in
+ * `storedVersionDocxKey` still keeps one file and discards the others.
+ */
+export function sharedDocxConversion(key: string, signal: AbortSignal | undefined, work: (deadline: AbortSignal) => Promise<string>): Promise<string> {
+  let shared = inFlight.get(key);
+  if (!shared) {
+    const controller = new AbortController();
+    const deadline = AbortSignal.any([controller.signal, AbortSignal.timeout(DOCX_CONVERSION_DEADLINE_MS)]);
+    const promise = (async () => {
+      await conversionSlots.acquire(deadline);
+      try {
+        return await work(deadline);
+      } finally {
+        conversionSlots.release();
+      }
+    })().finally(() => inFlight.delete(key));
+    shared = { promise, controller, waiters: 0 };
+    inFlight.set(key, shared);
+  }
+  const entry = shared;
+  entry.waiters += 1;
+  if (!signal) return entry.promise;
+  return new Promise<string>((resolve, reject) => {
+    const leave = () => {
+      entry.waiters -= 1;
+      if (entry.waiters === 0) entry.controller.abort(signal.reason);
+      reject(signal.reason);
+    };
+    if (signal.aborted) return leave();
+    signal.addEventListener('abort', leave, { once: true });
+    entry.promise.then(
+      (value) => {
+        signal.removeEventListener('abort', leave);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener('abort', leave);
+        reject(error);
+      },
+    );
+  });
 }
