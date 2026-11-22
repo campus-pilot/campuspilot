@@ -90,7 +90,8 @@ still counts.
 
 1. locks the person and checks they may create one;
 2. inserts the school with a unique slug from its name, no subscription
-   (`tier` null) and the person as owner;
+   (`tier` null) and the person as owner (steps 2 to 5 are
+   `provisionSelfServiceSchool`, shared with personal spaces);
 3. starts a trial of `SELF_SERVICE_TRIAL_TIER` (Plus, the smallest tier, named
    explicitly rather than derived from the tier order) for
    `SELF_SERVICE_TRIAL_PERIODS` (one) 28-day billing period, which starts the

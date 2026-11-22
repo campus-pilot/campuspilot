@@ -70,14 +70,33 @@ Two ways create one, through the same `createPersonalSpace`:
   `personalSpace.getStatus` has no refusal).
 
 `createPersonalSpace`, in the caller's transaction: locks the person, checks
-the status, inserts the school (`kind = personal`, named "{name}'s personal
-school" or "My personal school" without a name, empty location, no standing
-tier, the person as owner), starts the self-service trial
-(`SELF_SERVICE_TRIAL_TIER` for `SELF_SERVICE_TRIAL_PERIODS` billing period),
-switches the assistant on with `SELF_SERVICE_ASSISTANT_MONTHLY_LIMIT_USD`, and
-makes the person a member with the principal role. It writes **no
-`school_creation` row** (the space does not use the school creation allowance:
-the person can still create one school) and offers no guided setup.
+the status, then provisions the school with `provisionSelfServiceSchool`
+(`school-creation/school-provisioning.ts`), the one start shared with a
+self-created school so the two cannot drift: the school row with the person as
+owner and no standing tier, the self-service trial (`SELF_SERVICE_TRIAL_TIER`
+for `SELF_SERVICE_TRIAL_PERIODS` billing period), the assistant on with
+`SELF_SERVICE_ASSISTANT_MONTHLY_LIMIT_USD`, and the person as a member with the
+principal role. What differs is stated by each caller: a personal space is
+`kind = personal`, named "{name}'s personal school" ("My personal school"
+without a name), with an empty location and the slug `personal-` plus the
+random part of a fresh id (`personalSpaceSlug`): the slug never carries the
+person's name and is inserted once, with no search for a free one. It writes
+**no `school_creation` row** (the space does not use the school creation
+allowance: the person can still create one school) and offers no guided setup.
+
+## What is public
+
+A personal space is named after a real person, so none of the anonymous
+surfaces that name or resolve schools shows it:
+
+| Surface | For a personal space |
+| --- | --- |
+| Cadet Portal school search (`cadet.searchSchools`) | never returned, not even for its exact code |
+| Cadet sign-in school (`cadet.getSignInSchool`) and the admission sign-in (`cadet-sign-in.ts`) | not found; a personal space has no students and no Cadet Portal |
+| `/blob/school/{id}/manifest.webmanifest`, `/logo`, `/cadet.webmanifest` | 404 like an unknown school; the management app links CampusPilot's own manifest instead, so installing from a personal space installs CampusPilot |
+
+The web app lists no schools. Add any new public surface that names or
+resolves a school to this table with an explicit decision.
 
 Both procedures are mounted as `personalSpace` (no `schoolId`) and hidden from
 MCP and the assistant.
@@ -103,6 +122,10 @@ school of a kind the procedure does not serve is refused, **reads included**.
   personal space.
 - Platform administration (`systemAdmin.*`) is not held (the admin app renews
   a personal space's trial with the ordinary Billing card).
+
+`requireAuth` decides both of its school gates, this one and the read-only
+gate, from one read (`readSchoolGateFacts`: kind, membership, suspension and
+plan in one query; `assertSchoolGatesByCaller`).
 
 Upload routes outside oRPC hold the same rule with the kinds they serve:
 admissions, the school logo and exam question paper pages are
@@ -189,9 +212,13 @@ labelled `paper-details` holding a JSON object. `splitQuestionPaperDetails`
 (`packages/question-paper/src/details.ts`) takes the block out before the
 fragment is read (so it is never mistaken for the paper), parses it and
 normalises every value (whitespace collapsed, control characters removed, cut
-to 160 characters, empty is null). A missing or malformed block saves the
-paper without details. A repaired answer that leaves the block out keeps the
-first answer's details.
+to 160 characters, empty is null). A missing or malformed block in the first answer is a
+repair problem (`DETAILS_MISSING_PROBLEM`), never on its own a reason to fail
+the job. A repaired answer that leaves it out takes the first answer's
+details when that one had a block. When no answer has a readable block, the
+version **states no details and does not change the paper's** (`details:
+'keep'` in `saveQuestionPaperVersion`): the stored details stay as the last
+version that stated them left them. Chat saves always state all four.
 
 ## Assistant and MCP
 
@@ -204,7 +231,11 @@ first answer's details.
 - External MCP clients: the gate refuses other tools per `schoolId`, and the
   listing leaves out tools that serve none of the kinds of the user's schools
   (`schoolKindsOfUser`), so someone whose only school is a personal space sees
-  only its tools.
+  only its tools. A tool whose input has no `schoolId` (account-level, such as
+  `school.listMySchools`) is not held by the kind gate and is listed for every
+  kind (`toolSchoolKindsOf`), so such a person can still find their schoolId.
+- A saved version shows in the chat with the `standalone_question_paper` view
+  (`paperId`, `versionNo`), like an exam paper's `question_paper` view.
 - The paper's chat is seeded with `{ kind: 'standalone_question_paper', paperId }`
   and shared with the paper by id; reaching it needs the school's standalone
   paper permission (`conversation-access.ts`). Its photographed pages are
@@ -219,8 +250,9 @@ first answer's details.
 
 - Routes `/school/[schoolId]/papers` and `/papers/[paperId]` in the `(personal)`
   route group with `PersonalSpaceShell`: no sidebar on any screen size; the top
-  bar has a **Personal** label and the school switcher on the left, the trial
-  status and the user menu on the right. The shell renders only for a school
+  bar has a **Personal** label (a link to the papers) and the school switcher
+  on the left, then the breadcrumbs (Papers › the paper, the way back; on a
+  phone only "Papers"), the trial status and the user menu on the right. The shell renders only for a school
   of kind `personal` (any other school there is not found).
 - Every workspace, settings and guided setup address of a personal space opens
   its papers (`RealSchoolOnly`, before those pages mount), and the voice
@@ -228,6 +260,13 @@ first answer's details.
 - The papers page (`StandalonePaperList`): `TableSearchBar` and
   `TableFilterBar` (School, Class, Subject, Exam, from the papers' details)
   over a compact table; **Create question paper** creates a paper and opens it.
+  The paper is created on the click, not on its first photo, message or save:
+  the shared studio (its upload queue, detail polling, chat and page URLs) is
+  built around an existing paper id, and creating it lazily would need a
+  paper-less studio or an in-place change of the paper under a mounted upload
+  queue. An unused paper is deleted from its menu; nothing hides or prunes
+  papers. The filter values are read behind the same gates as the list and
+  read again after every change to a paper and every delete.
 - The paper page (`StandalonePaperWorkspace`) is the exam paper studio:
   photos, generate, chat, versions, preview and download, fed by the
   standalone procedures through `components/question-paper/paper-target.ts`,
@@ -251,6 +290,13 @@ first answer's details.
 A **Personal** badge (`SchoolBadges`) and a **Kind** filter on Organizations
 (`systemAdmin.listSchools` `filters.kind`). A personal space's trial is
 renewed with the existing Billing card.
+
+A personal space's admin pages are its dashboard, AI and storage usage, plan
+and features, and settings, all `systemAdmin.*`. Its sessions, staff,
+students and document settings (real-school `school.*` procedures) are not in
+its navigation, and their addresses say "Not available for a personal space"
+instead of calling procedures the kind gate refuses; the Owner card is not
+shown (the owner is the person the space belongs to).
 
 ## Demo schools
 

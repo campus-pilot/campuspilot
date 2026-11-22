@@ -23,7 +23,7 @@ import { RequirePermissions } from '@/components/require-permissions';
 import { orpc } from '@/lib/orpc';
 
 import { AssistantDocumentsViewBlock } from './assistant-document-views';
-import { AssistantQuestionPaperViewBlock } from './assistant-question-paper';
+import { AssistantQuestionPaperViewBlock, AssistantStandalonePaperViewBlock } from './assistant-question-paper';
 import { AssistantRecordsViewBlock, AssistantRecordsViewPlaceholder } from './assistant-record-views';
 import { retryUnlessRefused } from './assistant-stream';
 
@@ -133,6 +133,8 @@ export function AssistantViewBlock({ schoolId, view }: { schoolId: string; view:
       );
     case 'question_paper':
       return <AssistantQuestionPaperViewBlock schoolId={schoolId} view={view} />;
+    case 'standalone_question_paper':
+      return <AssistantStandalonePaperViewBlock schoolId={schoolId} view={view} />;
     case 'exam_result':
       return (
         <RequirePermissions

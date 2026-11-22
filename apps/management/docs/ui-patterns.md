@@ -428,8 +428,9 @@ A personal space ([Personal space](../../../docs/personal-space.md)) is its
 own interface, not a school workspace with items hidden:
 
 - `PersonalSpaceShell`: no sidebar on any screen size; one bar with the
-  **Personal** label and the school switcher on the left, the trial status and
-  the user menu on the right. No breadcrumbs, command palette, notification
+  **Personal** label (a link to the papers), the school switcher and the
+  breadcrumbs (Papers › the paper, the back navigation) on the left, the trial
+  status and the user menu on the right. No command palette, notification
   bell or voice launcher.
 - Its plan notice is inline under the bar (there is no app shell to hold an
   `AppShellAlert`) and links the website's contact page in a new tab; it never

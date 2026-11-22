@@ -6,13 +6,15 @@ import { notFound } from 'next/navigation';
 import { env } from '@campuspilot/env/management.client';
 import { Alert, AlertDescription } from '@campuspilot/ui/components/alert';
 import { Badge } from '@campuspilot/ui/components/badge';
+import Link from 'next/link';
+import { PersonalBreadcrumbs } from './personal-breadcrumbs';
 import { TriangleAlert } from 'lucide-react';
 import { AuthLoading } from '@/components/auth-loading';
 import { ManagementAccountMenu } from '@/components/management-account-menu';
 import { SchoolDocumentHead } from '@/components/school-document-head';
 import { SchoolSwitcher } from '@/components/school-switcher';
 import { orpc } from '@/lib/orpc';
-import { contactHrefOf, personalPlanNoticeOf, personalPlanStatusOf } from './personal-space-model';
+import { contactHrefOf, personalPapersHref, personalPlanNoticeOf, personalPlanStatusOf } from './personal-space-model';
 
 /** The user's entry for this school, from the cached school list the switcher also reads. */
 function useMySchool(schoolId: string) {
@@ -53,7 +55,9 @@ function PlanNotice({ notice }: { notice: NonNullable<ReturnType<typeof personal
 /**
  * The frame of a personal space (docs/personal-space.md): no sidebar on any
  * screen size, one bar on top with "Personal" and the school switcher on the
- * left, the plan's status and the user menu on the right. Only a school of
+ * left, then the breadcrumbs (Papers › the paper, the way back, as
+ * everywhere in the app; the Personal label links to the papers too), and
+ * the plan's status and the user menu on the right. Only a school of
  * kind `personal` is shown here; any other school's address under these
  * routes is not found (its own pages live in the workspace).
  *
@@ -74,12 +78,14 @@ export function PersonalSpaceShell({ schoolId, pageTitle, children }: { schoolId
       <SchoolDocumentHead schoolId={schoolId} pageTitle={pageTitle} />
       <header className="flex h-[4.5rem] shrink-0 items-center justify-between gap-3 border-b px-4 sm:px-6">
         <div className="flex min-w-0 items-center gap-2">
-          <Badge variant="secondary" className="shrink-0">
-            Personal
-          </Badge>
-          <div className="w-44 min-w-0 sm:w-64">
+          {/* The space's name for itself, and the way back to its papers from anywhere in it. */}
+          <Link href={personalPapersHref(schoolId)} className="shrink-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <Badge variant="secondary">Personal</Badge>
+          </Link>
+          <div className="w-36 min-w-0 sm:w-56">
             <SchoolSwitcher />
           </div>
+          <PersonalBreadcrumbs schoolId={schoolId} />
         </div>
         <div className="flex shrink-0 items-center gap-3">
           {status ? <span className="text-xs text-muted-foreground max-sm:hidden">{status}</span> : null}

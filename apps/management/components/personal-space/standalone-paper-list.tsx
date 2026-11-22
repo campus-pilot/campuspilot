@@ -120,28 +120,36 @@ function usePaperFilters(schoolId: string): TableFilterConfig<keyof PaperFilters
  * details the papers state. Creating a paper opens it.
  */
 export function StandalonePaperList({ schoolId }: { schoolId: string }) {
-  const controller = useDataTableListState<'updatedAt', PaperFilters>({ defaultOrderBy: { field: 'updatedAt', direction: 'desc' } });
-  const filters = usePaperFilters(schoolId);
+  // Every read of the list, its filter values included, waits behind the same gates as the procedures.
   return (
     <RequirePermissions permissions={standalonePaperPermission(schoolId, 'read')} fallback={<p className="text-sm text-muted-foreground">Your papers are unavailable for your account.</p>}>
       <QuestionPaperAssistantGate schoolId={schoolId}>
-        <section className="mx-auto flex w-full max-w-7xl flex-col gap-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="flex flex-col gap-1">
-              <h1 className="text-2xl font-semibold tracking-tight">Question papers</h1>
-              <p className="text-sm text-muted-foreground">Photograph a paper, attach a PDF or describe one, and the assistant types it up for you.</p>
-            </div>
-            <CreatePaperButton schoolId={schoolId} />
-          </div>
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <TableSearchBar placeholder="Search school, class, subject or exam…" onSearchChange={controller.onSearchChange} />
-            <TableFilterBar filters={filters} values={controller.query.filters ?? {}} onValuesChange={controller.onFiltersChange} />
-          </div>
-          <DataTableSuspense key={JSON.stringify(controller.query)} columnCount={6}>
-            <PaperRows schoolId={schoolId} controller={controller} />
-          </DataTableSuspense>
-        </section>
+        <PaperListContent schoolId={schoolId} />
       </QuestionPaperAssistantGate>
     </RequirePermissions>
+  );
+}
+
+/** The list itself, for someone who may read the papers and use the assistant. */
+function PaperListContent({ schoolId }: { schoolId: string }) {
+  const controller = useDataTableListState<'updatedAt', PaperFilters>({ defaultOrderBy: { field: 'updatedAt', direction: 'desc' } });
+  const filters = usePaperFilters(schoolId);
+  return (
+    <section className="mx-auto flex w-full max-w-7xl flex-col gap-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-2xl font-semibold tracking-tight">Question papers</h1>
+          <p className="text-sm text-muted-foreground">Photograph a paper, attach a PDF or describe one, and the assistant types it up for you.</p>
+        </div>
+        <CreatePaperButton schoolId={schoolId} />
+      </div>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <TableSearchBar placeholder="Search school, class, subject or exam…" onSearchChange={controller.onSearchChange} />
+        <TableFilterBar filters={filters} values={controller.query.filters ?? {}} onValuesChange={controller.onFiltersChange} />
+      </div>
+      <DataTableSuspense key={JSON.stringify(controller.query)} columnCount={6}>
+        <PaperRows schoolId={schoolId} controller={controller} />
+      </DataTableSuspense>
+    </section>
   );
 }

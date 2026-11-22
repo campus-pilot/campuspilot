@@ -56,9 +56,13 @@ export function useRefreshQuestionPaper(target: PaperTarget) {
   return async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: paperDetailQueryKey(target) }),
-      queryClient.invalidateQueries({
-        queryKey: isStandaloneTarget(target) ? orpc.school.listStandalonePapers.key() : orpc.school.listQuestionPapers.key(),
-      }),
+      // A standalone paper's list and its filter values (built from the papers' details) change with it.
+      ...(isStandaloneTarget(target)
+        ? [
+            queryClient.invalidateQueries({ queryKey: orpc.school.listStandalonePapers.key() }),
+            queryClient.invalidateQueries({ queryKey: orpc.school.listStandalonePaperFilterOptions.key() }),
+          ]
+        : [queryClient.invalidateQueries({ queryKey: orpc.school.listQuestionPapers.key() })]),
     ]);
   };
 }

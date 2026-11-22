@@ -183,7 +183,10 @@ function PaperMenu({
     mutationFn: () => paperCalls.deletePaper(target),
     onSuccess: async () => {
       setConfirming(false);
-      await queryClient.invalidateQueries({ queryKey: orpc.school.listStandalonePapers.key() });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: orpc.school.listStandalonePapers.key() }),
+        queryClient.invalidateQueries({ queryKey: orpc.school.listStandalonePaperFilterOptions.key() }),
+      ]);
       router.replace(personalPapersHref(target.schoolId));
     },
     onError: (error) => toast.error(requestErrorMessage(error, 'The paper could not be deleted.')),

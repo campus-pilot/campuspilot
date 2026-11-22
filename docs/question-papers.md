@@ -20,7 +20,10 @@ A personal space's papers are **standalone papers** (`exam_question_paper.kind =
 no session, exam, class, subject or mode, no school template (a built-in plain
 shell), details the AI states, and their own procedures. Everything below is about
 exam papers unless it says otherwise; the shared services, the sanitiser, the renderer
-pipeline and the job serve both kinds. See [Personal space](personal-space.md).
+pipeline and the job serve both kinds. A standalone paper's details are not revisioned:
+every save that states them replaces all four; a job version whose answer states none (no
+readable `paper-details` block, also after the repair) leaves them unchanged. See
+[Personal space](personal-space.md).
 
 - A **paper** is one fact per `(session, exam, class, subject, mode)`, the
   natural key of an exam plan. "Mode" is the school-defined assessment mode of

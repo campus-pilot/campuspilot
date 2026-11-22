@@ -655,7 +655,8 @@ function SchoolSettingsContent({ school }: { school: SchoolDto }) {
         </p>
       </div>
       <SchoolProfileCard school={school} />
-      {school.isDemo ? null : <SchoolOwnerCard school={school} />}
+      {/* A personal space's owner is the person it belongs to and is never changed (docs/personal-space.md). */}
+      {school.isDemo || school.kind === 'personal' ? null : <SchoolOwnerCard school={school} />}
       <SchoolSuspensionCard school={school} />
       {/* <DeleteSchoolCard school={school} /> — see the note above deleteSchoolFormSchema. */}
       {school.isDemo ? <DemoSchoolCredentialsCard schoolId={school.id} /> : null}
