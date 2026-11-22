@@ -7707,6 +7707,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "printed_details": {
+          "name": "printed_details",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "warnings": {
           "name": "warnings",
           "type": "jsonb",
@@ -7990,6 +7996,10 @@
         "exam_question_paper_version_no_check": {
           "name": "exam_question_paper_version_no_check",
           "value": "\"exam_question_paper_version\".\"version_no\" >= 1"
+        },
+        "exam_question_paper_version_printed_details_check": {
+          "name": "exam_question_paper_version_printed_details_check",
+          "value": "(\"exam_question_paper_version\".\"printed_details\" is not null) = (\"exam_question_paper_version\".\"paper_kind\"::text = 'standalone' and \"exam_question_paper_version\".\"paper_print_layout\"::text = 'school_template')"
         },
         "exam_question_paper_version_template_check": {
           "name": "exam_question_paper_version_template_check",

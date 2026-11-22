@@ -14,7 +14,14 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import type { QuestionPaperNotice } from "@campuspilot/question-paper/hash";
-import { QUESTION_PAPER_DETAIL_MAX_CHARS, QUESTION_PAPER_DETAIL_MAX_MARKS } from "@campuspilot/question-paper/details";
+import {
+  QUESTION_PAPER_DETAIL_MAX_CHARS,
+  QUESTION_PAPER_DETAIL_MAX_MARKS,
+  type QuestionPaperDetails,
+} from "@campuspilot/question-paper/details";
+
+/** The details a quick paper's version printed (`exam_question_paper_version.printed_details`). */
+export type QuestionPaperPrintedDetails = Pick<QuestionPaperDetails, "className" | "subjectName" | "examName" | "maxMarks">;
 import {
   QUESTION_PAPER_PAGE_ROTATIONS,
   type QuestionPaperPageRotation,
@@ -547,6 +554,17 @@ export const examQuestionPaperVersionTable = pgTable(
      */
     planMaxMarks: integer("plan_max_marks"),
     /**
+     * What a quick paper's version printed in the school template's heading:
+     * the class, subject and exam names and the maximum marks of the details
+     * this save stated (or the paper's, when it stated none). A snapshot like
+     * `plan_max_marks`: a paper's details are not revisioned, so without it an
+     * old version's preview, Word file or restored PDF would print the
+     * paper's details as they are now. Set exactly for a version of a
+     * standalone paper printed with the school's template (CHECK); a
+     * personal space's version carries its heading in its own body.
+     */
+    printedDetails: jsonb("printed_details").$type<QuestionPaperPrintedDetails>(),
+    /**
      * What the sanitiser removed or changed when this version was saved, one
      * entry per kind. Notices, not errors: the version saved without them.
      */
@@ -613,6 +631,10 @@ export const examQuestionPaperVersionTable = pgTable(
       foreignColumns: [examQuestionPaperTable.id, examQuestionPaperTable.printLayout],
     }).onDelete("cascade"),
     // Compared as text, as above.
+    check(
+      "exam_question_paper_version_printed_details_check",
+      sql`(${table.printedDetails} is not null) = (${table.paperKind}::text = 'standalone' and ${table.paperPrintLayout}::text = 'school_template')`,
+    ),
     check(
       "exam_question_paper_version_template_check",
       sql`(${table.paperPrintLayout}::text = 'plain') = (${table.templateRevisionId} is null)`,

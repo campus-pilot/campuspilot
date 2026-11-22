@@ -8,8 +8,10 @@
 -- states is a fifth detail (`details_max_marks`). A version's
 -- `paper_print_layout` is held equal to its paper's by a composite foreign
 -- key, so the version's CHECK ties the pinned template to the layout instead
--- of the kind. Every existing standalone paper is in a personal space: it and
--- its versions are backfilled to `plain`. The unique (id, print_layout)
+-- of the kind. A quick paper's version keeps the details its heading printed
+-- (`printed_details`), so an old version prints as it was saved. Every
+-- existing standalone paper is in a personal space: it and its versions are
+-- backfilled to `plain`. The unique (id, print_layout)
 -- constraint is created before the foreign key that references it.
 CREATE TYPE "public"."question_paper_print_layout" AS ENUM('school_template', 'plain');--> statement-breakpoint
 ALTER TABLE "exam_question_paper" DROP CONSTRAINT "exam_question_paper_kind_key_check";--> statement-breakpoint
@@ -30,4 +32,6 @@ ALTER TABLE "exam_question_paper" ADD CONSTRAINT "exam_question_paper_kind_key_c
         else num_nulls("exam_question_paper"."exam_slug", "exam_question_paper"."class_id", "exam_question_paper"."subject_slug", "exam_question_paper"."mode_slug") = 4
           and ("exam_question_paper"."session_id" is null) = ("exam_question_paper"."print_layout"::text = 'plain')
       end);--> statement-breakpoint
-ALTER TABLE "exam_question_paper_version" ADD CONSTRAINT "exam_question_paper_version_template_check" CHECK (("exam_question_paper_version"."paper_print_layout"::text = 'plain') = ("exam_question_paper_version"."template_revision_id" is null));
+ALTER TABLE "exam_question_paper_version" ADD CONSTRAINT "exam_question_paper_version_template_check" CHECK (("exam_question_paper_version"."paper_print_layout"::text = 'plain') = ("exam_question_paper_version"."template_revision_id" is null));--> statement-breakpoint
+ALTER TABLE "exam_question_paper_version" ADD COLUMN "printed_details" jsonb;--> statement-breakpoint
+ALTER TABLE "exam_question_paper_version" ADD CONSTRAINT "exam_question_paper_version_printed_details_check" CHECK (("exam_question_paper_version"."printed_details" is not null) = ("exam_question_paper_version"."paper_kind"::text = 'standalone' and "exam_question_paper_version"."paper_print_layout"::text = 'school_template'));

@@ -51,6 +51,21 @@ describe('quick papers in a school', () => {
     const draft = await teacher.client.school.previewStandalonePaperDraft({ schoolId, paperId, html: ENGLISH_SCIENCE });
     expect(draft.problems).toEqual([]);
     expect(draft.templateName).not.toBeNull();
+
+    // Each version keeps the heading it printed: a later save's details never change an earlier version's print.
+    expect(version!.printedDetails).toEqual({ className: 'Class 8', subjectName: 'Science', examName: 'Unit Test 1', maxMarks: 25 });
+    await teacher.client.school.saveStandalonePaperVersion({
+      schoolId,
+      paperId,
+      expectedVersionNo: 1,
+      html: ENGLISH_SCIENCE,
+      details: { ...DETAILS, className: 'Class 9', examName: 'Unit Test 2', maxMarks: 30 },
+    });
+    const first = await teacher.client.school.getStandalonePaperPreview({ schoolId, paperId, versionNo: 1 });
+    expect(first.html).toContain('Unit Test 1');
+    expect(first.html).not.toContain('Unit Test 2');
+    const second = await teacher.client.school.getStandalonePaperPreview({ schoolId, paperId, versionNo: 2 });
+    expect(second.html).toContain('Unit Test 2');
   });
 
   it('needs a session of the school in a school, and none in a personal space', async () => {

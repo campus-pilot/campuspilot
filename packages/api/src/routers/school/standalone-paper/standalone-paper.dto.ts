@@ -139,6 +139,8 @@ export const listStandalonePapersInputSchema = createListInputSchema({
 /** One paper as the list shows it. */
 export const standalonePaperListItemSchema = z.object({
   paperId: z.string(),
+  /** The session a school's quick paper belongs to (papers of every session are listed); null in a personal space. */
+  sessionId: z.string().nullable(),
   details: standalonePaperDetailsSchema,
   pageCount: z.number().int(),
   latestVersionNo: z.number().int(),
@@ -167,6 +169,8 @@ export const standalonePaperFactsSchema = z.object({
   paperId: z.string(),
   /** How the paper prints: with the school's template (a school's quick paper), or on the plain page (a personal space's). */
   printLayout: z.enum(['school_template', 'plain']),
+  /** The session a school's quick paper belongs to; null in a personal space. */
+  sessionId: z.string().nullable(),
   details: standalonePaperDetailsSchema,
   pageCount: z.number().int(),
   pageRevision: z.number().int(),

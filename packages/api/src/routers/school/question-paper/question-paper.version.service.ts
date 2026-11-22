@@ -8,6 +8,7 @@ import {
   examQuestionPaperJobTable,
   examQuestionPaperTable,
   examQuestionPaperVersionTable,
+  type QuestionPaperPrintedDetails,
 } from '@campuspilot/db/schema/exam-question-paper';
 import { encodedImageBytes } from '@campuspilot/assistant-contract/attachments';
 import {
@@ -408,6 +409,23 @@ async function paperNamesOf(db: DatabaseExecutor, scope: ResolvedPaper): Promise
  */
 type PrintTemplate = { kind: 'template'; revisionId: string; name: string; content: string } | { kind: 'plain' };
 
+/**
+ * The heading details a new version of a quick paper prints and keeps
+ * (`printed_details`): the ones the save states, else the paper's as stored.
+ * Null for any other paper: an exam paper prints its plan's names, a plain
+ * paper carries its heading in its body.
+ */
+function printedDetailsOf(scope: ResolvedPaper, stated: QuestionPaperDetails | undefined, paper: PaperRow | undefined): QuestionPaperPrintedDetails | null {
+  if (!isStandalonePaper(scope) || printLayoutOf(scope) !== 'school_template') return null;
+  if (stated) return { className: stated.className, subjectName: stated.subjectName, examName: stated.examName, maxMarks: stated.maxMarks };
+  return {
+    className: paper?.detailsClassName ?? null,
+    subjectName: paper?.detailsSubjectName ?? null,
+    examName: paper?.detailsExamName ?? null,
+    maxMarks: paper?.detailsMaxMarks ?? null,
+  };
+}
+
 /** The planned maximum marks a new version of this paper snapshots: the exam plan's, none for a standalone paper. */
 const planMaxMarksOf = (scope: ResolvedPaper): number | null => (isStandalonePaper(scope) ? null : scope.planMaxMarks);
 
@@ -667,7 +685,7 @@ async function renderPaperDocument(
     body: Awaited<ReturnType<typeof renderQuestionPaperBody>>;
     versionNo: number;
     planMaxMarks: number | null;
-    details?: QuestionPaperDetails;
+    details?: QuestionPaperPrintedDetails;
     generatedAt?: Date;
   },
 ): Promise<string> {
@@ -712,9 +730,12 @@ async function renderAndStore(
     paperId: paper?.id ?? null,
     html: checked.html,
   });
-  // A quick paper's heading prints the details this very save states (its row's when the save keeps them).
+  // The details this save stores on the paper (a standalone paper's; `keep` stores none).
   const details = isStandalonePaper(scope) && input.details && input.details !== 'keep' ? input.details : undefined;
-  const html = await renderPaperDocument(db, { scope, template: input.template, body, versionNo, planMaxMarks, details });
+  // A quick paper's heading prints the details this very save states (its row's when the save keeps them), and the
+  // version keeps them, so it prints the same later (`printed_details`).
+  const printedDetails = printedDetailsOf(scope, details, paper);
+  const html = await renderPaperDocument(db, { scope, template: input.template, body, versionNo, planMaxMarks, details: printedDetails ?? undefined });
   const pdf = await convertDocumentPdf(html, 'question_paper', input.signal);
   // A standalone paper's PDF is named after the details this very save states, or the paper's own when it keeps them.
   const names: PaperNames =
@@ -787,6 +808,7 @@ async function renderAndStore(
         sourceConversationId: source.kind === 'agent' ? source.conversationId : null,
         sourceVersionId: source.kind === 'copy' ? source.sourceVersionId : null,
         planMaxMarks,
+        printedDetails,
         warnings: checked.notices,
         templateRevisionId: input.template.kind === 'template' ? input.template.revisionId : null,
         pdfArtifactId: artifact.id,
@@ -849,7 +871,15 @@ export async function renderStoredVersionHtml(
   const body = await renderQuestionPaperBody(db, { schoolId, paperId: version.paperId, html: version.contentHtml });
   // The maximum marks are the saved fact (`plan_max_marks`), not the plan as it is today: an edited plan must not change
   // an old version's preview or a restored PDF. Class, subject, mode and exam names still come from the live scope.
-  const html = await renderPaperDocument(db, { scope, template, body, versionNo: version.versionNo, planMaxMarks: version.planMaxMarks, generatedAt });
+  const html = await renderPaperDocument(db, {
+    scope,
+    template,
+    body,
+    versionNo: version.versionNo,
+    planMaxMarks: version.planMaxMarks,
+    details: version.printedDetails ?? undefined,
+    generatedAt,
+  });
   return { html, templateName: template.kind === 'template' ? template.name : null };
 }
 
@@ -1036,7 +1066,9 @@ export async function downloadVersionDocx(
 async function storedVersionTemplateHtml(db: DatabaseExecutor, scope: ResolvedPaper, version: VersionRow): Promise<string> {
   const template = await pinnedPrintTemplateOf(db, scope, version);
   if (template.kind === 'plain') return renderStandaloneQuestionPaperShell();
-  const context = await measure('qp.context', () => buildPaperContext(db, scope, { versionNo: version.versionNo, planMaxMarks: version.planMaxMarks }));
+  const context = await measure('qp.context', () =>
+    buildPaperContext(db, scope, { versionNo: version.versionNo, planMaxMarks: version.planMaxMarks, details: version.printedDetails ?? undefined }),
+  );
   return measure('qp.document.render', () => renderQuestionPaperTemplate(template.content, context));
 }
 

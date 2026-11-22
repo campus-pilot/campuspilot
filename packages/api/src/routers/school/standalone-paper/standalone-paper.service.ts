@@ -164,6 +164,7 @@ async function factsOf(db: DatabaseExecutor, paper: PaperRow): Promise<z.infer<t
   return {
     paperId: paper.id,
     printLayout: paper.printLayout,
+    sessionId: paper.sessionId,
     details: detailsOf(paper),
     pageCount: pages?.count ?? 0,
     pageRevision: paper.pageRevision,
@@ -284,6 +285,7 @@ export async function listStandalonePapers(
       const facts = listFactsOf(paper.id);
       return {
         paperId: paper.id,
+        sessionId: paper.sessionId,
         details: detailsOf(paper),
         pageCount: facts.pageCount,
         latestVersionNo: paper.latestVersionNo,

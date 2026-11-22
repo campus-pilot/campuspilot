@@ -128,6 +128,7 @@ by `createStandalonePaper` from the school's kind and never changed:
 | `print_layout` | `plain`: the built-in shell, the AI writes the whole heading | `school_template`: the school's selected question paper template prints the heading, as for an exam paper; the AI writes the body only, leaving out every line the template prints (`templatePrints`) |
 | `session_id` | null | the session it was created in (`createStandalonePaper` takes `sessionId`, required in a school, refused in a personal space); its template prints the session's years |
 | Version template | none (`template_revision_id` null) | the template revision it printed with, pinned (CHECK on `paper_print_layout`, held equal to the paper's by a composite foreign key) |
+| Version heading | in the body | `printed_details` (class, subject and exam names and maximum marks): the details the version's heading printed, a snapshot like `plan_max_marks` (CHECK: set exactly for a quick paper's version) |
 
 Migration `0083_school-quick-papers.sql` added `print_layout` (and the version's
 `paper_print_layout`), the fifth detail `details_max_marks` (a whole number from 1 to
@@ -140,7 +141,11 @@ Migration `0083_school-quick-papers.sql` added `print_layout` (and the version's
 every document, the session's years, and the paper's details for the exam name, class,
 subject and `maxMarks`; a quick paper has no exam slug, order, subject slug or mode, so
 those are empty, never invented. The marketplace designs print the mode and the footer's
-exam name only when there is one. A save prints the details it is about to store. What
+exam name only when there is one (a school's already imported revision does not have
+that guard and prints an empty "()" after the subject until the school imports the
+design again). A save prints the details it is about to store and keeps them on the
+version (`printed_details`), and an old version's preview, Word file and restored PDF
+print from that snapshot, never from the paper's details as they are now. What
 the template prints for a quick paper (`readTemplatePrints`) is rendered with its current
 details and a placeholder for each it does not state yet (`withDetailPlaceholders`:
 `[class]`, `[subject]`, `[examination]`, `[maximum marks]`), so a line a template prints
@@ -171,6 +176,14 @@ shared with a standalone paper follow the same rule (`mayReachStandalonePaper` i
 `createStandalonePaper` reuses only the caller's own unused paper in the same session.
 The trusted generation job reads its paper with `findStandalonePaperScope` (no reach
 check: the start procedure checked it).
+
+**Sessions.** A quick paper belongs to the session it was created in: the Question
+papers page of that session lists it, switching session from its screen returns to the
+new session's list (`sessionSwitchSuffix`), and `listStandalonePapers` (the agents' list)
+returns the papers of every session with each one's `sessionId`. Unlike an exam paper, a
+quick paper is not locked when its session stops being the active one: it stays writable
+(an open product decision; the school's read-only gate still applies). A session that
+holds papers cannot be deleted (the foreign key refuses it), as with exam papers.
 
 **No limits of a personal space.** A school has any number of quick papers and versions,
 and no save rate or storage quota: the personal space limits (`personal-space.limits.ts`)

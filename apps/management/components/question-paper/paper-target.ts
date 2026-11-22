@@ -38,8 +38,10 @@ type StandaloneDetail = z.infer<typeof standalonePaperDetailOutputSchema>;
 
 /**
  * The facts the studio reads about a paper, for either kind. An exam paper's
- * detail is one as it is. A standalone paper has no exam that could end and
- * no session that could stop being active, so its lock facts are
+ * detail is one as it is. A standalone paper has no exam that could end, and
+ * the server does not lock it with its session (a school's quick paper stays
+ * writable after its session is no longer the active one;
+ * docs/question-papers.md "Quick papers in a school"), so its lock facts are
  * `examCompleted: false` and `sessionActive: true` (nothing locks it but the
  * school's own read-only state, which the server refuses with its own
  * message); it has no plan, so `planMaxMarks` is null; and whether it can

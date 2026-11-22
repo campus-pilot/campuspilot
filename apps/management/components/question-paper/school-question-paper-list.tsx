@@ -140,6 +140,9 @@ function PaperRows({ scope, controller }: { scope: QuestionPapersScope; controll
     { id: 'updatedAt', header: 'Updated', enableSorting: false, meta: { className: PHONE_HIDDEN }, cell: ({ row }) => updatedOn.format(row.original.updatedAt) },
   ];
   const defaultView = isDefaultView(controller);
+  // Only someone who may create quick papers is asked to make one; the same check as the button's gate.
+  const canCreate =
+    useQuery(orpc.authorization.checkPermissions.queryOptions({ input: { permissions: [standalonePaperPermission(scope.schoolId, 'manage')] } })).data?.results[0] === true;
   return (
     <DataTable
       ariaLabel="Question papers"
@@ -156,7 +159,11 @@ function PaperRows({ scope, controller }: { scope: QuestionPapersScope; controll
       state={controller.tableState}
       onRowClick={(paper) => router.push(schoolQuestionPaperHref(scope, paper))}
       emptyMessage={
-        defaultView ? 'No quick papers yet. Create one from photos of a paper, a PDF or a description.' : 'No question papers match.'
+        !defaultView
+          ? 'No question papers match.'
+          : canCreate
+            ? 'No quick papers yet. Create one from photos of a paper, a PDF or a description.'
+            : 'No quick papers yet.'
       }
       emptyAction={defaultView ? <CreateQuickPaperButton scope={scope} placement="empty" /> : undefined}
     />
