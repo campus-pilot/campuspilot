@@ -1,5 +1,6 @@
 import { issueAssistantRunToken } from '@campuspilot/api/assistant/token';
 import { resolvePaperScope, resolveStandalonePaper } from '@campuspilot/api/routers/school/question-paper/question-paper.scope';
+import { readSchoolKind } from '@campuspilot/api/school-access/school-kind.service';
 import type { AssistantAttachmentKind, AssistantMessageSeed } from '@campuspilot/assistant-contract/attachments';
 import { assistantContract } from '@campuspilot/assistant-contract/contract';
 import { ASSISTANT_LIST_PAGE_SIZE, type AssistantStreamEvent } from '@campuspilot/assistant-contract/dto';
@@ -216,7 +217,7 @@ export const assistantRouter = os.router({
       available: access.allowed,
       unavailableReason: access.refusal?.message ?? null,
       // A spoken request becomes an ordinary message, so voice needs a text model too (checked above).
-      voice: { available: voiceRefusal(context.session, access, voiceSettings()) === null },
+      voice: { available: voiceRefusal(context.session, access, voiceSettings(), await readSchoolKind(db, input.schoolId)) === null },
     };
   }),
 
