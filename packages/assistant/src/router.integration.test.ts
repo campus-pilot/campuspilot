@@ -61,7 +61,9 @@ vi.mock('@campuspilot/api/assistant/token', () => ({
 /** Object storage is not part of this test project; attachment rows are enough for the router. */
 const storage = vi.hoisted(() => ({ deleted: [] as string[], failing: false }));
 /** The paper a seed names exists only when its session id is `ss` (the real lookup is tested with the question paper procedures). */
-vi.mock('@campuspilot/api/routers/school/question-paper/question-paper.scope', () => ({
+vi.mock('@campuspilot/api/routers/school/question-paper/question-paper.scope', async (importOriginal) => ({
+  // The standalone paper reach check runs for real against the test database (`conversation-access.ts`).
+  resolveStandalonePaper: (await importOriginal<typeof import('@campuspilot/api/routers/school/question-paper/question-paper.scope')>()).resolveStandalonePaper,
   resolvePaperScope: vi.fn(async (_db: unknown, key: { sessionId: string }) => {
     if (key.sessionId !== 'ss') {
       const { ORPCError } = await import('@orpc/server');
