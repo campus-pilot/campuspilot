@@ -271,7 +271,11 @@ clients and the assistant call them directly
   `getStandalonePaper`, `getStandalonePaperDraft`, `listStandalonePaperVersions`,
   `learn_standalone_question_paper`, `validateStandalonePaperDraft`,
   `saveStandalonePaperVersion` and `editStandalonePaper` (both skip approval
-  and take `details`, all four, which replace the paper's).
+  and take `details`, all four, which replace the paper's). In the in-app
+  chat a save (and `getStandalonePaperDraft`) may name a `draftId`: it is
+  found among the conversation's `validateStandalonePaperDraft` calls
+  (`findChatDraftContent` picks the validate tool by the paper's kind,
+  `DRAFT_TOOL_NAME`), never an exam paper's drafts.
 - Human only (hidden): `getStandalonePaperDetail`, `reserve/release/delete/rotate/reorderStandalonePaperPage(s)`,
   `startStandalonePaperGeneration`, `deleteStandalonePaper`,
   `getStandalonePaperPreview`, `previewStandalonePaperDraft`, `getStandalonePaperDownload`.
@@ -386,9 +390,14 @@ saves always state all four.
   standalone procedures through `components/question-paper/paper-target.ts`,
   the one place that maps a paper of either kind to its procedures, upload
   routes, permission and seed.
-- Switcher: a personal space is its own **Personal space** entry; a school
-  opens its entry, a personal space its papers. **Create a school** is offered
-  as everywhere (`useOffersSchoolCreation`).
+- Switcher: a personal space is its own **Personal space** entry in a
+  **Personal** group; a school opens its entry, a personal space its papers.
+  The **Your schools** group is left out when the person has no school (never
+  shown empty). **Create a school** is offered as everywhere
+  (`useOffersSchoolCreation`); creating one opens the new school's guided
+  setup: the form reads the school list again even where no screen shows it
+  (`refetchType: 'all'`), so the new school's access check finds it instead of
+  the cached list, which would fall back to the personal space.
 - Landing (`/school`, `landingSchoolOf`): a valid stored selection; else the
   first real school; else the personal space; else the "not part of a school"
   page. Landing never creates a personal space.
@@ -398,12 +407,32 @@ saves always state all four.
   Billing card. `NEXT_PUBLIC_WEBSITE_URL` is a build variable of the
   management app (`packages/env/src/management.client.ts`, the Dockerfile, the
   release workflow's build args; https://campuspilot.in in production).
+  A refused change says the same: the API words the read-only refusals for a
+  personal space in its own terms (`PERSONAL_SPACE_WRITE_REFUSAL_MESSAGES`,
+  `schoolWriteRefusalMessageOf`: the trial ended or the space is suspended,
+  the papers can still be viewed and downloaded, contact us), for procedures,
+  uploads, the assistant and a generation that stops; never about a school or
+  billing. The reason (`data.reason`) is unchanged. Beside **Create question
+  paper** the app adds the contact link (`PersonalSpaceErrorText`,
+  `personalWriteRefusalOf`); in the studio the notice under the bar carries it.
+- Phones: the papers table keeps only Subject (with the class, exam and school
+  under it) and Status below `sm`; the other columns are left out with CSS
+  (`meta.className` on a `DataTable` column, `hidden sm:table-cell`), so the
+  list reads without sideways scrolling.
 
 ## Admin
 
 A **Personal** badge (`SchoolBadges`) and a **Kind** filter on Organizations
-(`systemAdmin.listSchools` `filters.kind`). A personal space's trial is
-renewed with the existing Billing card.
+(`systemAdmin.listSchools` `filters.kind`); a personal space shows no setup
+status there (it has no guided setup) and a dash for its empty location. A
+personal space's trial is renewed with the existing Billing card.
+
+Its dashboard shows what matters for one person's papers
+(`systemAdmin.getPersonalSpaceStats`, refused for a real school): papers,
+versions, stored bytes against `PERSONAL_SPACE_STORAGE_QUOTA_BYTES`, AI spend
+in the current spend window against the assistant's limit, and its plan (the
+trial and when it ends). Never the school counts (staff, classes, sessions,
+students), and no onboarding badge or location separator in its header.
 
 A personal space's admin pages are its dashboard, AI and storage usage, plan
 and features, and settings, all `systemAdmin.*`. Its sessions, staff,

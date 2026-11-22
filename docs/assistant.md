@@ -69,7 +69,13 @@ permissions.
    view** lists: every procedure the policy allows, core and advanced, tagged
    with exposure and module. Core tools load up front; advanced ones are
    deferred to the provider's tool search where it has one (Anthropic);
-   Gemini gets every tool on each request.
+   Gemini gets every tool on each request. A tool whose input has a top-level
+   `schoolId` (`schoolScoped`, from its listed schema) is shown to the model
+   without it, and the run fills in the conversation's school when calling it
+   (`modelInputSchemaOf`, `toolInputFor` in `src/runtime/tools.ts`): models
+   mistype long random ids, and a one-character slip was refused as another
+   school. A `schoolId` the model sends anyway is passed on unchanged, so the
+   API still refuses a call naming another school.
 5. A write pauses on a Restate awakeable until the user approves or declines
    it in the UI. The decision is saved on the approval row and handed to the
    worker (`AssistantControl.resolveApproval`, which wakes the run with the
