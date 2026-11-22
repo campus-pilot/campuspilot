@@ -29,6 +29,7 @@ import { pageNotReadyMessage, unreadablePageMessage } from '../../routers/school
 import { getObjectBytes } from '../../routers/school/question-paper/question-paper.storage';
 import { renameReservedClasses } from '../../routers/school/question-paper/question-paper.sanitize';
 import { checkQuestionPaperDraft, saveQuestionPaperVersion, SourceJobEndedError } from '../../routers/school/question-paper/question-paper.version.service';
+import { personalSpaceLimitOf } from '../../personal-space/personal-space.limits';
 import { QUESTION_PAPER_JOB_FAILURES, type QuestionPaperJobErrorCode } from './constants';
 import { nextQuestionPaperRequestKey, recordQuestionPaperRequest } from './cost';
 import type { QuestionPaperJobInput } from './input';
@@ -715,6 +716,11 @@ async function savePaper(deps: GenerationDeps, input: QuestionPaperJobInput, beg
   } catch (error) {
     // The sweep ended this job while the version was rendering: nothing was committed, stop quietly.
     if (error instanceof SourceJobEndedError) throw new JobStopped();
+    // A personal space's limits (docs/personal-space.md "Limits"): checked when the job started, and again here,
+    // because other saves may have filled the space or the paper meanwhile.
+    const limit = personalSpaceLimitOf(error);
+    if (limit === 'storage') throw new QuestionPaperJobFailure('storage_full', undefined, (error as Error).message);
+    if (limit === 'versions') throw new QuestionPaperJobFailure('version_limit', undefined, (error as Error).message);
     if (error instanceof ORPCError && error.code === 'BAD_REQUEST') {
       // Four different BAD_REQUESTs reach here: the paper was locked meanwhile (session or exam ended), the plan lost the
       // paper's mode meanwhile, the document failed the shared check, or the render refused it (too large or too complex).

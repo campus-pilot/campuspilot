@@ -20,6 +20,9 @@ import { and, asc, eq, inArray, lt, sql } from 'drizzle-orm';
 import type { z } from 'zod';
 
 import { rpcError } from '../../../errors';
+import { PERSONAL_SPACE_MAX_RUNNING_JOBS } from '../../../personal-space/personal-space.limits';
+import { assertPersonalSpaceStorageRoom, assertStandaloneVersionRoom } from '../../../personal-space/personal-space.storage';
+import { readSchoolKind } from '../../../school-access/school-kind.service';
 import { getExamSession } from '../exam/exam.service';
 import { conversationRefOf, latestPaperConversationId, paperChatIsWorking, unshareConversationsOf, unsharePaperConversations } from './question-paper.conversations';
 import { checkImageHeader, makeImageDerivatives, normalizeFigureImage } from '../../../files/image-derivative';
@@ -332,6 +335,7 @@ async function precheckPageUpload(db: Database, scope: ResolvedPaper) {
   const [pages, active] = await Promise.all([pagesOf(db, paper.id), activeJobOf(db, paper.id)]);
   if (pages.length >= QUESTION_PAPER_MAX_PAGES) throw rpcError.badRequest(`A paper can have at most ${QUESTION_PAPER_MAX_PAGES} pages.`);
   if (active) await assertNoActiveJob(db, paper.id, 'Pages cannot be added');
+  await assertPersonalSpaceStorageRoom(db, { schoolId: paperSchoolIdOf(scope), addedBytes: 0, lock: false });
 }
 
 /** The same unlocked look for a figure: a paper that already holds its figures refuses before anything is written. */
@@ -388,6 +392,8 @@ export async function reserveQuestionPaperPages(
       throw rpcError.badRequest(`A paper can have at most ${QUESTION_PAPER_MAX_PAGES} pages.`);
     }
     await assertNoActiveJob(tx, paper.id, 'Pages cannot be added');
+    // A personal space that is already full reserves nothing (the photo's size is checked when it arrives).
+    await assertPersonalSpaceStorageRoom(tx, { schoolId: paperSchoolIdOf(scope), addedBytes: 0, lock: true });
     const rows = await tx
       .insert(examQuestionPaperPageTable)
       .values(
@@ -412,7 +418,7 @@ export async function reserveQuestionPaperPages(
  * The cheap, unlocked look before the original is written: the page exists in
  * this paper and still awaits its bytes. The locked update re-checks both.
  */
-async function precheckPageStore(db: Database, scope: ResolvedPaper, pageId: string) {
+async function precheckPageStore(db: Database, scope: ResolvedPaper, pageId: string, byteSize: number) {
   const paper = await findPaperOf(db, scope);
   const [page] = paper
     ? await db
@@ -423,6 +429,7 @@ async function precheckPageStore(db: Database, scope: ResolvedPaper, pageId: str
     : [];
   if (!page) throw rpcError.notFound('Question paper page');
   if (page.uploadStatus !== 'awaiting') throw rpcError.conflict('This page already has its photo.');
+  await assertPersonalSpaceStorageRoom(db, { schoolId: paperSchoolIdOf(scope), addedBytes: byteSize, lock: false });
 }
 
 /**
@@ -448,7 +455,7 @@ export async function storeQuestionPaperPage(
 ) {
   const { scope, file, pageId } = input;
   assertResolvedPaperWritable(scope);
-  await precheckPageStore(db, scope, pageId);
+  await precheckPageStore(db, scope, pageId, file.bytes.byteLength);
   const size = await checkImageHeader(file.bytes);
   // Each attempt writes its own object: an overlapping store for the same page (a repeated request) that loses
   // the fence below removes only what it wrote, never the original of the attempt that won.
@@ -459,6 +466,9 @@ export async function storeQuestionPaperPage(
       await assertResolvedPaperWritableLocked(tx, scope);
       const paper = await lockPaperOf(tx, scope);
       await assertNoActiveJob(tx, paper.id, 'Pages cannot be added');
+      // The photo's bytes count now; its thumbnail and model copy, made by the worker from an accepted photo, are
+      // counted once they exist (docs/personal-space.md "Limits").
+      await assertPersonalSpaceStorageRoom(tx, { schoolId: paperSchoolIdOf(scope), addedBytes: file.bytes.byteLength, lock: true });
       const [stored] = await tx
         .update(examQuestionPaperPageTable)
         .set({
@@ -740,6 +750,7 @@ export async function rotateQuestionPaperPage(
           width: derivatives.width,
           height: derivatives.height,
           thumbS3Key: thumbKey,
+          thumbByteSize: derivatives.thumb.bytes.byteLength,
           modelS3Key: modelKey,
           modelContentType: derivatives.model.contentType,
           modelByteSize: derivatives.model.bytes.byteLength,
@@ -896,6 +907,8 @@ export async function storeQuestionPaperFigure(
   const { figure } = input;
   const figureId = generateId('examQuestionPaperFigure');
   const key = questionPaperKeys.figure(paperSchoolIdOf(input.scope), figureId, figure.extension);
+  // An early look before the object is written; the transaction below decides.
+  await assertPersonalSpaceStorageRoom(db, { schoolId: paperSchoolIdOf(input.scope), addedBytes: figure.bytes.byteLength, lock: false });
   try {
     // Written before the transaction so no lock is held across storage I/O; removed again if the row is refused.
     await putObject(key, figure.bytes, figure.contentType);
@@ -909,6 +922,7 @@ export async function storeQuestionPaperFigure(
       if (figures!.count >= QUESTION_PAPER_LIMITS.figures) {
         throw rpcError.badRequest(`A paper can have at most ${QUESTION_PAPER_LIMITS.figures} figure images.`);
       }
+      await assertPersonalSpaceStorageRoom(tx, { schoolId: paperSchoolIdOf(input.scope), addedBytes: figure.bytes.byteLength, lock: true });
       const [row] = await tx
         .insert(examQuestionPaperFigureTable)
         .values({
@@ -965,8 +979,10 @@ export function pageNotReadyMessage(pages: ReadonlyArray<{ position: number; ori
 }
 
 /**
- * Refuses a new job while the school already has
- * `QUESTION_PAPER_MAX_RUNNING_JOBS_PER_SCHOOL` queued or running ones. The
+ * Refuses a new job while the school already has its cap of queued or running
+ * ones: `QUESTION_PAPER_MAX_RUNNING_JOBS_PER_SCHOOL` for a real school,
+ * `PERSONAL_SPACE_MAX_RUNNING_JOBS` for a personal space (decided from the
+ * school's kind, docs/personal-space.md "Limits"). The
  * monthly AI limit is checked against a cached spend sum, so the number of
  * jobs that can pass that check on the same stale value has to be bounded
  * here. A transaction-scoped advisory lock on the school makes the count and
@@ -980,10 +996,12 @@ async function assertSchoolJobCapacity(tx: DatabaseTransaction, schoolId: string
     .select({ count: sql<number>`count(*)::int` })
     .from(examQuestionPaperJobTable)
     .where(and(eq(examQuestionPaperJobTable.schoolId, schoolId), inArray(examQuestionPaperJobTable.status, ['queued', 'running'])));
-  const cap = assistantEnv.QUESTION_PAPER_MAX_RUNNING_JOBS_PER_SCHOOL;
+  const personal = (await readSchoolKind(tx, schoolId)) === 'personal';
+  const cap = personal ? PERSONAL_SPACE_MAX_RUNNING_JOBS : assistantEnv.QUESTION_PAPER_MAX_RUNNING_JOBS_PER_SCHOOL;
   if ((row?.count ?? 0) >= cap) {
+    const holder = personal ? 'Your personal space' : 'Your school';
     throw rpcError.conflict(
-      `Your school already has ${cap} AI generation${cap === 1 ? '' : 's'} running. Wait for one to finish, then generate this paper.`,
+      `${holder} already has ${cap} AI generation${cap === 1 ? '' : 's'} running. Wait for ${cap === 1 ? 'it' : 'one'} to finish, then generate this paper.`,
     );
   }
 }
@@ -1037,6 +1055,11 @@ export async function startQuestionPaperGeneration(
     if (unreadable) throw rpcError.badRequest(unreadable);
     if (await activeJobOf(tx, paper.id)) throw rpcError.conflict('A generation is already running for this paper.');
     await assertSchoolJobCapacity(tx, paperSchoolIdOf(scope));
+    if (isStandalonePaper(scope)) {
+      // The job saves a version and its PDF: refused now, before any model cost, when it could not be saved.
+      await assertStandaloneVersionRoom(tx, { schoolId: paperSchoolIdOf(scope), paperId: paper.id, countsTowardRate: false, lock: true });
+      await assertPersonalSpaceStorageRoom(tx, { schoolId: paperSchoolIdOf(scope), addedBytes: 0, lock: true });
+    }
     const [job] = await tx
       .insert(examQuestionPaperJobTable)
       .values({

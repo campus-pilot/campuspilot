@@ -26,6 +26,7 @@ import {
 import type { StandalonePaperScope } from '../question-paper/question-paper.scope';
 import { STANDALONE_QUESTION_PAPER_PRINTS } from '../question-paper/question-paper.standalone-shell';
 import { getVersion } from '../question-paper/question-paper.version.service';
+import { personalSpaceLimitError } from '../../../personal-space/personal-space.storage';
 import { STANDALONE_PAPERS_PER_SPACE_LIMIT } from './standalone-paper.dto';
 import type {
   getStandalonePaperOutputSchema,
@@ -68,7 +69,7 @@ export function detailsOf(paper: Pick<PaperRow, 'detailsSchoolName' | 'detailsCl
  *   paper holds nothing anyone made, so repeated clicks or a looping agent
  *   never pile up empty papers. The oldest unused one is returned.
  * - Otherwise a new paper is created, unless the space already holds
- *   {@link STANDALONE_PAPERS_PER_SPACE_LIMIT} papers (BAD_REQUEST saying so).
+ *   {@link STANDALONE_PAPERS_PER_SPACE_LIMIT} papers (`personalSpaceLimitError('papers')`).
  *
  * The caller has checked the school's kind and the permission.
  */
@@ -97,7 +98,7 @@ export async function createStandalonePaper(db: Database, input: { schoolId: str
     if (unused) return { paperId: unused.id, reused: true };
     const [held] = await tx.select({ count: count() }).from(examQuestionPaperTable).where(standalone);
     if ((held?.count ?? 0) >= STANDALONE_PAPERS_PER_SPACE_LIMIT) {
-      throw rpcError.badRequest(`A personal space can hold at most ${STANDALONE_PAPERS_PER_SPACE_LIMIT} question papers. Delete some to create another.`);
+      throw personalSpaceLimitError('papers');
     }
     const [paper] = await tx
       .insert(examQuestionPaperTable)

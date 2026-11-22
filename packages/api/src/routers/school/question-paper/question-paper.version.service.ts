@@ -21,6 +21,7 @@ import { and, desc, eq, isNull } from 'drizzle-orm';
 import { rpcError } from '../../../errors';
 import { FIGURE_MAX_BYTES } from '../../../files/image-derivative';
 import { convertDocumentPdf } from '../document/document.render';
+import { assertPersonalSpaceStorageRoom, assertStandaloneVersionRoom } from '../../../personal-space/personal-space.storage';
 import { documentDownloadUrl, persistDocumentObject } from '../document/document.storage';
 import { attachmentFigureIds, attachmentFigureProblems, chatFiguresOf, convertAttachmentFigures, isAttachmentFigureId, type ChatFigures } from './question-paper.attachments';
 import { buildQuestionPaperContext } from './question-paper.context';
@@ -458,6 +459,10 @@ export async function saveQuestionPaperVersion(
     if (done) return savedResult(done, planMaxMarksOf(scope));
   }
   assertResolvedPaperWritable(scope);
+  // A standalone paper's limits (docs/personal-space.md "Limits"), looked at before any chat image is copied into the
+  // paper and before the PDF is printed, so a refused save writes and prints nothing; the save's transaction checks
+  // them again under the lock.
+  if (isStandalonePaper(scope)) await assertStandaloneSaveRoom(db, scope, source, false);
   let checked: Extract<DraftCheck, { ok: true }>;
   if (source.kind === 'copy') {
     // Copying an earlier paper is a feature of exam papers (same class and subject); a standalone paper has no class.
@@ -507,6 +512,20 @@ export async function saveQuestionPaperVersion(
       throw error;
     }
   }
+}
+
+/**
+ * A standalone paper's limits for one more version: the version cap and,
+ * for every save but the AI job's, the space's save rate
+ * (`assertStandaloneVersionRoom`), then the space's stored bytes with the
+ * new PDF (`pdfBytes`; 0 for the early look before it is printed). An exam
+ * paper has none of these.
+ */
+async function assertStandaloneSaveRoom(db: DatabaseExecutor, scope: ResolvedPaper, source: SaveSource, lock: boolean, pdfBytes = 0, paperId?: string) {
+  const schoolId = paperSchoolIdOf(scope);
+  const resolvedPaperId = paperId ?? (await findPaperOf(db, scope))?.id ?? null;
+  await assertStandaloneVersionRoom(db, { schoolId, paperId: resolvedPaperId, countsTowardRate: source.kind !== 'ai_job', lock });
+  await assertPersonalSpaceStorageRoom(db, { schoolId, addedBytes: pdfBytes, lock });
 }
 
 /**
@@ -720,6 +739,7 @@ async function renderAndStore(
       }
       // The figures were validated against the paper as it was before the lock; it is the same paper (same id).
       if (paper && paper.id !== locked.id) throw new VersionRaceError();
+      if (isStandalonePaper(scope)) await assertStandaloneSaveRoom(tx, scope, source, true, artifact.byteSize, locked.id);
       await tx.insert(examQuestionPaperVersionTable).values({
         paperId: locked.id,
         paperKind: locked.kind,

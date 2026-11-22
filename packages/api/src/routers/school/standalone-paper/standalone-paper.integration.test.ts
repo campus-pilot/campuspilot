@@ -1,6 +1,7 @@
 import { db } from '@campuspilot/db';
 import { artifactTable } from '@campuspilot/db/schema/artifact';
 import {
+  examQuestionPaperFigureTable,
   examQuestionPaperJobTable,
   examQuestionPaperPageTable,
   examQuestionPaperTable,
@@ -12,6 +13,8 @@ import sharp from 'sharp';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createHandlerContext, createTestClient } from '../../../../test/fixtures';
+import { PERSONAL_SPACE_STORAGE_QUOTA_BYTES } from '../../../personal-space/personal-space.limits';
+import { personalSpaceStoredBytes } from '../../../personal-space/personal-space.storage';
 import { settleDerivatives } from '../../../../test/image-derivatives';
 import { personalSpaceOwner } from '../../../../test/personal-space';
 import { defaultGenerationDeps, runQuestionPaperGeneration, type StepRunner } from '../../../workflows/question-paper/generation';
@@ -229,5 +232,27 @@ describe('the generation job for a standalone paper', () => {
     expect(JSON.stringify(requests[1]!.parts)).toContain('no readable paper-details block');
     const [saved] = await db.select().from(examQuestionPaperTable).where(eq(examQuestionPaperTable.id, paperId));
     expect(saved!.detailsClassName).toBe('Class 6');
+  });
+
+  it('fails with its own reason when the space filled up while the paper was being written', async () => {
+    const { schoolId, paperId, job } = await queueStandaloneJob();
+    // Room for ten bytes: the PDF does not fit.
+    const stored = await personalSpaceStoredBytes(db, schoolId);
+    await db.insert(examQuestionPaperFigureTable).values({
+      paperId,
+      schoolId,
+      s3Key: `test/figures/${paperId}.png`,
+      contentType: 'image/png',
+      byteSize: PERSONAL_SPACE_STORAGE_QUOTA_BYTES - stored - 10,
+      width: 10,
+      height: 10,
+      sha256: 'x',
+      createdBy: job.requestedBy,
+    });
+    const { model } = scriptedModel([withDetails(ENGLISH_SCIENCE, DETAILS)]);
+    await runJob(job.id, model);
+    const [failed] = await db.select().from(examQuestionPaperJobTable).where(eq(examQuestionPaperJobTable.id, job.id));
+    expect(failed).toMatchObject({ status: 'failed', errorCode: 'storage_full' });
+    expect(await db.select().from(examQuestionPaperVersionTable).where(eq(examQuestionPaperVersionTable.paperId, paperId))).toEqual([]);
   });
 });

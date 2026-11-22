@@ -78,10 +78,11 @@ export const standalonePaperDetailsSchema = z.object({
 export type StandalonePaperDetailsDto = z.infer<typeof standalonePaperDetailsSchema>;
 
 /**
- * The most standalone papers one personal space holds (docs/personal-space.md).
- * A hard cap: creating one more is refused until a paper is deleted.
+ * The most standalone papers one personal space holds, with the space's other
+ * limits in `personal-space.limits.ts` (docs/personal-space.md "Limits"). A
+ * hard cap: creating one more is refused until a paper is deleted.
  */
-export const STANDALONE_PAPERS_PER_SPACE_LIMIT = 500;
+export { STANDALONE_PAPERS_PER_SPACE_LIMIT } from '../../../personal-space/personal-space.limits';
 
 export const createStandalonePaperInputSchema = z.object({ schoolId: id.describe('School id of the personal space.') });
 export const createStandalonePaperOutputSchema = z.object({

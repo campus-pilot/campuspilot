@@ -47,6 +47,8 @@ export const QUESTION_PAPER_JOB_FAILURES = {
   plan_mode_removed: 'The exam plan no longer has this paper\'s mode, so the paper was not saved. Check the exam plan and try again.',
   paper_unprintable: 'The paper was read but it is too large or too complex to print. Use fewer pages or simpler formulas.',
   pdf_failed: 'The paper was read but the PDF could not be created. Try again.',
+  storage_full: 'Your personal space is full, so the paper was not saved. Delete papers you no longer need, then try again.',
+  version_limit: 'This paper has as many versions as it can have, so the new one was not saved. Create a new paper.',
   internal_error: 'AI generation failed unexpectedly. Try again.',
   not_started: 'AI generation did not start. Try again.',
   not_finished: 'AI generation took too long. Try again.',
