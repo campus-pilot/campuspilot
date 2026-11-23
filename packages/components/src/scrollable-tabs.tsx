@@ -17,13 +17,17 @@ import { cn } from '@campuspilot/ui/lib/utils';
  * triggers, or a desktop scrollbar under them, overflow the row and the
  * browser shows a second, vertical scrollbar. A `line` row's active
  * underline sits 1px under the triggers, so that row pads 1px to hold it.
+ * The row only ever scrolls sideways, so its vertical overflow is hidden: a
+ * trigger's positioned underline (present, but transparent, in the `default`
+ * pill variant) still reaches past the row and would otherwise add a
+ * vertical scrollbar (`overflow-x-auto` makes the other axis `auto` too).
  */
 export function ScrollableTabsList({ className, variant = 'line', ...props }: ComponentProps<typeof TabsList>) {
   return (
     <TabsList
       variant={variant}
       className={cn(
-        'max-w-full justify-start overflow-x-auto group-data-horizontal/tabs:h-auto',
+        'max-w-full justify-start overflow-x-auto overflow-y-hidden group-data-horizontal/tabs:h-auto',
         variant === 'line' && 'pb-px',
         className,
       )}
