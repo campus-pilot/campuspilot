@@ -80,13 +80,15 @@ only Create document and Document history.
 5. If the template is missing, generation stays unavailable. An inline explanation
    describes the dependency, while the shell warning provides the authorized path
    to Settings.
-6. Preview validates and renders the current choices without writing an artifact.
-   It is optional: nothing waits for it, because generation validates the same
-   choices again on the server.
-7. "Download PDF" converts the same authorized context to PDF, stores it and
-   starts its download in one click. A member who may generate but not download
-   documents gets "Create PDF", which only stores it. The dialog then offers a
-   fresh authorized download ("Download again") and a link to unified history.
+6. Preview validates the whole selection and renders a sample (the first two
+   printed sheets) without writing anything. It is optional: nothing waits for
+   it, because generation validates the same choices again on the server.
+7. "Create PDF" starts a generation job (see "Generation jobs") and returns at
+   once. The dialog shows the job's progress (polled) and, when the PDF is
+   ready, a fresh authorized download (for members who may download documents)
+   and a link to unified history. Closing the dialog or leaving the page does
+   not cancel the job; History lists it while it runs and, with its message,
+   if it fails.
 
 The bill dialog searches and pages posted billing runs, displays the run period,
 billing date, bill count, amount, and state, and rejects empty or non-posted runs.
@@ -94,7 +96,7 @@ Fully reversed runs remain selectable because bill documents reproduce immutable
 original postings; the reversal state remains visible. A run source always
 previews and generates the complete immutable run by
 `billRunId`. The receipt dialog keeps non-reversed payment selections across search
-pages up to the 500-source API limit. Both preserve the current session in their
+pages up to the 1,500-source API limit. Both preserve the current session in their
 source; previewing before creation is optional, as for academic documents. The
 global receipt source carries an explicit payment-only eligibility policy; preview
 and generation both recheck in the database transaction that every selected
@@ -245,7 +247,9 @@ same boundary through server middleware.
 | `saveDocumentTemplate` | Save and select a custom revision | `MANAGE_DOCUMENT_TEMPLATES` |
 | `previewDocumentTemplate` | Render source with synthetic data; also powers read-only selected-template previews | `READ_DOCUMENT_TEMPLATES` |
 | `previewDocument` | Render authorized data without persistence | Academic: `GENERATE_DOCUMENTS`; finance: `GENERATE_FINANCE_DOCUMENTS` |
-| `generateDocument` | Render, convert, persist, and return a PDF artifact | Academic: `GENERATE_DOCUMENTS`; finance: `GENERATE_FINANCE_DOCUMENTS` |
+| `generateDocument` | Validate the request and queue a generation job; returns `{ jobId, job }` at once | Academic: `GENERATE_DOCUMENTS`; finance: `GENERATE_FINANCE_DOCUMENTS` |
+| `getDocumentGenerationJob` | Status, progress, `artifactId` once succeeded, `errorCode`/`errorMessage` once failed | Generate action of the job's type |
+| `listDocumentGenerationJobs` | A session's queued and running jobs and those failed in the last 7 days | Requested academic and/or finance artifact read actions |
 | `listDocumentArtifacts` | Paginated PDF history; explicit `all` requests form a chronological secure union | Requested academic and/or finance artifact read actions |
 | `getDocumentDownload` | Issue a fresh short-lived signed URL | Type-aware academic or finance artifact read action |
 | `deleteDocumentArtifact` | Retry-safe PDF deletion | Type-aware academic or finance artifact delete action |
@@ -313,7 +317,7 @@ template-only too, rendered by the question paper feature (see "Question papers"
 below), but it does store a PDF artifact per saved version. Do not add optional
 fields to a common base merely because two types happen to use the same value today.
 
-- Report cards can target a complete examination, one class, or up to 500 explicit
+- Report cards can target a complete examination, one class, or up to 1,500 explicit
   students within one class. Approval policy and four independent print flags are
   recorded.
 - Student IDs use enrollment plus admission identity and photo data.
@@ -500,8 +504,10 @@ Important shapes and semantics:
   and `subjects[]`. An unscheduled cell has an empty subjects array.
 - Legacy `rows[].cells[classId]` is a resolved subject object, an array preserving
   multiple subjects/modes, or `null`. Keep it while v1 templates remain supported.
-- Image values are embedded data URIs or `null`. Templates must guard them with
-  `{{#if ...}}`; they must never construct or fetch an external URL.
+- Image values are strings the template places in `<img src>` unchanged, or
+  `null`: a `data:` URI in previews, a generated asset file name in a generated
+  PDF (see "Images as conversion assets"). Templates must guard them with
+  `{{#if ...}}` and must never build or fetch a URL from them.
 
 ### Add a marketplace design
 
@@ -762,9 +768,124 @@ no selected template of the type, the message is sent as text instead. The
 worker acts for the notification system, not for a staff member; staff
 generation permissions do not apply because nothing is generated for staff.
 
+## Generation jobs
+
+Every PDF made through `generateDocument` (report cards, ID cards, admit cards,
+timetables, bills, receipts, statements, from the Documents workspace, the
+examination links, the admission ledger's receipt, bill and statement actions)
+is made in the background by the worker, so a 1,500-student export never loads
+the API pod and survives worker restarts. Notices and question papers keep their
+own flows. Code: `packages/api/src/workflows/document-generation/`, the router
+side in `document.jobs.ts`.
+
+**Start (API).** `generateDocument` authorizes exactly as before (type and
+source permissions, the `studentManagement` gate; a suspended school or one
+without a plan is refused by `requireAuth`, since starting a job is a write),
+checks the selected template revision (`CONFLICT` when it changed), builds every
+context once without reading any image (so relationships, approvals, the global
+receipt reversal check and the statement review hash refuse here, as before),
+refuses more than `MAX_DOCUMENT_SOURCE_ITEMS` (1,500) documents, inserts a
+`document_generation_job` row and returns. The row pins what the worker must
+reproduce: the template revision, `generated_at` (every document's
+`generatedAt`), the statement `review_hash`, and for finance documents
+`ledger_cutoff`, the per-account high-water ledger sequence read at start (a
+statement's is its reviewed high-water). The PDF's artifact id is reserved on
+the row (`artifact_id`). The request never waits for the worker: the hand-over
+runs after the insert, and the job row is also the outbox.
+
+**Hand-over.** The API sends a signed (`WORKER_CONTROL_SECRET`), idempotent
+one-way call to `DocumentGenerationControl.startGeneration`, the only
+ingress-public document service. It checks the row and queues the job on the
+ingress-private Restate object `documentGeneration`, keyed by school: its
+handler is exclusive, so **at most one job per school runs at a time** (a
+partial unique index on running jobs guarantees it) and the school's other jobs
+wait in order while other schools run. Each worker process runs at most two
+Gotenberg conversions or merges at once (`conversion-slots.ts`). The API sweep
+(every 30 s) re-sends unaccepted jobs, fails a job Restate never accepted
+(10 minutes, `dispatch_failed`), never started (60 minutes, `not_started`) or
+that runs longer than 60 minutes (`not_finished`), and removes temporary objects
+an ended job left behind.
+
+**Steps (worker, each journaled).** `claim` (queued to running) → `prepare` →
+`batch:N` per batch → `merge` (more than one batch) → `finish` → `cleanup`.
+Steps return only keys, counts, sizes and hashes.
+
+- `prepare` builds every context in one repeatable-read, read-only transaction
+  with the pinned cutoff (finance reads stop at the pinned sequences, so the
+  documents describe the moment of Generate), compares a statement's review hash
+  again, reads the size of every distinct image (`HEAD`), measures each
+  document's rendered HTML, splits the documents into batches and writes them as
+  JSON under the job's private prefix `schools/{schoolId}/document-jobs/{jobId}/`
+  with a manifest (name, student ids, finance source, warnings).
+- `batch:N` reads its JSON, reads its images once, renders with the pinned
+  revision, converts, and stores `batch-NNNN.pdf` under a deterministic key (a
+  repeated step overwrites; a single batch is stored straight at the final key).
+- `merge` streams the batch PDFs in order to Gotenberg `/forms/pdfengines/merge`
+  (it merges in file-name order) and streams the result into a multipart upload
+  at `schools/{schoolId}/documents/{artifactId}.pdf`; no PDF is held in memory
+  whole.
+- `finish` inserts the artifact (same fields as before: template revision, page
+  footprint, source identifiers, finance source, SHA-256, size, the requester as
+  creator) under the reserved id with `ON CONFLICT DO NOTHING` and marks the job
+  succeeded in one transaction, so a repeated finish never creates a second
+  artifact; a job the sweep failed meanwhile gets none.
+- `cleanup` removes the temporary prefix (and a final PDF no artifact holds).
+
+**Batching** (`batches.ts`). A batch closes at about 200 documents, about 5 MB
+of HTML, the render budget, or 20 MB of distinct image bytes (each image counted
+once per batch), whichever comes first, and always holds whole physical sheets
+(two half-A4 documents, eight student IDs, one of anything else), so the merged
+PDF has exactly the pages and order one conversion would print. A timetable is
+one document. A sheet whose images alone pass 20 MB fails (`images_too_large`).
+
+**Failure.** A job ends `failed` with a stable code and a message the screens
+show (`DOCUMENT_GENERATION_JOB_FAILURES`): a refused input (`source_changed`,
+`invalid_source` with the builder's own message, `template_unavailable`,
+`images_invalid` naming whose photo, `images_too_large`, `document_too_large`)
+fails at once without retries; an infrastructure failure is retried by Restate
+(5 attempts with backoff) and then fails as `conversion_failed` or
+`internal_error`. A job already accepted keeps running if the school is
+suspended afterwards, like a queued notification.
+
+**Screens.** The generators poll `getDocumentGenerationJob` with TanStack
+Query's `refetchInterval` (no effect) and show waiting, the part being created,
+the failure message, or the ready state with the download. A ledger row's
+receipt or bill action becomes a download button when its PDF is ready (a
+browser download must follow a click). History lists queued, running and
+recently failed jobs above the PDFs and reads both lists again while a job is in
+progress.
+
+**Data.** `document_generation_job` (migration `0084`) is school-owned and is
+deleted by `purge_demo_school`; its temporary objects are under the school's
+prefix, which the demo purge workflow sweeps.
+
+### Images as conversion assets
+
+Context builders can return images as references (`reference` mode,
+`document.images.ts`) instead of `data:` URIs. A preview reads only its sample's
+images and embeds them as `data:` URIs. A generation batch sends each distinct
+image once as a Gotenberg form file named `asset-<sha256>.<ext>` (the content
+hash and the verified type, nothing the school wrote) next to `index.html`, and
+the documents reference that name: the logo travels once per batch, each photo
+once. Templates are unchanged.
+
+Security (the second deliberate exception after question papers'
+`font-src data:`): in HTML converted with assets, the sanitiser keeps an
+`<img src>` only when it is a raster `data:` URI or exactly one of the batch's
+generated names (`documentSanitizerOptions`); any other relative path,
+`http(s):` or `file:` URL is removed with its element. The CSP of that HTML adds
+`'self'` to `img-src` and nothing else, because the asset files load from
+Gotenberg's request directory. The policy cannot name files, so a template's
+CSS `url()` could name another file Chromium may read; Gotenberg's Chromium deny
+list keeps file access to its own `/tmp` (request directories have random names)
+and only an image could be drawn. Previews never get this policy, question
+papers never get it, and image limits stay: 5 MB per image, 20 MB of images per
+batch.
+
 ## History and downloads
 
-History is one session-wide list. It may accept backend filters for contextual API
+History is one session-wide list of PDFs, preceded by the session's generation
+jobs that are still running or failed in the last seven days. It may accept backend filters for contextual API
 consumers, but the main UI does not require a document-type choice before showing
 records. Each record should expose its type, creation time, source summary, status,
 and template name when available.

@@ -144,6 +144,9 @@ One permanent warning explains why.
 - A new Cadet procedure that changes data is covered by `cadetProcedure`.
   Put it on `cadetLoginProcedure` only if a student must still be able to do
   it in a suspended school, and say why.
+- A PDF generation job (docs/document-system.md "Generation jobs") is refused
+  at start like any write; one already accepted runs to its end if the school
+  is suspended meanwhile (it only produces the PDF that was requested).
 - A background job that changes a school's data on its own schedule is not
   held today (there is none that staff do not start). If one is added, decide
   explicitly whether it runs for a suspended school and for a school without
