@@ -144,3 +144,26 @@ describe('CSS escapes cannot change what is loaded (review round 2)', () => {
     expect(html).toContain('color:red');
   });
 });
+
+describe('image-set() and substituted values cannot smuggle a target (review round 3)', () => {
+  const name = documentAssetName('e'.repeat(64), 'image/png');
+  const sheet = (css: string) => batchHtml(`<style>${css}</style>`, {}, [name]);
+
+  it.each([
+    ['image-set(var(--x))', '.a{--x:"../secret.png" 1x}.b{background-image:image-set(var(--x))}'],
+    ['-webkit-image-set(var(--x))', '.a{--x:"../secret.png" 1x}.b{background-image:-webkit-image-set(var(--x))}'],
+    ['image-set(attr(data-src))', '.b{background-image:image-set(attr(data-src) 1x)}'],
+    ['image-set(env(x))', '.b{background-image:image-set(env(x))}'],
+    ['an allowed url next to a variable', `.b{background-image:url(${name}), var(--x)}`],
+    ['an empty image-set()', '.b{background-image:image-set()}'],
+    ['an image-set() candidate that is not a literal', `.b{background-image:image-set(linear-gradient(red, blue) 1x, "${name}" 2x)}`],
+  ])('removes %s', (_label, css) => {
+    const html = sheet(css);
+    expect(html).not.toMatch(/image-set|url\(/);
+  });
+
+  it('keeps an image-set() whose every candidate is an allowed literal', () => {
+    const html = sheet(`.b{background-image:image-set(url(${name}) 1x, "${name}" 2x)}`);
+    expect(html).toContain(`image-set(url(${name}) 1x, "${name}" 2x)`);
+  });
+});

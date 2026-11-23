@@ -44,6 +44,72 @@ function urlTargets(value: string): string[] | null {
   return opened === found ? targets : null;
 }
 
+/** The text inside the parentheses opened just before `open`, or null when they never close. */
+function insideParentheses(value: string, open: number): { body: string; end: number } | null {
+  let depth = 1;
+  let quote: string | null = null;
+  for (let index = open; index < value.length; index += 1) {
+    const char = value[index]!;
+    if (quote) {
+      if (char === quote) quote = null;
+    } else if (char === '"' || char === "'") quote = char;
+    else if (char === "(") depth += 1;
+    else if (char === ")" && (depth -= 1) === 0) return { body: value.slice(open, index), end: index };
+  }
+  return null;
+}
+
+/** Splits at commas outside quotes and parentheses. */
+function topLevelParts(body: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let quote: string | null = null;
+  let start = 0;
+  for (let index = 0; index < body.length; index += 1) {
+    const char = body[index]!;
+    if (quote) {
+      if (char === quote) quote = null;
+    } else if (char === '"' || char === "'") quote = char;
+    else if (char === "(") depth += 1;
+    else if (char === ")") depth -= 1;
+    else if (char === "," && depth === 0) {
+      parts.push(body.slice(start, index));
+      start = index + 1;
+    }
+  }
+  parts.push(body.slice(start));
+  return parts;
+}
+
+/**
+ * One `image-set()` candidate: a literal `url(...)` or quoted string,
+ * optionally followed by a resolution (`2x`, `192dpi`). Anything else (a
+ * variable, a `type()`, a nested function) is not read, so it is refused.
+ */
+const IMAGE_SET_CANDIDATE =
+  /^\s*(?:url\(\s*(?:"([^"]*)"|'([^']*)'|([^)\s'"]*))\s*\)|"([^"]*)"|'([^']*)')(?:\s+[0-9]*\.?[0-9]+(?:x|dppx|dpi|dpcm))?\s*$/i;
+
+/**
+ * The targets of every `image-set()` / `-webkit-image-set()` in `value`;
+ * null when one of them cannot be read with certainty (an unclosed set, an
+ * empty set, or a candidate that is not a literal URL or string).
+ */
+function imageSetTargets(value: string): string[] | null {
+  const targets: string[] = [];
+  for (const match of value.matchAll(/(?:-webkit-)?image-set\s*\(/gi)) {
+    const inside = insideParentheses(value, match.index + match[0].length);
+    if (!inside) return null;
+    const candidates = topLevelParts(inside.body);
+    if (candidates.length === 0 || candidates.every((candidate) => candidate.trim() === "")) return null;
+    for (const candidate of candidates) {
+      const parsed = IMAGE_SET_CANDIDATE.exec(candidate);
+      if (!parsed) return null;
+      targets.push(parsed[1] ?? parsed[2] ?? parsed[3] ?? parsed[4] ?? parsed[5] ?? "");
+    }
+  }
+  return targets;
+}
+
 /**
  * Whether a declaration value (or at-rule prelude) loads only allowed
  * targets. Escapes are decoded only to FIND loading functions (`u\72l(` is
@@ -51,19 +117,24 @@ function urlTargets(value: string): string[] | null {
  * refused, because an escaped quote or parenthesis inside a URL string
  * (`url("a.png\")/../x.png")`) would make the checker read a different
  * target than Chromium resolves. Generated names and base64 data never need
- * a backslash.
+ * a backslash. A value that loads anything and also uses `var()`, `env()` or
+ * `attr()` is refused: the browser substitutes them after this check
+ * (`image-set(var(--x))` with `--x: "../secret.png" 1x`). Every `url()` and
+ * every `image-set()` candidate must be a literal whose target passes; a
+ * loading function with no target read is refused, never passed.
  */
 export function cssValueAllowed(raw: string, assets: ReadonlySet<string>): boolean {
   const value = decodeCssEscapes(raw);
   const functions = [...value.matchAll(LOADING_FUNCTION)].map((match) => match[1]!.toLowerCase());
   if (functions.length === 0) return true;
   if (raw.includes("\\")) return false;
+  if (/(?:^|[^a-z0-9_-])(?:var|env|attr)\s*\(/i.test(value)) return false;
   if (functions.some((name) => name !== "url" && name !== "image-set" && name !== "-webkit-image-set")) return false;
-  const targets = urlTargets(value);
-  if (targets === null) return false;
-  // `image-set("a.png" 1x)` names targets as plain strings: every quoted string counts.
-  if (functions.some((name) => name !== "url"))
-    for (const match of value.matchAll(/"([^"]*)"|'([^']*)'/g)) targets.push(match[1] ?? match[2] ?? "");
+  const urls = urlTargets(value);
+  const sets = imageSetTargets(value);
+  if (urls === null || sets === null) return false;
+  const targets = [...urls, ...sets];
+  if (targets.length === 0) return false;
   return targets.every((target) => {
     const trimmed = target.trim();
     return EMBEDDABLE_IMAGE.test(trimmed) || assets.has(trimmed);
