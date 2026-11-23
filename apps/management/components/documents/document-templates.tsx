@@ -20,8 +20,8 @@ import {
   type ActiveTemplate,
   type DocumentTemplateScope,
 } from './document-common';
-import { TemplatePdfPreview } from './template-pdf-preview';
-import { TemplateEditor } from './template-workspace';
+import { TemplateRevisionPdfPreview } from './template-pdf-preview';
+import { TemplateEditor, useTemplateWorkspaceView } from './template-workspace';
 
 const TEMPLATE_TITLES: Record<DocumentTemplateScope['documentType'], string> = {
   report_card: 'Report Cards Template',
@@ -115,7 +115,9 @@ export function DocumentTemplates({ scope }: { scope: DocumentTemplateScope }) {
 /**
  * The editor of the selected revision, keyed by it: a save (or a colleague's)
  * adopts the new revision only after the query cache refreshes, as a fresh
- * editor. The variable reference comes from the server's template contract.
+ * editor. What the builder shows (its tool and phone section) is kept here,
+ * above the key. The variable reference comes from the server's template
+ * contract.
  */
 function EditableTemplate({
   scope,
@@ -127,6 +129,8 @@ function EditableTemplate({
   onReload: () => Promise<void>;
 }) {
   const help = useQuery(orpc.school.learn_document_template_editing.queryOptions({ input: scope, staleTime: Number.POSITIVE_INFINITY }));
+  // Above the key, so the tool and section on screen survive the remount a save causes.
+  const view = useTemplateWorkspaceView();
   return (
     <TemplateEditor
       key={template.artifact.id}
@@ -135,6 +139,7 @@ function EditableTemplate({
       title={TEMPLATE_TITLES[scope.documentType]}
       contextHelp={help.data?.contextHelp}
       marketplaceHref={marketplaceHref(scope)}
+      view={view}
       onReload={onReload}
     />
   );
@@ -189,8 +194,10 @@ function NoTemplateSelected({ scope }: { scope: DocumentTemplateScope }) {
 
 /**
  * The selected template for someone who may read but not change it: the same
- * PDF preview as the editor's, with sample data. A Notice design is previewed
- * at either print size (a view choice, never saved).
+ * PDF preview as the editor's, with sample data, asked for by the selected
+ * revision's id (`previewDocumentTemplateRevisionPdf`: converting source of
+ * one's own needs the manage permission). A Notice design is previewed at
+ * either print size (a view choice, never saved).
  */
 function SavedTemplatePreview({
   scope,
@@ -220,13 +227,7 @@ function SavedTemplatePreview({
         }
       />
       <div className="h-[80dvh] min-h-96">
-        <TemplatePdfPreview
-          scope={scope}
-          content={template.content}
-          pageSize={template.artifact.pageSize}
-          printSize={printSize}
-          label={`${template.artifact.name} preview`}
-        />
+        <TemplateRevisionPdfPreview scope={scope} revisionId={template.revisionId} printSize={printSize} label={`${template.artifact.name} preview`} />
       </div>
     </TemplatePageFrame>
   );

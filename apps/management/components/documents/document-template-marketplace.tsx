@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { useForm, useStore } from '@tanstack/react-form';
 import { useQuery } from '@tanstack/react-query';
 import { Check, LayoutTemplate, Maximize2 } from 'lucide-react';
@@ -22,9 +22,10 @@ import { PreviewDialogContent } from '@campuspilot/components/documents/preview-
 import { OptionSelect } from '@campuspilot/components/option-select';
 import { resolveQueryBoundary } from '@campuspilot/components/query-boundary';
 import { ScrollableTabsList } from '@campuspilot/components/scrollable-tabs';
-import { Dialog } from '@campuspilot/ui/components/dialog';
+import { Dialog, DialogTrigger } from '@campuspilot/ui/components/dialog';
 import { Tabs, TabsContent, TabsTrigger } from '@campuspilot/ui/components/tabs';
 import { client, orpc } from '@/lib/orpc';
+import { FeatureUnknown } from '../feature-unavailable';
 import { useSchoolFeature } from '../require-feature';
 import {
   DocumentLoading,
@@ -58,8 +59,10 @@ type MarketplaceItem = {
   pageSize: 'full' | 'half';
 };
 
-/** Moves the marketplace to another type, design or preview; see `MarketplaceRequest`. */
+/** Moves the marketplace to another type or design, in place; see `MarketplaceRequest`. */
 type GoTo = (request: Partial<MarketplaceRequest>) => void;
+/** Opens or closes a design's full-screen preview (see `useMarketplaceNavigation`). */
+type PreviewNavigation = { open: (design: { type: DocumentType; template: string }) => void; close: (design: { type: DocumentType; template: string }) => void };
 
 /** Human-facing settings routes predate the API enum and stay explicitly mapped. */
 const settingsSlugs: Record<DocumentType, string> = {
@@ -78,18 +81,37 @@ function settingsHref(scope: DocumentTemplateScope) {
   return `/school/${encodeURIComponent(scope.schoolId)}/settings/templates/${settingsSlugs[scope.documentType]}`;
 }
 
+/** The `history.state` key that marks the entry opening the full-screen preview pushed. */
+const PREVIEW_HISTORY_MARK = 'campuspilotMarketplacePreview';
+
+/** Whether the current history entry is one the preview's opening pushed (so Back leaves it). */
+const onPushedPreviewEntry = () => (window.history.state as Record<string, unknown> | null)?.[PREVIEW_HISTORY_MARK] === true;
+
 /**
  * The type, design and preview the marketplace shows live in its address
  * (`?type=&template=&preview=1`, see `marketplace-model.ts`), so a reload, a
  * shared link or the template settings' Marketplace action opens the same
- * view. Changes replace the address: picking tabs is not a trail to walk
- * back through.
+ * view. The address is rewritten with the History API, never `router.*`:
+ * this route is an async server component, so a router navigation would
+ * fetch its RSC payload on every tab and the tabs and dialog would wait for
+ * it; Next syncs `useSearchParams` with `pushState` and `replaceState` (see
+ * `lib/search-param.ts`).
+ * - Picking a type or a design replaces the entry: tabs are not a trail to
+ *   walk back through.
+ * - Opening the preview pushes an entry, marked in `history.state`, so Back
+ *   (a phone's back gesture above all) closes the full-screen preview instead
+ *   of leaving the marketplace. Closing it goes back past that entry when
+ *   this page pushed it, and otherwise (a shared link that opened the
+ *   preview) replaces the entry without `preview`.
  */
 function useMarketplaceNavigation(schoolId: string) {
-  const router = useRouter();
   const request = marketplaceRequestOf(useSearchParams());
-  const goTo: GoTo = (next) => router.replace(marketplaceHref(schoolId, next), { scroll: false });
-  return { request, goTo };
+  const goTo: GoTo = (next) => window.history.replaceState(null, '', marketplaceHref(schoolId, next));
+  const preview: PreviewNavigation = {
+    open: (design) => window.history.pushState({ [PREVIEW_HISTORY_MARK]: true }, '', marketplaceHref(schoolId, { ...design, preview: true })),
+    close: (design) => (onPushedPreviewEntry() ? window.history.back() : goTo(design)),
+  };
+  return { request, goTo, preview };
 }
 
 /**
@@ -109,8 +131,26 @@ function useMarketplaceKinds(schoolId: string) {
     ...(notices.enabled ? [noticeDocumentKind] : []),
     ...(assistant.enabled ? [questionPaperDocumentKind] : []),
   ];
-  const pending = [notices, assistant, studentManagement].some((feature) => feature.status === 'pending');
-  return { kinds, pending };
+  const features = [notices, assistant, studentManagement];
+  const pending = features.some((feature) => feature.status === 'pending');
+  // The three come from one flags query: when it could not be read, every one is unknown and one retry reads them all.
+  const unknown = features.find((feature) => feature.status === 'unknown') ? { retry: studentManagement.retry } : null;
+  return { kinds, pending, unknown };
+}
+
+/**
+ * The marketplace under its header: loading while the school's features are
+ * read, a retry when they could not be read (never "no templates"), a notice
+ * when the school has no document type with templates, else the tabs.
+ */
+function MarketplaceBody({ schoolId, navigation }: { schoolId: string; navigation: ReturnType<typeof useMarketplaceNavigation> }) {
+  const { kinds, pending, unknown } = useMarketplaceKinds(schoolId);
+  if (pending) return <DocumentLoading />;
+  if (unknown) return <FeatureUnknown feature="studentManagement" onRetry={unknown.retry} />;
+  if (kinds.length === 0) {
+    return <DocumentNotice>This school has no document templates yet. They come with student management, notices or the AI assistant.</DocumentNotice>;
+  }
+  return <MarketplaceTypeTabs schoolId={schoolId} types={kinds} request={navigation.request} goTo={navigation.goTo} preview={navigation.preview} />;
 }
 
 /**
@@ -119,8 +159,7 @@ function useMarketplaceKinds(schoolId: string) {
  * the PDF it prints as, with a full-screen preview and Use template.
  */
 export function DocumentTemplateMarketplace({ schoolId }: { schoolId: string }) {
-  const { request, goTo } = useMarketplaceNavigation(schoolId);
-  const { kinds, pending } = useMarketplaceKinds(schoolId);
+  const navigation = useMarketplaceNavigation(schoolId);
   return (
     <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-5 pb-12">
       <header className="flex flex-col gap-1 border-b pb-5">
@@ -131,11 +170,7 @@ export function DocumentTemplateMarketplace({ schoolId }: { schoolId: string }) 
           until you choose another one.
         </p>
       </header>
-      {pending ? (
-        <DocumentLoading />
-      ) : (
-        <MarketplaceTypeTabs schoolId={schoolId} types={kinds} request={request} goTo={goTo} />
-      )}
+      <MarketplaceBody schoolId={schoolId} navigation={navigation} />
     </div>
   );
 }
@@ -151,13 +186,16 @@ function MarketplaceTypeTabs({
   types,
   request,
   goTo,
+  preview,
 }: {
   schoolId: string;
   types: readonly { value: DocumentType; label: string }[];
   request: MarketplaceRequest;
   goTo: GoTo;
+  preview: PreviewNavigation;
 }) {
   const type = selectedTypeOf(request.type, types.map(({ value }) => value));
+  // The body offers the tabs only when the school has a type.
   if (!type) return null;
   const asked = request.type === type;
   return (
@@ -188,6 +226,7 @@ function MarketplaceTypeTabs({
               requestedSlug={asked ? request.template : null}
               previewRequested={asked && request.preview}
               goTo={goTo}
+              preview={preview}
             />
           </DocumentPermission>
         </TabsContent>
@@ -202,11 +241,13 @@ function MarketplaceTypeSection({
   requestedSlug,
   previewRequested,
   goTo,
+  preview,
 }: {
   scope: DocumentTemplateScope;
   requestedSlug: string | null;
   previewRequested: boolean;
   goTo: GoTo;
+  preview: PreviewNavigation;
 }) {
   const market = useQuery(orpc.school.listMarketplaceTemplates.queryOptions({ input: scope }));
   const active = useQuery(orpc.school.getActiveDocumentTemplate.queryOptions({ input: scope }));
@@ -234,6 +275,7 @@ function MarketplaceTypeSection({
       // The dialog opens only for the design that was asked for, never for one shown instead.
       previewOpen={previewRequested && requestedSlug !== null && !selection.missing}
       goTo={goTo}
+      preview={preview}
     />
   );
 }
@@ -250,6 +292,12 @@ type DesignState = {
  * it, and its full-screen preview. A Notice design is previewed at a notice
  * print size ("Preview as", full or half A4, never saved), shared by the page
  * and the dialog; the choice is a form field.
+ *
+ * The design tabs activate on Enter or a click, not on focus
+ * (`activationMode="manual"`): arrowing along the row would otherwise select,
+ * and convert, every design it passes. The dialog's root wraps the tabs so
+ * the page's Preview button is its `DialogTrigger`: Radix returns focus to it
+ * when the dialog closes, also when Back closed it.
  */
 function MarketplaceDesigns({
   items,
@@ -258,6 +306,7 @@ function MarketplaceDesigns({
   inUseSlug,
   previewOpen,
   goTo,
+  preview,
   ...state
 }: DesignState & {
   items: readonly MarketplaceItem[];
@@ -266,6 +315,7 @@ function MarketplaceDesigns({
   inUseSlug: string | null;
   previewOpen: boolean;
   goTo: GoTo;
+  preview: PreviewNavigation;
 }) {
   const view = useForm({
     defaultValues: { printSize: 'full' as NoticePreviewPrintSize },
@@ -282,9 +332,10 @@ function MarketplaceDesigns({
       />
     ) : null;
   const type = state.scope.documentType;
+  const design = { type, template: selected.slug };
   return (
-    <>
-      <Tabs value={selected.slug} onValueChange={(slug) => goTo({ type, template: slug })} className="min-w-0 gap-4">
+    <Dialog open={previewOpen} onOpenChange={(next) => (next ? preview.open(design) : preview.close(design))}>
+      <Tabs value={selected.slug} onValueChange={(slug) => goTo({ type, template: slug })} activationMode="manual" className="min-w-0 gap-4">
         <ScrollableTabsList variant="default" aria-label={`${DOCUMENT_LABELS[type]} designs`}>
           {items.map((item) => (
             <DesignTab key={item.slug} item={item} inUse={item.slug === inUseSlug} />
@@ -295,27 +346,12 @@ function MarketplaceDesigns({
         ) : null}
         {items.map((item) => (
           <TabsContent key={item.slug} value={item.slug} className="min-w-0">
-            <MarketplaceDesign
-              {...state}
-              item={item}
-              inUse={item.slug === inUseSlug}
-              printSize={printSize}
-              printSizeControl={printSizeControl}
-              onPreview={() => goTo({ type, template: item.slug, preview: true })}
-            />
+            <MarketplaceDesign {...state} item={item} inUse={item.slug === inUseSlug} printSize={printSize} printSizeControl={printSizeControl} />
           </TabsContent>
         ))}
       </Tabs>
-      <MarketplacePreviewDialog
-        {...state}
-        open={previewOpen}
-        onClose={() => goTo({ type, template: selected.slug })}
-        item={selected}
-        inUse={selected.slug === inUseSlug}
-        printSize={printSize}
-        printSizeControl={printSizeControl}
-      />
-    </>
+      <MarketplacePreviewDialog {...state} item={selected} inUse={selected.slug === inUseSlug} printSize={printSize} printSizeControl={printSizeControl} />
+    </Dialog>
   );
 }
 
@@ -371,25 +407,26 @@ function MarketplaceDesign({
   inUse,
   printSize,
   printSizeControl,
-  onPreview,
   ...state
 }: DesignState & {
   item: MarketplaceItem;
   inUse: boolean;
   printSize: NoticePreviewPrintSize;
   printSizeControl: ReactNode;
-  onPreview: () => void;
 }) {
+  // The tab panel is already named by its design's tab, so this is a plain container, not another labelled region.
   return (
-    <section aria-label={item.name} className="flex min-w-0 flex-col gap-4">
+    <div className="flex min-w-0 flex-col gap-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <DesignSummary item={item} />
         <div className="flex shrink-0 flex-wrap items-start gap-2">
           {printSizeControl}
-          <DocumentButton variant="outline" onClick={onPreview}>
-            <Maximize2 data-icon="inline-start" aria-hidden />
-            Preview
-          </DocumentButton>
+          <DialogTrigger asChild>
+            <DocumentButton variant="outline">
+              <Maximize2 data-icon="inline-start" aria-hidden />
+              Preview
+            </DocumentButton>
+          </DialogTrigger>
           <DesignActions {...state} item={item} inUse={inUse} />
         </div>
       </div>
@@ -401,7 +438,7 @@ function MarketplaceDesign({
           label={`${item.name} preview with sample data`}
         />
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -409,51 +446,36 @@ function MarketplaceDesign({
  * A design full screen, on a phone and a larger screen alike, as the
  * question paper chat previews a draft (`PreviewDialogContent`): the pages
  * scroll inside the dialog, with Use template beside the title. It shows the
- * page's cached conversion, so opening it converts nothing again. Closing
- * it drops `preview` from the address.
+ * page's cached conversion, so opening it converts nothing again. It is the
+ * content of the `Dialog` that `MarketplaceDesigns` controls from the
+ * address; closing it drops `preview` from the address.
  */
 function MarketplacePreviewDialog({
-  open,
-  onClose,
   item,
   inUse,
   printSize,
   printSizeControl,
   ...state
 }: DesignState & {
-  open: boolean;
-  onClose: () => void;
   item: MarketplaceItem;
   inUse: boolean;
   printSize: NoticePreviewPrintSize;
   printSizeControl: ReactNode;
 }) {
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        if (!next) onClose();
-      }}
+    <PreviewDialogContent
+      size="full"
+      title={item.name}
+      description={`${DOCUMENT_LABELS[item.documentType]} · ${footprintLabel(item)} · Sample data. Nothing is imported until you choose Use template.`}
+      actions={
+        <>
+          {printSizeControl}
+          <DesignActions {...state} item={item} inUse={inUse} />
+        </>
+      }
     >
-      <PreviewDialogContent
-        size="full"
-        title={item.name}
-        description={`${DOCUMENT_LABELS[item.documentType]} · ${footprintLabel(item)} · Sample data. Nothing is imported until you choose Use template.`}
-        actions={
-          <>
-            {printSizeControl}
-            <DesignActions {...state} item={item} inUse={inUse} />
-          </>
-        }
-      >
-        <MarketplaceTemplatePdfPreview
-          scope={state.scope}
-          slug={item.slug}
-          printSize={printSize}
-          label={`${item.name} preview with sample data`}
-        />
-      </PreviewDialogContent>
-    </Dialog>
+      <MarketplaceTemplatePdfPreview scope={state.scope} slug={item.slug} printSize={printSize} label={`${item.name} preview with sample data`} />
+    </PreviewDialogContent>
   );
 }
 

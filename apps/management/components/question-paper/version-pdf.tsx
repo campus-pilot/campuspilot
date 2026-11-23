@@ -14,13 +14,15 @@ import { targetKeyOf, type PaperTarget } from './paper-target';
  * A saved version's PDF, opened with pdf.js. A version never changes, so it
  * is read once (`staleTime: Infinity`) and never refetched in place, which
  * would orphan the open document; the query client releases the document
- * when the cache drops it (`createQueryClient`). The data is not plain
+ * when the cache drops it (`createQueryClient`), and pdf.js frees it once no
+ * viewer holds it either (`LoadedPdf`). A document finished after the query
+ * was cancelled is freed by `loadPdf` itself. The data is not plain
  * JSON, so structural sharing is off.
  */
 function useVersionPdf(scope: PaperTarget, versionNo: number) {
   return useQuery({
     queryKey: ['question-paper', 'version-pdf', ...targetKeyOf(scope), versionNo],
-    queryFn: async ({ signal }) => loadPdf(await fetchQuestionPaperVersionPdf(scope, versionNo, signal)),
+    queryFn: async ({ signal }) => loadPdf(await fetchQuestionPaperVersionPdf(scope, versionNo, signal), signal),
     staleTime: Number.POSITIVE_INFINITY,
     structuralSharing: false,
     retry: retryUnlessRefused,

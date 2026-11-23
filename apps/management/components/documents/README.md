@@ -30,7 +30,7 @@ for the management implementation.
 | `document-templates.tsx` | Settings empty state, read-only PDF preview, and the editor's entry (keyed by revision) |
 | `template-workspace.tsx` | The template builder: header row, resizable AI/Code pane, PDF preview, working copy, assistant drafts, revision restore |
 | `template-assistant.tsx` | The builder's chat (`?chat=`), its seed, suggestions and drafts |
-| `template-pdf-preview.tsx` | A template source as its PDF (`previewDocumentTemplatePdf`), cached per source; a marketplace design as its PDF by slug (`previewMarketplaceTemplatePdf`) |
+| `template-pdf-preview.tsx` | A template source as its PDF (`previewDocumentTemplatePdf`, manage only), cached per source; a saved revision by id (`previewDocumentTemplateRevisionPdf`); a marketplace design by slug (`previewMarketplaceTemplatePdf`) |
 | `template-revisions.tsx` | Revision select (`?revision=`), All revisions dialog, read-only revision with Restore |
 | `template-code-editor.tsx` | Dynamically loaded Monaco source editor and format action |
 | `document-template-settings.tsx` | Settings permission boundary and scope adapter |
@@ -69,9 +69,23 @@ document HTML is shown: an iframe with an **empty** `sandbox`. Its options:
 - The template editor's preview is a PDF query keyed by a hash of the source: typing
   re-renders after a 900 ms pause (or *Refresh preview now*), an assistant draft,
   footprint or print size at once, and the previous pages stay while the next one
-  converts. Document-generation previews remain explicit HTML.
+  converts and under a failure. A preview is retried only when the server said the
+  person has several in flight (TOO_MANY_REQUESTS). Document-generation previews
+  remain explicit HTML.
+- Read-only users and the revision view preview a saved revision by its id, never
+  its source (`previewDocumentTemplatePdf` needs the manage permission).
+- A pdf.js document is held by the query cache (`release`) and by every `PdfPages`
+  that shows it (`retain`), and is freed when both are done; all documents share one
+  pdf.js worker (`loadPdf`). Preview queries keep a short `gcTime`.
 - The template on screen is derived (`editorSourceOf`) from the working copy and the
-  assistant's newest draft; no effect copies one into the other.
+  assistant's newest draft; no effect copies one into the other. A draft that
+  arrives after the person changed the template since sending is held, not shown,
+  and offered as *Replace my edits*.
+- View state in the address (`?chat=`, `?revision=`, the marketplace's
+  `?type=&template=`) is rewritten with `replaceSearchParam` / the History API,
+  never `router.replace`, which would refetch the route's server payload. The
+  marketplace's full-screen preview is pushed (`pushState`, marked in
+  `history.state`) so Back closes it.
 - Cache invalidation after selecting/saving a template must refresh both the active
   template and any consumers that show template availability.
 - A missing template is a persistent setup condition: register one domain-scoped
@@ -97,7 +111,8 @@ document HTML is shown: an iframe with an **empty** `sandbox`. Its options:
   selected design's PDF in a frame most of the screen tall. Only the selected
   design is converted. *Preview* opens it full screen (`PreviewDialogContent` size
   `full`) with Use template beside the title. The type, design and open preview are
-  in the address, not local state.
+  in the address, not local state. The design tabs activate on Enter or a click
+  (`activationMode="manual"`), so arrowing along them converts nothing.
 - The builder follows the question paper studio: it fills the window from md up
   (`APP_SHELL_FILL_HEIGHT_MD_CLASS`), the editing pane (AI | Code tabs) and the
   preview share a resizable divider, and *Hide editor* / *Show editor* fold the pane.

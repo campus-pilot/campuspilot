@@ -20,15 +20,22 @@ export type MarketplaceRequest = {
   preview: boolean;
 };
 
-/** A catalog slug as the API accepts one (`marketplaceTemplateInputSchema`), and nothing a URL could smuggle. */
-const SLUG_PATTERN = /^[A-Za-z0-9_-]{1,100}$/;
+/**
+ * The longest slug the API accepts (`marketplaceTemplateInputSchema`: any
+ * 1 to 100 characters). The address takes any such value rather than a
+ * stricter pattern of its own, so a design the catalog no longer lists is
+ * still told apart from no request ("no longer in the marketplace"). The
+ * value is only ever compared with the listed slugs and sent as API input;
+ * React escapes it wherever it is shown.
+ */
+const MAX_SLUG_CHARS = 100;
 
 export function marketplaceRequestOf(search: { get(name: string): string | null }): MarketplaceRequest {
   const type = documentTypeSchema.safeParse(search.get('type'));
   const template = search.get('template');
   return {
     type: type.success ? type.data : null,
-    template: template && SLUG_PATTERN.test(template) ? template : null,
+    template: template && template.length <= MAX_SLUG_CHARS ? template : null,
     preview: search.get('preview') === '1',
   };
 }

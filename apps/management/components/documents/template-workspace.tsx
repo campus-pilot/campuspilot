@@ -4,14 +4,17 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useCallback, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useForm, useStore } from '@tanstack/react-form';
-import { Code2, FileText, PanelLeftClose, PanelLeftOpen, RefreshCw, Save, Sparkles, Store } from 'lucide-react';
+import { Code2, FileText, PanelLeftClose, PanelLeftOpen, RefreshCw, Replace, Save, Sparkles, Store } from 'lucide-react';
 import { z } from 'zod';
 import { APP_SHELL_FILL_HEIGHT_MD_CLASS } from '@campuspilot/components/app-shell';
 import type { AssistantEditorSource } from '@campuspilot/assistant-contract/template-editing';
 import {
+  adoptShownSource,
+  draftBelongsTo,
   editorSourceOf,
   lastKnownSourceOf,
   sourceToSend,
+  templateDraftStatusOf,
   type TemplateDraft,
 } from '@campuspilot/components/documents/template-draft-model';
 import type { TemplateDraftCardStatus } from '@campuspilot/components/documents/template-draft-card';
@@ -73,10 +76,12 @@ function useSideBySide() {
 
 /**
  * The editor's state and its actions. The template on screen is derived from
- * two facts kept apart (`editorSourceOf`): the person's own working copy and
- * the assistant's newest ready draft, so a draft that arrives in the chat is
- * shown at once, with no effect, and a hand edit is never overwritten until
- * the next draft. Nothing is saved until Save, which goes through the same
+ * facts kept apart (`editorSourceOf`): the person's own working copy and the
+ * assistant's newest ready draft, so a draft that arrives in the chat is
+ * shown at once, with no effect. A hand edit is never overwritten: a draft
+ * that arrives after the person changed the template since sending their
+ * message is held back (`source.held`) and offered as "Replace my edits".
+ * Nothing is saved until Save, which goes through the same
  * `saveDocumentTemplate` as always and creates the immutable revision.
  */
 function useTemplateEditor(scope: DocumentTemplateScope, template: ActiveTemplate, latest: TemplateDraft | null, onReload: () => Promise<void>) {
@@ -92,6 +97,11 @@ function useTemplateEditor(scope: DocumentTemplateScope, template: ActiveTemplat
       manual: false,
       /** The draft (its call id) that was the newest when they last chose; a newer draft is shown over their copy. */
       manualOver: null as string | null,
+      /**
+       * Whether they changed the working copy by hand (typing, Restore, Reload saved) since their last message
+       * was sent: the snapshot taken at sending. A draft arriving after such a change is held, not shown.
+       */
+      editedSinceSend: false,
       /** The working copy the preview renders: it follows typing after a pause, so each keystroke is not a PDF. */
       previewContent: template.content,
       /** Notice designs only: the notice print size the preview renders at (not saved). */
@@ -105,6 +115,7 @@ function useTemplateEditor(scope: DocumentTemplateScope, template: ActiveTemplat
         pageSize: z.enum(['full', 'half']),
         manual: z.boolean(),
         manualOver: z.string().nullable(),
+        editedSinceSend: z.boolean(),
         previewContent: z.string(),
         printSize: noticePreviewPrintSizeSchema,
         error: z.string(),
@@ -127,7 +138,8 @@ function useTemplateEditor(scope: DocumentTemplateScope, template: ActiveTemplat
     },
   });
   const values = useStore(form.store, (state) => state.values);
-  const source = editorSourceOf({ content: values.content, over: values.manualOver, edited: values.manual }, latest);
+  const working = { content: values.content, edited: values.manual, over: values.manualOver, editedSinceSend: values.editedSinceSend };
+  const source = editorSourceOf(working, latest);
 
   const cancelPreviewTimer = () => {
     if (previewTimer.current) clearTimeout(previewTimer.current);
@@ -142,22 +154,52 @@ function useTemplateEditor(scope: DocumentTemplateScope, template: ActiveTemplat
   const editSource = (next: string) => {
     // Editing over a draft starts from that draft, so the preview keeps showing it until the pause is over.
     if (source.draft) form.setFieldValue('previewContent', source.content);
-    choose(next);
+    if (source.held) {
+      // Typing on while a draft is held keeps it held (and its "Replace my edits") until the person decides or sends.
+      form.setFieldValue('content', next);
+    } else {
+      choose(next);
+    }
+    form.setFieldValue('editedSinceSend', true);
     cancelPreviewTimer();
     previewTimer.current = setTimeout(() => {
       previewTimer.current = null;
       form.setFieldValue('previewContent', next);
     }, PREVIEW_DEBOUNCE_MS);
   };
+  /** Shows a draft (Show in editor, or Replace my edits for a held one): it becomes the working copy. */
   const showDraft = (draft: TemplateDraft) => {
+    // Only a draft of this school's template of this type is ever loaded here.
+    if (!draftBelongsTo(draft, scope)) return;
     cancelPreviewTimer();
     choose(draft.content);
+    form.setFieldValue('editedSinceSend', false);
     form.setFieldValue('previewContent', draft.content);
+  };
+  /**
+   * A message is being sent with what is on screen: the snapshot. The model
+   * now drafts from it, so a draft that arrives is shown unless the person
+   * changes the template again before it does. A held draft is declined by
+   * sending past it (the working copy that was sent is newer than it).
+   */
+  const markSent = () => {
+    if (source.held) choose(source.content);
+    form.setFieldValue('editedSinceSend', false);
+  };
+  /** Keeps a shown draft on screen as the working copy when its chat goes away (New chat). */
+  const adoptShown = () => {
+    const kept = adoptShownSource(working, source);
+    if (kept === working) return;
+    form.setFieldValue('content', kept.content);
+    form.setFieldValue('manual', kept.edited);
+    form.setFieldValue('manualOver', kept.over);
+    form.setFieldValue('previewContent', kept.content);
   };
   /** An earlier revision's source and footprint become the working copy; saving it adds a new revision. */
   const restore = (revision: { content: string; pageSize: PageSize }) => {
     cancelPreviewTimer();
     choose(revision.content);
+    form.setFieldValue('editedSinceSend', true);
     form.setFieldValue('pageSize', revision.pageSize);
     form.setFieldValue('previewContent', revision.content);
   };
@@ -165,6 +207,7 @@ function useTemplateEditor(scope: DocumentTemplateScope, template: ActiveTemplat
     if (!(await confirmNavigation())) return;
     cancelPreviewTimer();
     choose(template.content);
+    form.setFieldValue('editedSinceSend', true);
     form.setFieldValue('name', template.artifact.name);
     form.setFieldValue('pageSize', template.artifact.pageSize);
     form.setFieldValue('previewContent', template.content);
@@ -192,6 +235,8 @@ function useTemplateEditor(scope: DocumentTemplateScope, template: ActiveTemplat
     dirty: source.content !== template.content || values.name !== template.artifact.name || values.pageSize !== template.artifact.pageSize,
     editSource,
     showDraft,
+    markSent,
+    adoptShown,
     restore,
     reload,
     save,
@@ -201,11 +246,10 @@ function useTemplateEditor(scope: DocumentTemplateScope, template: ActiveTemplat
 
 type TemplateEditorState = ReturnType<typeof useTemplateEditor>;
 
-/** How each draft in the chat stands for this editor (`TemplateDraftCard`). */
-function draftBinding(editor: TemplateEditorState, savedAt: Date): TemplateDraftBinding {
+/** How each draft in the chat stands for this editor (`TemplateDraftCard`); a draft of another template is only described. */
+function draftBinding(editor: TemplateEditorState, scope: DocumentTemplateScope, savedAt: Date): TemplateDraftBinding {
   return {
-    statusOf: (draft): TemplateDraftCardStatus =>
-      draft.content === editor.source.content ? 'shown' : draft.writtenAt <= savedAt ? 'saved-before' : 'available',
+    statusOf: (draft): TemplateDraftCardStatus => templateDraftStatusOf(draft, { scope, source: editor.source, savedAt }),
     onShow: editor.showDraft,
   };
 }
@@ -238,7 +282,13 @@ function AiAction({
 
 /** The one header row: the template's name and state, then its actions (the main one, Save, last). */
 function WorkspaceHeader({ title, editor, actions }: { title: string; editor: TemplateEditorState; actions: ReactNode }) {
-  const state = editor.source.draft ? `Draft ${editor.source.draft.ordinal} from the assistant, not saved` : editor.dirty ? 'Unsaved changes' : 'Saved';
+  const state = editor.source.draft
+    ? `Draft ${editor.source.draft.ordinal} from the assistant, not saved`
+    : editor.source.held
+      ? `Your edits, unsaved · Draft ${editor.source.held.ordinal} is waiting`
+      : editor.dirty
+        ? 'Unsaved changes'
+        : 'Saved';
   return (
     <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 md:border-b md:px-4 md:py-2.5">
       <div className="flex min-w-0 flex-1 flex-col">
@@ -267,6 +317,27 @@ function SaveActions({ editor }: { editor: TemplateEditorState }) {
         </>
       )}
     </editor.form.Subscribe>
+  );
+}
+
+/**
+ * A draft that arrived after the person changed the template since sending
+ * (`source.held`), under the header: their edits stay on screen, and the
+ * draft replaces them only when they say so.
+ */
+function HeldDraftNotice({ editor }: { editor: TemplateEditorState }) {
+  const held = editor.source.held;
+  if (!held) return null;
+  return (
+    <div role="status" className="flex shrink-0 flex-wrap items-center gap-2 text-sm md:border-b md:px-4 md:py-2">
+      <p className="min-w-0 flex-1 text-muted-foreground">
+        Draft {held.ordinal} arrived while you were editing, so your edits are still in the editor.
+      </p>
+      <DocumentButton variant="outline" onClick={() => editor.showDraft(held)}>
+        <Replace />
+        Replace my edits
+      </DocumentButton>
+    </div>
   );
 }
 
@@ -467,7 +538,7 @@ function MobileSwitch({ value, withAssistant, onChange }: { value: MobileSection
       variant="outline"
       spacing={0}
       aria-label="Show"
-      className="w-full"
+      className="min-w-0 flex-1"
       value={value}
       onValueChange={(next) => {
         // Pressing the chosen section again keeps it chosen.
@@ -511,6 +582,16 @@ function DesktopPanes({
   );
 }
 
+/** The phone's section switch, with the chat's own action (New chat) beside it while the chat is the section shown. */
+function MobileSwitchRow({ switcher, aiActions }: { switcher: ReactNode; aiActions: ReactNode }) {
+  return (
+    <div className="flex items-center gap-2">
+      {switcher}
+      {aiActions}
+    </div>
+  );
+}
+
 /** One section at a time on a phone; both stay mounted, so switching loses nothing. */
 function MobilePanes({ previewShown, edit, preview }: { previewShown: boolean; edit: ReactNode; preview: ReactNode }) {
   return (
@@ -520,6 +601,20 @@ function MobilePanes({ previewShown, edit, preview }: { previewShown: boolean; e
     </div>
   );
 }
+
+/**
+ * What the builder shows: the editing tool (AI or Code) and, on a phone,
+ * whether the preview is the section on screen. Kept by the page above the
+ * editor (`EditableTemplate`), so a save, which remounts the editor on the
+ * new revision, does not send the person back to the defaults.
+ */
+export function useTemplateWorkspaceView() {
+  const [tool, setTool] = useState<EditTool>('ai');
+  // A phone shows the preview first, as the question paper studio shows the paper.
+  const [mobilePreview, setMobilePreview] = useState(true);
+  return { tool, setTool, mobilePreview, setMobilePreview };
+}
+export type TemplateWorkspaceView = ReturnType<typeof useTemplateWorkspaceView>;
 
 /**
  * The template builder, laid out like the question paper studio: one header
@@ -540,6 +635,7 @@ export function TemplateEditor({
   title,
   contextHelp,
   marketplaceHref,
+  view,
   onReload,
 }: {
   scope: DocumentTemplateScope;
@@ -547,6 +643,7 @@ export function TemplateEditor({
   title: string;
   contextHelp?: string;
   marketplaceHref: string;
+  view: TemplateWorkspaceView;
   onReload: () => Promise<void>;
 }) {
   const gate = useAssistantGate(scope.schoolId);
@@ -555,11 +652,93 @@ export function TemplateEditor({
   const editor = useTemplateEditor(scope, template, chat.latest, onReload);
   const sideBySide = useSideBySide();
   const editPanelRef = useResizablePanelRef();
-  const [tool, setTool] = useState<EditTool>('ai');
-  // A phone shows the preview first, as the question paper studio shows the paper.
-  const [mobilePreview, setMobilePreview] = useState(true);
+  const { tool, setTool, mobilePreview, setMobilePreview } = view;
   const withAssistant = gate === 'allowed';
   const shownTool: EditTool = withAssistant ? tool : 'code';
+  const revisions = useRevisionView(scope, editor, setMobilePreview);
+  const sourceForChat = (): AssistantEditorSource | null => {
+    // Read at the moment of sending: what is on screen now is what the model will draft from.
+    editor.markSent();
+    const content = sourceToSend({ current: editor.source.content, lastKnown: lastKnownSourceOf(chat.rows, scope.documentType) });
+    return content ? { documentType: scope.documentType, content } : null;
+  };
+  /** New chat: a draft shown from the old chat stays on screen as unsaved work instead of vanishing with it. */
+  const startNewChat = () => {
+    editor.adoptShown();
+    chat.startNew();
+  };
+  const chatWithDrafts = { ...chat, startNew: startNewChat };
+  const assistant = withAssistant ? (
+    <TemplateAssistantPane scope={scope} chat={chatWithDrafts} sourceToSend={sourceForChat} drafts={draftBinding(editor, scope, savedAt)} />
+  ) : null;
+  const aiActions = chat.chatId ? <NewTemplateChatButton onClick={startNewChat} /> : null;
+  const code = <CodePane editor={editor} template={template} contextHelp={contextHelp} />;
+  /** "Ask for edit": the chat on screen, with the editing pane unfolded if it was folded away. */
+  const ask = () => {
+    setTool('ai');
+    setMobilePreview(false);
+    editPanelRef.current?.expand();
+  };
+  const edit = (onCollapse?: () => void) => (
+    <EditPane tool={shownTool} onTool={setTool} assistant={assistant} code={code} header={sideBySide} aiActions={aiActions} onCollapse={onCollapse} />
+  );
+  const preview = (onExpand?: () => void) => <PreviewPane scope={scope} editor={editor} title={title} revision={revisions.view} onExpand={onExpand} />;
+  return (
+    // md+: cancels the shell's page padding and takes the window's remaining height, as the question paper studio does.
+    <div ref={editor.rootRef} className={cn('flex min-w-0 flex-col gap-4 md:-m-6 md:gap-0 lg:-m-8', APP_SHELL_FILL_HEIGHT_MD_CLASS)}>
+      <DocumentDirtyGuard dirty={editor.dirty} />
+      <WorkspaceHeader
+        title={title}
+        editor={editor}
+        actions={
+          <>
+            {revisions.picker}
+            <AiAction gate={gate} scope={scope} editor={editor} contextHelp={contextHelp} onAsk={ask} />
+            <DocumentButton asChild variant="outline">
+              <Link href={marketplaceHref}>
+                <Store />
+                Marketplace
+              </Link>
+            </DocumentButton>
+            <SaveActions editor={editor} />
+          </>
+        }
+      />
+      <SaveError editor={editor} />
+      <HeldDraftNotice editor={editor} />
+      {revisions.dialogs}
+      {sideBySide ? (
+        <DesktopPanes panelRef={editPanelRef} edit={edit} preview={preview} />
+      ) : (
+        <>
+          <MobileSwitchRow
+            switcher={
+              <MobileSwitch
+                value={mobilePreview ? 'preview' : shownTool}
+                withAssistant={withAssistant}
+                onChange={(section) => {
+                  setMobilePreview(section === 'preview');
+                  if (section !== 'preview') setTool(section);
+                }}
+              />
+            }
+            aiActions={!mobilePreview && shownTool === 'ai' ? aiActions : null}
+          />
+          <MobilePanes previewShown={mobilePreview} edit={edit()} preview={preview()} />
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The builder's revision history (docs/document-system.md, "Revision
+ * history"): the revision in the address, its read-only view for the
+ * preview pane, the header's picker, the history dialog and the Restore
+ * confirmation. Restoring replaces unsaved changes only after the app's own
+ * dialog.
+ */
+function useRevisionView(scope: DocumentTemplateScope, editor: TemplateEditorState, setMobilePreview: (shown: boolean) => void) {
   const { revisionId, setRevision } = useRevisionParam();
   const revision = useTemplateRevision(scope, revisionId);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -575,9 +754,10 @@ export function TemplateEditor({
     // On a phone the revision is in the preview.
     if (next) setMobilePreview(true);
   };
-  const revisionView = revisionId ? (
+  const view = revisionId ? (
     <RevisionPreview
       scope={scope}
+      revisionId={revisionId}
       revision={revision}
       printSize={editor.values.printSize}
       // Nothing is lost silently: unsaved changes are replaced only after the app's own dialog.
@@ -585,61 +765,19 @@ export function TemplateEditor({
       onClose={() => setRevision(null)}
     />
   ) : null;
-  const sourceForChat = (): AssistantEditorSource | null => {
-    const content = sourceToSend({ current: editor.source.content, lastKnown: lastKnownSourceOf(chat.rows, scope.documentType) });
-    return content ? { documentType: scope.documentType, content } : null;
-  };
-  const assistant = withAssistant ? (
-    <TemplateAssistantPane scope={scope} chat={chat} sourceToSend={sourceForChat} drafts={draftBinding(editor, savedAt)} />
-  ) : null;
-  const code = <CodePane editor={editor} template={template} contextHelp={contextHelp} />;
-  /** "Ask for edit": the chat on screen, with the editing pane unfolded if it was folded away. */
-  const ask = () => {
-    setTool('ai');
-    setMobilePreview(false);
-    editPanelRef.current?.expand();
-  };
-  const edit = (onCollapse?: () => void) => (
-    <EditPane
-      tool={shownTool}
-      onTool={setTool}
-      assistant={assistant}
-      code={code}
-      header={sideBySide}
-      aiActions={chat.chatId ? <NewTemplateChatButton onClick={chat.startNew} /> : null}
-      onCollapse={onCollapse}
+  const picker = (
+    <RevisionPicker
+      scope={scope}
+      revisionId={revisionId}
+      shown={revision.data?.revision}
+      failed={revision.isError}
+      dirty={editor.dirty}
+      onChange={viewRevision}
+      onOpenHistory={() => setHistoryOpen(true)}
     />
   );
-  const preview = (onExpand?: () => void) => <PreviewPane scope={scope} editor={editor} title={title} revision={revisionView} onExpand={onExpand} />;
-  return (
-    // md+: cancels the shell's page padding and takes the window's remaining height, as the question paper studio does.
-    <div ref={editor.rootRef} className={cn('flex min-w-0 flex-col gap-4 md:-m-6 md:gap-0 lg:-m-8', APP_SHELL_FILL_HEIGHT_MD_CLASS)}>
-      <DocumentDirtyGuard dirty={editor.dirty} />
-      <WorkspaceHeader
-        title={title}
-        editor={editor}
-        actions={
-          <>
-            <RevisionPicker
-              scope={scope}
-              revisionId={revisionId}
-              shown={revision.data?.revision}
-              dirty={editor.dirty}
-              onChange={viewRevision}
-              onOpenHistory={() => setHistoryOpen(true)}
-            />
-            <AiAction gate={gate} scope={scope} editor={editor} contextHelp={contextHelp} onAsk={ask} />
-            <DocumentButton asChild variant="outline">
-              <Link href={marketplaceHref}>
-                <Store />
-                Marketplace
-              </Link>
-            </DocumentButton>
-            <SaveActions editor={editor} />
-          </>
-        }
-      />
-      <SaveError editor={editor} />
+  const dialogs = (
+    <>
       <RevisionHistoryDialog scope={scope} open={historyOpen} onOpenChange={setHistoryOpen} shownRevisionId={revisionId} onView={viewRevision} />
       <ConfirmationDialog
         open={restoring !== null}
@@ -654,21 +792,7 @@ export function TemplateEditor({
           if (restoring) restoreNow(restoring);
         }}
       />
-      {sideBySide ? (
-        <DesktopPanes panelRef={editPanelRef} edit={edit} preview={preview} />
-      ) : (
-        <>
-          <MobileSwitch
-            value={mobilePreview ? 'preview' : shownTool}
-            withAssistant={withAssistant}
-            onChange={(section) => {
-              setMobilePreview(section === 'preview');
-              if (section !== 'preview') setTool(section);
-            }}
-          />
-          <MobilePanes previewShown={mobilePreview} edit={edit()} preview={preview()} />
-        </>
-      )}
-    </div>
+    </>
   );
+  return { view, picker, dialogs };
 }

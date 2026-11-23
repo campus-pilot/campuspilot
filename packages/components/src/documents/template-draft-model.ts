@@ -56,6 +56,8 @@ export type TemplateDraft = {
   callId: string;
   /** "Draft 2": its place among the conversation's template drafts. */
   ordinal: number;
+  /** The school the draft was checked for (the call's own input). */
+  schoolId: string;
   documentType: string;
   /** The complete proposed source, exactly as the assistant sent it. */
   content: string;
@@ -78,6 +80,7 @@ export function templateDraftsOf(rows: readonly AssistantTimelineRow[]): Templat
     drafts.push({
       callId: row.call.id,
       ordinal: drafts.length + 1,
+      schoolId: input.data.schoolId,
       documentType: input.data.documentType,
       content: input.data.content,
       result: parseTemplateDraftResult(row.call.body.output, row.call.body.outputTruncated),
@@ -90,41 +93,96 @@ export function templateDraftsOf(rows: readonly AssistantTimelineRow[]): Templat
 /** Whether a draft can be loaded into the editor: its verdict says it would save. */
 export const isReadyTemplateDraft = (draft: TemplateDraft) => Boolean(draft.result?.valid && draft.result.draftId);
 
+/** The template an editor is open on: the draft must be of its school and type to be shown there. */
+export type TemplateEditorScope = { schoolId: string; documentType: string };
+
 /**
- * The newest ready draft of this document type that was proposed after the
- * template on screen was saved (`savedAt`, the revision's creation time).
- * A draft from before that save belongs to an older revision (often the one
- * just saved from it), so it is not offered as an unsaved change. Both times
- * are the server's, so no clock of the browser is involved.
+ * Whether a draft belongs to the template open in the editor: proposed for
+ * the same school and the same document type. A conversation reopened in
+ * another type's editor (an old `?chat=` link) can hold drafts of another
+ * template; those are only described, never loaded.
+ */
+export const draftBelongsTo = (draft: TemplateDraft, scope: TemplateEditorScope) =>
+  draft.schoolId === scope.schoolId && draft.documentType === scope.documentType;
+
+/**
+ * The newest ready draft of this school's template of this document type
+ * that was proposed after the template on screen was saved (`savedAt`, the
+ * revision's creation time). A draft from before that save belongs to an
+ * older revision (often the one just saved from it), so it is not offered as
+ * an unsaved change. Both times are the server's, so no clock of the
+ * browser is involved.
  */
 export function latestTemplateDraftOf(
   drafts: readonly TemplateDraft[],
-  facts: { documentType: string; savedAt: Date },
+  facts: TemplateEditorScope & { savedAt: Date },
 ): TemplateDraft | null {
   for (let index = drafts.length - 1; index >= 0; index -= 1) {
     const draft = drafts[index]!;
-    if (draft.documentType === facts.documentType && isReadyTemplateDraft(draft) && draft.writtenAt > facts.savedAt) return draft;
+    if (draftBelongsTo(draft, facts) && isReadyTemplateDraft(draft) && draft.writtenAt > facts.savedAt) return draft;
   }
   return null;
 }
 
 /**
- * The template the editor holds, from two independent facts: the person's
- * own working copy (`manual`, which starts as the saved revision and changes
- * only when they edit or reload) and the assistant's newest ready draft
- * (`latest`). The draft wins unless the person changed the working copy
- * after it arrived: `manual.over` records which draft was showing when they
- * last edited (null: none was). So a new proposal replaces what is shown, and
- * a hand edit of a proposal keeps the hand edit until the next proposal. It
- * is derived on every render, so a draft that arrives while the editor is
- * open shows at once with no effect.
+ * The person's own working copy, as four independent facts:
+ * - `content`: the source they hold (the saved revision until they edit,
+ *   reload, restore or choose a draft);
+ * - `edited`: whether they chose it since the editor opened;
+ * - `over`: the newest draft (its call id) when they last chose, null when
+ *   there was none;
+ * - `editedSinceSend`: whether they changed it by hand (typing, Restore,
+ *   Reload saved) since their last message to the assistant was sent. It is
+ *   the snapshot taken at sending: the model drafts from what it was sent,
+ *   so a draft that arrives after a later hand change would discard that
+ *   change.
  */
-export function editorSourceOf(
-  manual: { content: string; over: string | null; edited: boolean },
-  latest: TemplateDraft | null,
-): { content: string; draft: TemplateDraft | null } {
-  if (latest && (!manual.edited || manual.over !== latest.callId)) return { content: latest.content, draft: latest };
-  return { content: manual.content, draft: null };
+export type TemplateWorkingCopy = { content: string; edited: boolean; over: string | null; editedSinceSend: boolean };
+
+/**
+ * What the editor shows: `content`; `draft`, the assistant's draft when that
+ * is what is shown; `held`, a newer draft that is NOT shown because the
+ * person changed their working copy after sending (the editor offers it with
+ * "Replace my edits").
+ */
+export type TemplateEditorSource = { content: string; draft: TemplateDraft | null; held: TemplateDraft | null };
+
+/**
+ * The template the editor holds, from the working copy and the assistant's
+ * newest ready draft (`latest`). Derived on every render, so a draft that
+ * arrives while the editor is open shows at once, with no effect.
+ * - No draft, or the person chose after the newest one arrived (they edited
+ *   it, or showed it): their working copy.
+ * - A newer draft, and they have not changed the working copy by hand since
+ *   their last message: the draft, shown in the code and the preview.
+ * - A newer draft, but they changed the working copy since sending: their
+ *   working copy stays, and the draft is `held`, never shown by itself.
+ */
+export function editorSourceOf(manual: TemplateWorkingCopy, latest: TemplateDraft | null): TemplateEditorSource {
+  if (!latest || (manual.edited && manual.over === latest.callId)) return { content: manual.content, draft: null, held: null };
+  if (manual.editedSinceSend) return { content: manual.content, draft: null, held: latest };
+  return { content: latest.content, draft: latest, held: null };
+}
+
+/**
+ * The working copy that keeps what is on screen when the draft showing it
+ * goes away (a new chat has no drafts): a shown draft becomes the working
+ * copy, unsaved, as if the person had chosen it. Anything else is unchanged.
+ */
+export function adoptShownSource(manual: TemplateWorkingCopy, shown: TemplateEditorSource): TemplateWorkingCopy {
+  return shown.draft ? { ...manual, content: shown.content, edited: true, over: shown.draft.callId } : manual;
+}
+
+/** Where a draft card stands for the editor beside the chat (`TemplateDraftCardStatus`). */
+export function templateDraftStatusOf(
+  draft: TemplateDraft,
+  editor: { scope: TemplateEditorScope; source: TemplateEditorSource; savedAt: Date },
+): 'elsewhere' | 'shown' | 'held' | 'saved-before' | 'available' {
+  if (!draftBelongsTo(draft, editor.scope)) return 'elsewhere';
+  if (draft.content === editor.source.content) return 'shown';
+  if (draft.writtenAt <= editor.savedAt) return 'saved-before';
+  if (editor.source.held?.callId === draft.callId) return 'held';
+  return 'available';
 }
 
 /**

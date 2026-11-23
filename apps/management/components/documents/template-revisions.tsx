@@ -1,8 +1,8 @@
 'use client';
 
 import { skipToken, useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { History } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
+import { ArrowLeft, History } from 'lucide-react';
 import type { TemplateRevision } from '@campuspilot/api/routers/school/document/document.dto';
 import { OptionSelect } from '@campuspilot/components/option-select';
 import {
@@ -16,9 +16,10 @@ import { Skeleton } from '@campuspilot/ui/components/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@campuspilot/ui/components/tooltip';
 
 import { orpc } from '@/lib/orpc';
+import { replaceSearchParam } from '@/lib/search-param';
 
 import { DocumentReadError, type DocumentTemplateScope } from './document-common';
-import { TemplatePdfPreview } from './template-pdf-preview';
+import { TemplateRevisionPdfPreview } from './template-pdf-preview';
 
 /** The select's value for the editor's own working copy (a revision id never looks like this). */
 const WORKING_COPY = 'working';
@@ -30,21 +31,15 @@ export const revisionViewOf = (revision: TemplateRevision): TemplateRevisionView
  * editor's address (`?revision=<id>`, as the question paper studio keeps
  * `?version=n`), so a reload or a shared link keeps it. Null: the working
  * copy. The id is only a request: the server decides whether this school's
- * template of this type has such a revision.
+ * template of this type has such a revision. Choosing one rewrites the
+ * address in place (`replaceSearchParam`): looking through revisions is not
+ * a trail for Back, and no navigation refetches the page.
  */
 export function useRevisionParam() {
-  const router = useRouter();
-  const pathname = usePathname();
   const search = useSearchParams();
   const raw = search.get('revision');
   const revisionId = raw && /^[A-Za-z0-9_-]{1,100}$/.test(raw) ? raw : null;
-  const setRevision = (next: string | null) => {
-    const query = new URLSearchParams(search.toString());
-    if (next) query.set('revision', next);
-    else query.delete('revision');
-    const suffix = query.toString();
-    router.replace(suffix ? `${pathname}?${suffix}` : pathname, { scroll: false });
-  };
+  const setRevision = (next: string | null) => replaceSearchParam('revision', next);
   return { revisionId, setRevision };
 }
 
@@ -72,6 +67,7 @@ export function RevisionPicker({
   scope,
   revisionId,
   shown,
+  failed,
   dirty,
   onChange,
   onOpenHistory,
@@ -80,6 +76,8 @@ export function RevisionPicker({
   revisionId: string | null;
   /** The revision on screen when it was read; it names the select's value when it is not among the newest. */
   shown: TemplateRevision | undefined;
+  /** The revision asked for could not be read (an old or mistyped link). */
+  failed: boolean;
   dirty: boolean;
   onChange: (revisionId: string | null) => void;
   onOpenHistory: () => void;
@@ -87,14 +85,18 @@ export function RevisionPicker({
   const recent = useRecentRevisions(scope);
   const listed = recent.data?.items ?? [];
   const revisions = shown && !listed.some((revision) => revision.revisionId === shown.revisionId) ? [...listed, shown] : listed;
+  // A revision asked for that the select cannot name yet (still loading, or not found) is an option of its own,
+  // so the select shows what the preview shows and choosing Working copy is a change that leaves it.
+  const unnamed = revisionId && !revisions.some((revision) => revision.revisionId === revisionId) ? revisionId : null;
   const options = [
     { value: WORKING_COPY, label: dirty ? 'Working copy (unsaved)' : 'Working copy' },
     ...revisions.map((revision) => ({ value: revision.revisionId, label: `Revision ${revision.revisionNo}${revision.selected ? ' (in use)' : ''}` })),
+    ...(unnamed ? [{ value: unnamed, label: failed ? 'Revision not found' : 'Loading revision…' }] : []),
   ];
   return (
     <div className="flex items-center gap-1">
       <OptionSelect
-        value={revisionId && revisions.some((revision) => revision.revisionId === revisionId) ? revisionId : WORKING_COPY}
+        value={revisionId ?? WORKING_COPY}
         options={options}
         onValueChange={(value) => onChange(value === WORKING_COPY ? null : value)}
         triggerProps={{ 'aria-label': 'Revision', className: 'w-52 max-md:min-w-36 max-md:flex-1' }}
@@ -174,19 +176,32 @@ export function RevisionHistoryDialog({
   );
 }
 
+/** The way back from a revision the preview could not show (still loading, or not found). */
+function BackToWorkingCopy({ onClose }: { onClose: () => void }) {
+  return (
+    <Button type="button" variant="ghost" size="sm" className="self-start" onClick={onClose}>
+      <ArrowLeft data-icon="inline-start" aria-hidden /> Back to working copy
+    </Button>
+  );
+}
+
 /**
  * An earlier revision in the preview pane: what it is (read-only) above its
  * PDF, with Restore for someone who may change the template. Nothing here
- * is editable: a revision is immutable.
+ * is editable: a revision is immutable. Its PDF is previewed by the
+ * revision's id (`TemplateRevisionPdfPreview`), and while it loads or when it
+ * cannot be read the way back to the working copy is offered all the same.
  */
 export function RevisionPreview({
   scope,
+  revisionId,
   revision,
   printSize,
   onRestore,
   onClose,
 }: {
   scope: DocumentTemplateScope;
+  revisionId: string;
   revision: ReturnType<typeof useTemplateRevision>;
   /** Notice designs only: the print size to preview at (the same choice as the working copy's). */
   printSize: 'full' | 'half';
@@ -194,7 +209,12 @@ export function RevisionPreview({
   onClose: () => void;
 }) {
   if (!revision.data) {
-    return revision.isError ? <DocumentReadError error={revision.error} retry={revision.refetch} /> : <Skeleton className="h-full w-full rounded-xl" />;
+    return (
+      <div className="flex h-full min-h-0 flex-col gap-3">
+        <BackToWorkingCopy onClose={onClose} />
+        {revision.isError ? <DocumentReadError error={revision.error} retry={revision.refetch} /> : <Skeleton className="min-h-0 w-full flex-1 rounded-xl" />}
+      </div>
+    );
   }
   const { content } = revision.data;
   const { pageSize } = revision.data.revision;
@@ -206,10 +226,9 @@ export function RevisionPreview({
         onClose={onClose}
       />
       <div className="min-h-0 flex-1">
-        <TemplatePdfPreview
+        <TemplateRevisionPdfPreview
           scope={scope}
-          content={content}
-          pageSize={pageSize}
+          revisionId={revisionId}
           printSize={printSize}
           label={`Revision ${revision.data.revision.revisionNo} preview`}
         />

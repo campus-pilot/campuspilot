@@ -1,11 +1,13 @@
 'use client';
 
-import { keepPreviousData, useQuery, type UseQueryResult } from '@tanstack/react-query';
+import { useState } from 'react';
+import { ORPCError } from '@orpc/client';
+import { keepPreviousData, skipToken, useQuery, type UseQueryResult } from '@tanstack/react-query';
 import type { DocumentType } from '@campuspilot/api/routers/school/document/document.dto';
 import { loadPdf, type LoadedPdf } from '@campuspilot/components/documents/pdf-pages';
 import { PdfPreview } from '@campuspilot/components/documents/pdf-preview';
 
-import { isClientError, retryUnlessRefused } from '@/components/assistant/assistant-stream';
+import { isClientError } from '@/components/assistant/assistant-stream';
 import { client } from '@/lib/orpc';
 
 import type { DocumentTemplateScope } from './document-common';
@@ -41,30 +43,50 @@ function sourceKeyOf(content: string): string {
   return `${content.length}:${(4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36)}`;
 }
 
+/** How many times a preview the server turned away as busy is asked again (see {@link retryWhenBusy}). */
+const BUSY_RETRIES = 3;
+
+/**
+ * A preview is asked again only when the server said this person already
+ * has several previews being made (TOO_MANY_REQUESTS, docs/document-system.md
+ * "Preview limits"), which frees up within seconds. Everything else is final
+ * until the person presses Try again: a refused template gives the same
+ * answer again, and a conversion that failed or ran out of time (each one a
+ * Chromium conversion) must not be repeated behind their back.
+ */
+function retryWhenBusy(failureCount: number, error: unknown): boolean {
+  return failureCount < BUSY_RETRIES && error instanceof ORPCError && error.code === 'TOO_MANY_REQUESTS';
+}
+
 /**
  * What every template PDF preview query shares. A preview renders the same
- * every time, so each one is converted once (`staleTime: Infinity`) and the
- * cache releases its pdf.js document when it drops the query
- * (`createQueryClient`); a `LoadedPdf` is never compared field by field
- * (`structuralSharing: false`). A template the renderer refuses is a final
- * answer, never retried.
+ * every time, so each one is converted once (`staleTime: Infinity`); a
+ * `LoadedPdf` is never compared field by field (`structuralSharing: false`).
+ * The cache releases a document soon after nothing asks for it (`gcTime`,
+ * then `createQueryClient` calls its `release`), so typing does not pile up
+ * parsed PDFs; a document still on screen (a previous render kept while the
+ * next converts, or after it failed) is never destroyed by that, because the
+ * viewer holds it too (`LoadedPdf.retain`).
  */
 const templatePdfQueryDefaults = {
   staleTime: Number.POSITIVE_INFINITY,
+  gcTime: 30_000,
   structuralSharing: false,
-  retry: retryUnlessRefused,
+  retry: retryWhenBusy,
+  retryDelay: (attempt: number) => 1_000 * 2 ** attempt,
 } as const;
 
-/** Opens the base64 PDF a preview procedure returns. */
-function loadPreviewPdf(result: { pdfBase64: string }): Promise<LoadedPdf> {
-  return loadPdf(bytesOfBase64(result.pdfBase64));
+/** Opens the base64 PDF a preview procedure returns; a document opened after the query was cancelled is freed (`loadPdf`). */
+function loadPreviewPdf(result: { pdfBase64: string }, signal: AbortSignal): Promise<LoadedPdf> {
+  return loadPdf(bytesOfBase64(result.pdfBase64), signal);
 }
 
 /**
  * A template source rendered with sample data as the PDF it prints as
- * (`previewDocumentTemplatePdf`), opened with pdf.js, converted once per
- * source (`templatePdfQueryDefaults`). While a newer source converts, the
- * previous pages stay on screen (`keepPreviousData`).
+ * (`previewDocumentTemplatePdf`, for those who may change the template),
+ * opened with pdf.js, converted once per source (`templatePdfQueryDefaults`).
+ * While a newer source converts, the previous pages stay on screen
+ * (`keepPreviousData`).
  */
 export function useTemplatePdf(input: { scope: DocumentTemplateScope; content: string; pageSize: PageSize; printSize: PageSize }) {
   const { scope, content, pageSize } = input;
@@ -73,9 +95,29 @@ export function useTemplatePdf(input: { scope: DocumentTemplateScope; content: s
   return useQuery({
     queryKey: ['document-template', 'preview-pdf', scope.schoolId, scope.documentType, pageSize, printSize ?? null, sourceKeyOf(content)],
     queryFn: async ({ signal }) =>
-      loadPreviewPdf(await client.school.previewDocumentTemplatePdf({ ...scope, content, pageSize, ...(printSize ? { printSize } : {}) }, { signal })),
+      loadPreviewPdf(await client.school.previewDocumentTemplatePdf({ ...scope, content, pageSize, ...(printSize ? { printSize } : {}) }, { signal }), signal),
     ...templatePdfQueryDefaults,
     placeholderData: keepPreviousData,
+  });
+}
+
+/**
+ * A saved revision rendered with sample data as the PDF it prints as, by its
+ * id (`previewDocumentTemplateRevisionPdf`, the template read gate): the
+ * read-only template page and the builder's revision view. A revision never
+ * changes, so it converts once per print size; like the marketplace it keeps
+ * no previous data, so another revision's pages never stand in for it.
+ */
+export function useTemplateRevisionPdf(input: { scope: DocumentTemplateScope; revisionId: string | null; printSize: PageSize }) {
+  const { scope, revisionId } = input;
+  const printSize = scope.documentType === 'notice' ? input.printSize : undefined;
+  return useQuery({
+    queryKey: ['document-template', 'revision-pdf', scope.schoolId, scope.documentType, revisionId, printSize ?? null],
+    queryFn: revisionId
+      ? async ({ signal }) =>
+          loadPreviewPdf(await client.school.previewDocumentTemplateRevisionPdf({ ...scope, revisionId, ...(printSize ? { printSize } : {}) }, { signal }), signal)
+      : skipToken,
+    ...templatePdfQueryDefaults,
   });
 }
 
@@ -92,7 +134,7 @@ export function useMarketplaceTemplatePdf(input: { scope: DocumentTemplateScope;
   const request = marketplaceTemplatePreviewInput(input.scope, input.slug, input.printSize);
   return useQuery({
     queryKey: ['document-template', 'marketplace-pdf', request.schoolId, request.documentType, request.slug, request.printSize ?? null],
-    queryFn: async ({ signal }) => loadPreviewPdf(await client.school.previewMarketplaceTemplatePdf(request, { signal })),
+    queryFn: async ({ signal }) => loadPreviewPdf(await client.school.previewMarketplaceTemplatePdf(request, { signal }), signal),
     ...templatePdfQueryDefaults,
   });
 }
@@ -108,11 +150,40 @@ function orientationOf(documentType: DocumentType) {
   return documentType === 'timetable' ? 'landscape' : 'portrait';
 }
 
+/**
+ * The document a preview shows: the query's own (or, while a newer one
+ * converts, its placeholder), else, when `keepOnError` and the latest render
+ * failed, the last document that rendered, so a failure is said over the
+ * last good pages instead of blanking them (TanStack Query drops the
+ * placeholder once a query fails). The last good document is remembered by
+ * setting state during render, React's pattern for keeping information from
+ * earlier renders, not in an effect. It was on screen without a break until
+ * now, so its viewer still holds it (`LoadedPdf.retain`).
+ */
+function useShownPdf(query: UseQueryResult<LoadedPdf, unknown>, keepOnError: boolean): LoadedPdf | null {
+  const [lastGood, setLastGood] = useState<LoadedPdf | null>(null);
+  if (query.isSuccess && !query.isPlaceholderData && query.data !== lastGood) setLastGood(query.data);
+  if (query.data) return query.data;
+  return keepOnError && query.isError ? lastGood : null;
+}
+
 /** A template PDF query on screen: its pages, the updating badge, and a failure with Try again. */
-function TemplatePdfQueryPreview({ pdf, documentType, label }: { pdf: UseQueryResult<LoadedPdf, unknown>; documentType: DocumentType; label: string }) {
+function TemplatePdfQueryPreview({
+  pdf,
+  documentType,
+  label,
+  keepOnError,
+}: {
+  pdf: UseQueryResult<LoadedPdf, unknown>;
+  documentType: DocumentType;
+  label: string;
+  /** Keep the last good pages under a failure (the editor's own source; never another design or revision). */
+  keepOnError: boolean;
+}) {
+  const shown = useShownPdf(pdf, keepOnError);
   return (
     <PdfPreview
-      pdf={pdf.data ?? null}
+      pdf={shown}
       label={label}
       orientation={orientationOf(documentType)}
       updating={pdf.isFetching}
@@ -141,7 +212,7 @@ export function TemplatePdfPreview({
   label: string;
 }) {
   const pdf = useTemplatePdf({ scope, content, pageSize, printSize });
-  return <TemplatePdfQueryPreview pdf={pdf} documentType={scope.documentType} label={label} />;
+  return <TemplatePdfQueryPreview pdf={pdf} documentType={scope.documentType} label={label} keepOnError />;
 }
 
 /**
@@ -162,5 +233,26 @@ export function MarketplaceTemplatePdfPreview({
   label: string;
 }) {
   const pdf = useMarketplaceTemplatePdf({ scope, slug, printSize });
-  return <TemplatePdfQueryPreview pdf={pdf} documentType={scope.documentType} label={label} />;
+  return <TemplatePdfQueryPreview pdf={pdf} documentType={scope.documentType} label={label} keepOnError={false} />;
+}
+
+/**
+ * A saved revision's preview with sample data, as its PDF pages, by its id
+ * (the read-only template page and the builder's revision view). It takes
+ * its container's height.
+ */
+export function TemplateRevisionPdfPreview({
+  scope,
+  revisionId,
+  printSize,
+  label,
+}: {
+  scope: DocumentTemplateScope;
+  revisionId: string;
+  /** Notice designs only: the notice print size to preview at. */
+  printSize: PageSize;
+  label: string;
+}) {
+  const pdf = useTemplateRevisionPdf({ scope, revisionId, printSize });
+  return <TemplatePdfQueryPreview pdf={pdf} documentType={scope.documentType} label={label} keepOnError={false} />;
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { LayoutTemplate, ListChecks, SquarePen, Stamp } from 'lucide-react';
 import type { AssistantEditorSource } from '@campuspilot/assistant-contract/template-editing';
 import type { AssistantSuggestion } from '@campuspilot/components/assistant';
@@ -13,6 +13,7 @@ import { AssistantChat } from '@/components/assistant/assistant-chat';
 import type { TemplateDraftBinding } from '@/components/assistant/assistant-template-draft';
 import { useAssistantTimeline } from '@/components/assistant/use-assistant';
 import { chatIdOf } from '@/components/question-paper/question-paper-model';
+import { replaceSearchParam } from '@/lib/search-param';
 
 import type { DocumentTemplateScope } from './document-common';
 
@@ -65,21 +66,14 @@ const TEMPLATE_WELCOME = {
  * chat, another id) is a new chat, as on a question paper's screen.
  */
 export function useTemplateChat(scope: DocumentTemplateScope, savedAt: Date, enabled: boolean) {
-  const router = useRouter();
-  const pathname = usePathname();
   const search = useSearchParams();
   const [session, setSession] = useState<{ generation: number; started: string | null }>({ generation: 0, started: null });
   const chatId = enabled ? chatIdOf(search.get('chat')) : null;
   const rows = useAssistantTimeline(scope.schoolId, chatId);
   const drafts = templateDraftsOf(rows ?? []);
-  const latest = latestTemplateDraftOf(drafts, { documentType: scope.documentType, savedAt });
-  const setChat = (next: string | null) => {
-    const query = new URLSearchParams(search.toString());
-    if (next) query.set('chat', next);
-    else query.delete('chat');
-    const suffix = query.toString();
-    router.replace(suffix ? `${pathname}?${suffix}` : pathname, { scroll: false });
-  };
+  const latest = latestTemplateDraftOf(drafts, { schoolId: scope.schoolId, documentType: scope.documentType, savedAt });
+  // Rewritten in place (`replaceSearchParam`): switching chats is not a trail for Back, and no navigation refetches the page.
+  const setChat = (next: string | null) => replaceSearchParam('chat', next);
   return {
     chatId,
     rows: rows ?? [],

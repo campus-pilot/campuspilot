@@ -46,9 +46,11 @@ export const orpc = createTanstackQueryUtils(client);
 
 /**
  * Query data that holds something outside the JavaScript heap (a PDF opened
- * with pdf.js keeps a worker and its parsed pages) has a `release` method; it
- * is called when the cache drops the query, after its last viewer left and
- * its `gcTime` passed.
+ * with pdf.js keeps its parsed pages in the worker) has a `release` method; it
+ * is called when the cache drops the query, after its last observer left and
+ * its `gcTime` passed. That is the cache's own hold only: a document a screen
+ * still shows (say, as a previous render) stays alive until that screen lets
+ * go of it too (`LoadedPdf.retain`).
  */
 function releaseHeldData(data: unknown) {
   if (data && typeof data === 'object' && 'release' in data && typeof data.release === 'function') {

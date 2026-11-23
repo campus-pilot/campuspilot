@@ -17,11 +17,16 @@ test('reads the type, design and preview the address asks for, refusing what is 
     template: 'id_card-modern',
     preview: true,
   });
-  assert.deepEqual(marketplaceRequestOf(search('type=nope&template=..%2Fsecret&preview=yes')), {
+  assert.deepEqual(marketplaceRequestOf(search('type=nope&preview=yes')), {
     type: null,
     template: null,
     preview: false,
   });
+  // Any slug the API would accept is a request (only ever compared with the listed slugs), so an old link that
+  // names a design no longer listed is told apart from no request; a longer value is none.
+  assert.equal(marketplaceRequestOf(search('type=bill&template=..%2Fsecret')).template, '../secret');
+  assert.equal(marketplaceRequestOf(search(`type=bill&template=${'a'.repeat(100)}`)).template, 'a'.repeat(100));
+  assert.equal(marketplaceRequestOf(search(`type=bill&template=${'a'.repeat(101)}`)).template, null);
   assert.deepEqual(marketplaceRequestOf(search('')), { type: null, template: null, preview: false });
 });
 
