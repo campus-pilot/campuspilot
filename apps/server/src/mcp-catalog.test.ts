@@ -71,6 +71,11 @@ const CORE_TOOLS = [
 ];
 
 const HIDDEN_TOOLS = [
+  // Template PDF previews: each call is a Gotenberg conversion for a person
+  // looking at the editor or the marketplace, never an agent tool.
+  'school.previewDocumentTemplatePdf',
+  'school.previewDocumentTemplateRevisionPdf',
+  'school.previewMarketplaceTemplatePdf',
   'auth.setPassword',
   'auth.getOAuthConsentClient',
   'auth.listOAuthConnections',
@@ -313,8 +318,9 @@ describe('catalog metadata', () => {
     // get, get draft, versions, learn, validate, save, edit);
     // +1 systemAdmin.getPersonalSpaceStats (the admin dashboard's personal space counts);
     // +4 school.addClassSubject, updateClassSubject, removeClassSubject and
-    // moveClassSubjectToClassroom (one subject at a time, subjects added from an exam).
-    expect(catalog.advanced).toHaveLength(134);
+    // moveClassSubjectToClassroom (one subject at a time, subjects added from an exam);
+    // +4 template tools (list and get revisions, learn template editing, validate a template draft).
+    expect(catalog.advanced).toHaveLength(138);
   });
 });
 
