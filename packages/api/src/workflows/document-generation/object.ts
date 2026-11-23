@@ -32,10 +32,13 @@ function journaled(ctx: restate.ObjectContext): StepRunner {
     ctx.run(
       name,
       async () => {
+        const attempt = ctx.request().attemptCompletedSignal;
         try {
           // Ends when this attempt ends (retry, abort, lost connection), so a slot wait stops with it.
-          return await action(ctx.request().attemptCompletedSignal);
+          return await action(attempt);
         } catch (error) {
+          // The attempt ended (the wait stopped with it): not a step failure worth an error line.
+          if (attempt.aborted) throw new Error('The Restate attempt ended while the step waited.');
           log.error(
             {
               object: DOCUMENT_GENERATION_OBJECT_NAME,

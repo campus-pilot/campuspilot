@@ -234,7 +234,10 @@ export async function mergeBatchPdfs(
     await response.body?.cancel().catch(() => undefined);
     throw new DocumentConversionRefused('refused', `PDF merge was refused (${response.status}).`);
   }
-  if (!response.ok || !response.body) throw new Error(`PDF merge failed (${response.status}).`);
+  if (!response.ok || !response.body) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new Error(`PDF merge failed (${response.status}).`);
+  }
   const tooLarge = () => new DocumentConversionRefused('too_large', 'The merged PDF is larger than the stored PDF limit.');
   const declared = Number(response.headers.get('content-length') ?? 'NaN');
   if (Number.isFinite(declared) && declared > MERGED_PDF_MAX_BYTES) {

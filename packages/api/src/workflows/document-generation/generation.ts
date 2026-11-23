@@ -122,6 +122,12 @@ export type StepRunner = <T>(name: string, action: (signal?: AbortSignal) => Pro
  * How many times a step waits `SLOT_WAIT_LIMIT_MS` for a slot before the job
  * fails as `worker_busy` (an hour in all, the running deadline). Each wait
  * is its own journaled step, so waiting never uses a step's retries.
+ *
+ * Replay: the waits are journaled under the names `name:wait-N`, so this
+ * number is part of the journal's shape. Lowering it while jobs are in flight
+ * can make a replay end at a wait the journal already went past (and fail a
+ * job that was still waiting); deploy a change only when no document job is
+ * running, as for any change to the step sequence.
  */
 const MAX_SLOT_WAITS = 6;
 
@@ -233,7 +239,8 @@ export async function runDocumentGeneration(
         wait === 0 ? name : `${name}:wait-${wait}`,
         async (signal) => {
           try {
-            return { ok: true, value: slot ? await slot(action, signal) : await action() };
+            // Keyed by job and step, so a step waiting again keeps its place in the queue.
+            return { ok: true, value: slot ? await slot(action, signal, `${input.jobId}:${name}`) : await action() };
           } catch (error) {
             if (error instanceof SlotWaitTimeout) return { ok: false, slotWaitTimedOut: true };
             if (error instanceof JobStopped) return { ok: false, stopped: true };

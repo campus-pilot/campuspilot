@@ -37,68 +37,121 @@ export class SlotWaitTimeout extends Error {
   }
 }
 
-type Waiter = { grant: () => void; leave: () => void };
+/**
+ * How long a place in the queue is kept for a step that stopped waiting
+ * (`SLOT_WAIT_LIMIT_MS`) and is expected to wait again at once under its next
+ * name, and how long a slot granted meanwhile is held for it.
+ */
+export const SLOT_PLACE_KEPT_MS = 60_000;
+
+type Waiter = {
+  key: string | undefined;
+  /** Set while a call is waiting on this place; unset between a timeout and the next wait. */
+  attached: { resolve: () => void; reject: (error: unknown) => void } | null;
+  granted: boolean;
+  timers: Set<NodeJS.Timeout>;
+};
 
 /**
  * A first-come-first-served limit of `size` tasks. A released slot is handed
  * straight to the oldest waiter (it is never free in between), so a newcomer
- * cannot take it first.
+ * cannot take it first. A wait with a `key` that runs out keeps its place:
+ * the next wait with the same key (the step waiting again, `name:wait-N`)
+ * resumes it, and a slot granted in between is held for it; a place nobody
+ * resumes within {@link SLOT_PLACE_KEPT_MS} is given up.
  */
 export function createSlots(size: number, waitStep: string) {
   let active = 0;
   const waiting: Waiter[] = [];
+  const byKey = new Map<string, Waiter>();
 
-  function acquire(signal?: AbortSignal): Promise<void> {
+  function clearTimers(waiter: Waiter) {
+    for (const timer of waiter.timers) clearTimeout(timer);
+    waiter.timers.clear();
+  }
+  function forget(waiter: Waiter) {
+    clearTimers(waiter);
+    const index = waiting.indexOf(waiter);
+    if (index >= 0) waiting.splice(index, 1);
+    if (waiter.key !== undefined && byKey.get(waiter.key) === waiter) byKey.delete(waiter.key);
+  }
+  function release() {
+    const next = waiting.shift();
+    if (!next) {
+      active -= 1;
+      return;
+    }
+    // The slot changes hands: `active` stays as it is.
+    if (next.attached) {
+      forget(next);
+      next.attached.resolve();
+      return;
+    }
+    // Its step is between two waits: hold the slot for it, briefly.
+    next.granted = true;
+    next.timers.add(
+      setTimeout(() => {
+        forget(next);
+        release();
+      }, SLOT_PLACE_KEPT_MS),
+    );
+  }
+
+  function attach(waiter: Waiter, signal: AbortSignal | undefined): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const onAbort = () => {
+        // The attempt ended: its retry starts the step again from the start of the queue.
+        forget(waiter);
+        reject(signal?.reason ?? new Error('The attempt ended.'));
+      };
+      waiter.attached = {
+        resolve: () => {
+          signal?.removeEventListener('abort', onAbort);
+          resolve();
+        },
+        reject,
+      };
+      clearTimers(waiter);
+      waiter.timers.add(
+        setTimeout(() => {
+          signal?.removeEventListener('abort', onAbort);
+          waiter.attached = null;
+          // A keyed place is kept for the step's next wait, for a while; any other leaves.
+          if (waiter.key === undefined) forget(waiter);
+          else waiter.timers.add(setTimeout(() => forget(waiter), SLOT_PLACE_KEPT_MS));
+          reject(new SlotWaitTimeout());
+        }, SLOT_WAIT_LIMIT_MS),
+      );
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+
+  function acquire(signal?: AbortSignal, key?: string): Promise<void> {
     if (signal?.aborted) return Promise.reject(signal.reason ?? new Error('The attempt ended.'));
+    const kept = key === undefined ? undefined : byKey.get(key);
+    if (kept?.granted) {
+      forget(kept);
+      return Promise.resolve();
+    }
+    if (kept) return measure(waitStep, () => attach(kept, signal));
     if (active < size && waiting.length === 0) {
       active += 1;
       return Promise.resolve();
     }
-    return measure(
-      waitStep,
-      () =>
-        new Promise<void>((resolve, reject) => {
-          const timer = setTimeout(() => {
-            waiter.leave();
-            reject(new SlotWaitTimeout());
-          }, SLOT_WAIT_LIMIT_MS);
-          const onAbort = () => {
-            waiter.leave();
-            reject(signal?.reason ?? new Error('The attempt ended.'));
-          };
-          const waiter: Waiter = {
-            // The releasing task keeps `active` as it is: the slot changes hands.
-            grant: () => {
-              clearTimeout(timer);
-              signal?.removeEventListener('abort', onAbort);
-              resolve();
-            },
-            leave: () => {
-              clearTimeout(timer);
-              signal?.removeEventListener('abort', onAbort);
-              const index = waiting.indexOf(waiter);
-              if (index >= 0) waiting.splice(index, 1);
-            },
-          };
-          signal?.addEventListener('abort', onAbort, { once: true });
-          waiting.push(waiter);
-        }),
-    );
-  }
-
-  function release() {
-    const next = waiting.shift();
-    if (next) next.grant();
-    else active -= 1;
+    const waiter: Waiter = { key, attached: null, granted: false, timers: new Set() };
+    waiting.push(waiter);
+    if (key !== undefined) byKey.set(key, waiter);
+    return measure(waitStep, () => attach(waiter, signal));
   }
 
   /**
    * Runs `task` holding one slot; the slot is returned when `task` settles,
    * whatever it throws. Throws {@link SlotWaitTimeout} after waiting
-   * {@link SLOT_WAIT_LIMIT_MS}, or the signal's reason when it aborts.
+   * {@link SLOT_WAIT_LIMIT_MS} (a `key` keeps the place for the next wait), or
+   * the signal's reason when it aborts.
    */
-  async function withSlot<T>(task: () => Promise<T>, signal?: AbortSignal): Promise<T> {
-    await acquire(signal);
+  async function withSlot<T>(task: () => Promise<T>, signal?: AbortSignal, key?: string): Promise<T> {
+    await acquire(signal, key);
     try {
       return await task();
     } finally {
@@ -106,7 +159,7 @@ export function createSlots(size: number, waitStep: string) {
     }
   }
 
-  /** Slots held and tasks waiting, for tests. */
+  /** Slots held and places waiting, for tests. */
   withSlot.usage = () => ({ active, waiting: waiting.length });
   return withSlot;
 }

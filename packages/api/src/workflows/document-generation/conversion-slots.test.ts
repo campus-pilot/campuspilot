@@ -48,3 +48,28 @@ describe('document job slots', () => {
     expect(slots.usage()).toEqual({ active: 0, waiting: 0 });
   });
 });
+
+describe('a step that waits again keeps its place (review round 3)', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('resumes the same place in the queue, ahead of later waiters', async () => {
+    vi.useFakeTimers();
+    const slots = createSlots(1, 'test.wait');
+    const order: string[] = [];
+    let release!: () => void;
+    const holder = slots(() => new Promise<void>((resolve) => { release = resolve; }));
+    const first = slots(async () => { order.push('step'); }, undefined, 'job:batch:1');
+    const later = slots(async () => { order.push('later'); });
+    vi.advanceTimersByTime(SLOT_WAIT_LIMIT_MS + 1);
+    await expect(first).rejects.toBeInstanceOf(SlotWaitTimeout);
+    // `later` timed out too and left; the step's place is kept for its next wait.
+    await expect(later).rejects.toBeInstanceOf(SlotWaitTimeout);
+    const newcomer = slots(async () => { order.push('newcomer'); });
+    const again = slots(async () => { order.push('step again'); }, undefined, 'job:batch:1');
+    release();
+    await holder;
+    await Promise.all([again, newcomer]);
+    expect(order).toEqual(['step again', 'newcomer']);
+    expect(slots.usage()).toEqual({ active: 0, waiting: 0 });
+  });
+});
