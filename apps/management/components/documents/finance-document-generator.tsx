@@ -2,9 +2,13 @@
 
 import { useForm } from "@tanstack/react-form";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, CheckCircle2, Eye, Search } from "lucide-react";
+import { ArrowRight, Eye, Search } from "lucide-react";
 import { z } from "zod";
-import type { DocumentSource } from "@campuspilot/api/routers/school/document/document.dto";
+import {
+  MAX_DOCUMENT_SOURCE_ITEMS,
+  type DocumentGenerationJobDto,
+  type DocumentSource,
+} from "@campuspilot/api/routers/school/document/document.dto";
 import { formatMinor } from "@campuspilot/components/finance";
 import {
   DocumentButton,
@@ -22,14 +26,10 @@ import {
   DocumentReadError,
   SCHOOL_ACTIONS,
   documentPermission,
-  useDocumentCache,
   type DocumentScope,
 } from "./document-common";
-import {
-  CreatePdfButton,
-  DocumentDownload,
-  downloadCreatedDocument,
-} from "./document-generator";
+import { CreatePdfButton, DocumentDownload } from "./document-generator";
+import { DocumentJobTracker } from "./document-job";
 
 type FinanceDocumentType = "bill" | "receipt";
 type FinanceSource = Extract<
@@ -40,9 +40,11 @@ type Preview = {
   html: string;
   warnings: string[];
   recipientCount: number;
+  sampleCount: number;
   fingerprint: string;
 };
-type GeneratedArtifact = { id: string; fingerprint: string };
+/** The job started for a selection, with the selection it was started for. */
+type StartedJob = { job: DocumentGenerationJobDto; fingerprint: string };
 type Selection = { id: string; label: string };
 
 const selectionSchema = z.object({
@@ -143,16 +145,15 @@ function useFinanceGeneration({
     selected: Selection[];
   }) => FinanceSource | null;
 }) {
-  const cache = useDocumentCache();
   const form = useForm({
     defaultValues: {
       search: "",
       page: 1,
       billRunId: "",
       selected: [] as Selection[],
-      mode: "preview" as "preview" | "generate" | "download",
+      mode: "preview" as "preview" | "generate",
       preview: null as Preview | null,
-      generated: null as GeneratedArtifact | null,
+      generated: null as StartedJob | null,
       error: "",
     },
     validators: {
@@ -160,18 +161,19 @@ function useFinanceGeneration({
         search: z.string().max(searchMax),
         page: z.number().int().positive(),
         billRunId: z.string(),
-        selected: z.array(selectionSchema).max(500),
-        mode: z.enum(["preview", "generate", "download"]),
+        selected: z.array(selectionSchema).max(MAX_DOCUMENT_SOURCE_ITEMS),
+        mode: z.enum(["preview", "generate"]),
         preview: z
           .object({
             html: z.string(),
             warnings: z.array(z.string()),
             recipientCount: z.number().int().nonnegative(),
+            sampleCount: z.number().int().nonnegative(),
             fingerprint: z.string(),
           })
           .nullable(),
         generated: z
-          .object({ id: z.string().min(1), fingerprint: z.string().min(1) })
+          .object({ job: z.custom<DocumentGenerationJobDto>(), fingerprint: z.string().min(1) })
           .nullable(),
         error: z.string(),
       }),
@@ -193,6 +195,7 @@ function useFinanceGeneration({
             html: preview.html,
             warnings: preview.warnings,
             recipientCount: preview.studentCount,
+            sampleCount: preview.sampleCount,
             fingerprint,
           });
           return;
@@ -203,20 +206,7 @@ function useFinanceGeneration({
           source,
           templateRevisionId: templateId,
         });
-        form.setFieldValue("generated", {
-          id: generated.artifact.id,
-          fingerprint,
-        });
-        await cache.artifacts(scope.schoolId);
-        if (value.mode === "download")
-          form.setFieldValue(
-            "error",
-            await downloadCreatedDocument({
-              schoolId: scope.schoolId,
-              artifactId: generated.artifact.id,
-              documentType: source.documentType,
-            }),
-          );
+        form.setFieldValue("generated", { job: generated.job, fingerprint });
       } catch (error) {
         form.setFieldValue(
           "error",
@@ -503,7 +493,9 @@ function ReceiptPicker({
         <DocumentErrors errors={searchErrors} />
       </div>
       <p className="text-xs text-muted-foreground">
-        {values.selected.length} of 500 payments selected across pages
+        {values.selected.length} of{" "}
+        {MAX_DOCUMENT_SOURCE_ITEMS.toLocaleString("en-IN")} payments selected
+        across pages
       </p>
       {values.selected.length ? (
         <div className="flex max-h-24 flex-wrap gap-2 overflow-y-auto">
@@ -532,7 +524,8 @@ function ReceiptPicker({
             {payments.data.items.map((payment) => {
               const selected = selectedIds.has(payment.id);
               const disabled =
-                payment.reversed || (!selected && values.selected.length >= 500);
+                payment.reversed ||
+                (!selected && values.selected.length >= MAX_DOCUMENT_SOURCE_ITEMS);
               return (
                 <DocumentButton
                   key={payment.id}
@@ -619,14 +612,10 @@ function FinancePreviewAndActions({
             ) : null}
             <div className="flex flex-wrap gap-2">
               <CreatePdfButton
-                permission={{
-                  schoolId: scope.schoolId,
-                  action: SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS,
-                }}
                 disabled={!source || submitting || !canSubmit}
-                running={submitting ? values.mode : null}
-                onCreate={(mode) => {
-                  form.setFieldValue("mode", mode);
+                running={submitting && values.mode === "generate"}
+                onCreate={() => {
+                  form.setFieldValue("mode", "generate");
                   void form.handleSubmit();
                 }}
               />
@@ -644,43 +633,49 @@ function FinancePreviewAndActions({
                   : "Preview document"}
               </DocumentButton>
             </div>
-            {previewCurrent ? (
+            {previewCurrent && values.preview ? (
               <p className="text-xs text-muted-foreground">
-                Preview contains {values.preview?.recipientCount ?? 0}{" "}
-                {documentType === "bill" ? "bills" : "receipts"}.
+                The PDF will contain{" "}
+                {values.preview.recipientCount.toLocaleString("en-IN")}{" "}
+                {documentType === "bill" ? "bills" : "receipts"}
+                {values.preview.sampleCount < values.preview.recipientCount
+                  ? `; the preview shows the first ${values.preview.sampleCount}`
+                  : ""}
+                .
               </p>
             ) : null}
             <DocumentPreview
               html={previewCurrent ? values.preview?.html : undefined}
             />
             {generatedCurrent && values.generated ? (
-              <div className="flex flex-col gap-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
-                <p role="status" className="flex items-center gap-2 text-sm font-medium">
-                  <CheckCircle2 className="size-4" /> Your PDF is ready
-                </p>
-                <RequirePermissions
-                  permissions={documentPermission(
-                    scope.schoolId,
-                    SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS,
-                  )}
-                  fallback={
-                    <DocumentNotice>
-                      The PDF was created, but your account cannot download
-                      finance documents.
-                    </DocumentNotice>
-                  }
-                >
-                  <DocumentDownload
-                    schoolId={scope.schoolId}
-                    artifactId={values.generated.id}
-                    documentType={documentType}
-                    label="Download again"
-                  />
-                  <DocumentButton variant="ghost" onClick={onHistory}>
-                    View document history <ArrowRight />
-                  </DocumentButton>
-                </RequirePermissions>
-              </div>
+              <DocumentJobTracker
+                key={values.generated.job.id}
+                schoolId={scope.schoolId}
+                job={values.generated.job}
+                ready={(artifactId) => (
+                  <RequirePermissions
+                    permissions={documentPermission(
+                      scope.schoolId,
+                      SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS,
+                    )}
+                    fallback={
+                      <DocumentNotice>
+                        The PDF was created, but your account cannot download
+                        finance documents.
+                      </DocumentNotice>
+                    }
+                  >
+                    <DocumentDownload
+                      schoolId={scope.schoolId}
+                      artifactId={artifactId}
+                      documentType={documentType}
+                    />
+                    <DocumentButton variant="ghost" onClick={onHistory}>
+                      View document history <ArrowRight />
+                    </DocumentButton>
+                  </RequirePermissions>
+                )}
+              />
             ) : null}
           </section>
         );
