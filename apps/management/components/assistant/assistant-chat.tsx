@@ -38,7 +38,8 @@ import {
   type AssistantApprovalDecision,
   type AssistantSuggestion,
 } from '@campuspilot/components/assistant';
-import { draftSaved, draftSaveSpent, saveEventsOf, supersededDrafts } from '@campuspilot/components/question-paper/chat-cards-model';
+import { draftSaved, draftSaveSpent, isPaperDraftCard, saveEventsOf, supersededDrafts } from '@campuspilot/components/question-paper/chat-cards-model';
+import type { AssistantEditorSource } from '@campuspilot/assistant-contract/template-editing';
 import { Button } from '@campuspilot/ui/components/button';
 import { Spinner } from '@campuspilot/ui/components/spinner';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@campuspilot/ui/components/tooltip';
@@ -54,6 +55,7 @@ import { orpc } from '@/lib/orpc';
 import { useApprovalMoney } from './assistant-approval-currency';
 import { AssistantApprovalWithSummary } from './assistant-approval-request';
 import { AssistantDraftCard, useDraftVerdicts } from './assistant-question-paper';
+import { AssistantTemplateDraftCard, type TemplateDraftBinding } from './assistant-template-draft';
 import { seedFailedOf } from './assistant-question-paper-model';
 import { mayStopTurn } from './assistant-conversation-state';
 import { missingAttachmentIdsOf, refusalMessage, type AssistantConversationFailure } from './assistant-stream';
@@ -186,6 +188,16 @@ export type AssistantChatProps = {
    * the app to a section on request, `openLink` follows a link on the page.
    */
   overlay?: Required<Pick<VoiceHandlers, 'open' | 'openLink'>>;
+  /**
+   * The template editor's chat: the editor's unsaved source to send with the
+   * next message, read at the moment of sending (null when the model already
+   * holds it), and how the template drafts in the chat relate to the editor.
+   * See docs/document-system.md, "Edit with the assistant".
+   */
+  templateEditor?: {
+    sourceToSend: () => AssistantEditorSource | null;
+    drafts: TemplateDraftBinding;
+  };
 };
 
 /** A paper chat suggests Pro once the user has sent this many messages on Fast. */
@@ -208,8 +220,11 @@ function SeedChip({ paperLabel, failed, onRemove }: { paperLabel: string | undef
  * conversation then starts plain, without the seed text in the model's context.
  */
 function useSeedPaper(schoolId: string, seed: AssistantMessageSeed | null) {
-  const examSeed = seed?.kind === 'question_paper' ? seed : null;
-  const standaloneSeed = seed?.kind === 'standalone_question_paper' ? seed : null;
+  // A template editor's seed names a document type only (nothing to read); its chat shows no chip.
+  const paperSeed = seed?.kind === 'document_template' ? null : seed;
+  const templateSeed = seed?.kind === 'document_template' ? seed : null;
+  const examSeed = paperSeed?.kind === 'question_paper' ? paperSeed : null;
+  const standaloneSeed = paperSeed?.kind === 'standalone_question_paper' ? paperSeed : null;
   // A standalone paper (docs/personal-space.md) is read by its id; it names itself by its details.
   const standalone = useQuery({
     ...orpc.school.getStandalonePaperDetail.queryOptions({ input: standaloneSeed ? { schoolId, paperId: standaloneSeed.paperId } : skipToken }),
@@ -219,6 +234,7 @@ function useSeedPaper(schoolId: string, seed: AssistantMessageSeed | null) {
     ...orpc.school.getQuestionPaperDetail.queryOptions({ input: examSeed ? { ...examSeed, schoolId } : skipToken }),
     retry: false,
   });
+  if (templateSeed) return { paperLabel: undefined, failed: false, usableSeed: templateSeed };
   if (standaloneSeed) {
     const failedStandalone = seedFailedOf({ hasSeed: true, hasData: standalone.data !== undefined, isError: standalone.isError });
     return {
@@ -227,7 +243,7 @@ function useSeedPaper(schoolId: string, seed: AssistantMessageSeed | null) {
       usableSeed: failedStandalone ? null : seed,
     };
   }
-  const failed = seedFailedOf({ hasSeed: seed !== null, hasData: detail.data !== undefined, isError: detail.isError });
+  const failed = seedFailedOf({ hasSeed: paperSeed !== null, hasData: detail.data !== undefined, isError: detail.isError });
   const paper = detail.data?.paper;
   return { paperLabel: paper ? `${paper.subjectName} (${paper.modeName}), ${paper.className}, ${paper.examName}` : undefined, failed, usableSeed: failed ? null : seed };
 }
@@ -326,6 +342,8 @@ type TurnActions = {
   /** Sends a message the user chose with a button (a draft card's Save); undefined when sending is not possible now. */
   onSendMessage?: (text: string) => void;
   stoppingRunId: string | null;
+  /** How template drafts relate to the template editor beside the chat; absent anywhere else. */
+  templateDrafts?: TemplateDraftBinding;
 };
 
 /**
@@ -346,6 +364,7 @@ function ConversationTimeline({
   onRetry,
   onSendMessage,
   stoppingRunId,
+  templateDrafts,
 }: TurnActions & {
   schoolId: string;
   conversationId: string | null;
@@ -393,18 +412,22 @@ function ConversationTimeline({
       attachmentPreviewUrl={(attachment: AssistantAttachmentRef) => assistantAttachmentThumbUrl(schoolId, attachment.id)}
       attachmentOriginalUrl={(attachment: AssistantAttachmentRef) => assistantAttachmentOriginalUrl(schoolId, attachment.id)}
       authorOf={authorOf}
-      renderCard={(row) => (
+      renderCard={(row) =>
+        row.card === 'document_template_draft' ? (
+          <AssistantTemplateDraftCard rows={rows} callId={row.call.id} binding={templateDrafts} />
+        ) : (
         <AssistantDraftCard
           schoolId={schoolId}
           call={row.call}
-          // "Draft n": the card's place among this conversation's drafts.
-          ordinal={rows.filter((candidate) => candidate.kind === 'card').findIndex((candidate) => candidate.id === row.id) + 1}
+          // "Draft n": the card's place among this conversation's paper drafts.
+          ordinal={rows.filter(isPaperDraftCard).findIndex((candidate) => candidate.id === row.id) + 1}
           onSendMessage={onSendMessage}
           supersededBy={superseded.get(row.call.id)}
           saveRequested={(request) => draftSaveSpent(saveEventsOf(rows), request)}
           saved={(paper, draftId) => draftSaved(rows, paper, draftId)}
         />
-      )}
+        )
+      }
     />
   );
 }
@@ -566,6 +589,7 @@ function ChatBody({
   onRetry,
   onSendMessage,
   stoppingRunId,
+  templateDrafts,
 }: TurnActions & {
   schoolId: string;
   conversationId: string | null;
@@ -588,6 +612,7 @@ function ChatBody({
         onRetry={onRetry}
         onSendMessage={onSendMessage}
         stoppingRunId={stoppingRunId}
+        templateDrafts={templateDrafts}
       />
     </div>
   );
@@ -623,6 +648,7 @@ export function AssistantChat({
   shareWithPaper = false,
   readOnlyReason = null,
   overlay,
+  templateEditor,
 }: AssistantChatProps) {
   const life = useSurfaceLife();
   // The conversation this chat's first message started, set the moment the send returns. The surface moves
@@ -728,6 +754,7 @@ export function AssistantChat({
       seed: seedPaper.usableSeed,
       shareWithPaper,
       tier,
+      editorSource: templateEditor?.sourceToSend() ?? null,
     }).catch((error: unknown) => {
       const missing = missingAttachmentIdsOf(error);
       // The composer marks these tiles, so the failed copy of the message is dropped: its Retry would name the same missing files.
@@ -757,7 +784,13 @@ export function AssistantChat({
       // A new request brings the panel back: its answer is about to appear there.
       if (overlay) setOverlayPanelOpen(true);
       // The overlay sits over the page the user is asking about, so its requests carry what that page shows.
-      const result = await send(request, intoConversationId, { seed: seedPaper.usableSeed, shareWithPaper, screen: Boolean(overlay), tier }).catch((error: unknown) => {
+      const result = await send(request, intoConversationId, {
+        seed: seedPaper.usableSeed,
+        shareWithPaper,
+        screen: Boolean(overlay),
+        tier,
+        editorSource: templateEditor?.sourceToSend() ?? null,
+      }).catch((error: unknown) => {
         throw new Error(refusalMessage(error) ?? 'The request could not be sent. Check your connection.');
       });
       return { conversationId: result.conversation.id, runId: result.run.id };
@@ -871,6 +904,7 @@ export function AssistantChat({
             onRetry={canRetry ? sendDirectly : undefined}
             onSendMessage={canRetry ? sendDirectly : undefined}
             stoppingRunId={stop.isPending ? stop.variables.runId : null}
+            templateDrafts={templateEditor?.drafts}
           />
         )}
         <div

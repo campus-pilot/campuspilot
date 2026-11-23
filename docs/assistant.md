@@ -678,6 +678,36 @@ so a colleague who takes the paper over reads how it came to be and carries on.
   sender's own permissions. The welcome says so ("Everyone who can open this
   paper sees this chat").
 
+## The template editor's conversations
+
+The template builder in Settings › Templates has the assistant beside the template
+(canonical description: [Document system](document-system.md#edit-with-the-assistant)).
+It adds no table, no flag and no access rule: the chat is `AssistantChat` (surface
+`panel`) behind `useAssistantGate`, and the model reaches templates only through the
+`documents` tools, behind the user's own template permissions.
+
+- **Seed.** `{ kind: 'document_template', documentType }` (`documentTemplateSeedSchema`).
+  It names only a document type (an enum), so `sendMessage` has nothing to resolve
+  (`assertSeedNamesAPaper` returns for it). The model's context gets a
+  `<document_template_context>` block: learn first, edit the newest source, propose
+  with `validateDocumentTemplateDraft`, never save. The conversation stays private.
+- **`editorSource`.** `sendMessage` (and the stored user message body) may carry the
+  editor's unsaved source, `{ documentType, content }` up to 200,000 characters
+  (`assistantEditorSourceSchema` in `packages/assistant-contract/src/template-editing.ts`).
+  The editor sends it when the conversation has not seen that source yet. It becomes a
+  `<template_editor_source>` block, fenced like the page's text: every tag of the block
+  is removed from the source until none is left (`buildUserTranscriptContent`). It is
+  user data, never instructions.
+- **Tools.** `learn_document_template_editing` and `validateDocumentTemplateDraft`
+  (advanced reads, module `documents`), plus the existing template reads. The check
+  saves nothing and never echoes the source; a succeeded call is a chat card
+  (`ASSISTANT_CARD_TOOLS`: `school.validateDocumentTemplateDraft` →
+  `document_template_draft`), never counted as a question paper's draft
+  (`isPaperDraftCard`). `previewDocumentTemplatePdf` is hidden (a person's preview).
+- **Saving.** The person saves in the editor. `saveDocumentTemplate` and
+  `selectMarketplaceTemplate` keep their approval card, so a model that calls one
+  against its instructions still cannot save without the user.
+
 ## Voice mode
 
 Staff can talk to the assistant and hear it answer, on every surface the chat
@@ -1055,6 +1085,9 @@ All three share one chat component and the same conversations:
 - **Palette**: type a question in ⌘K and choose *Ask the assistant*.
 
 Each run records the surface it started from (`assistant_run.surface`).
+
+The template builder embeds the same chat beside a template (see "The template
+editor's conversations"), recorded as the `panel` surface.
 
 The same chat component is also embedded where a screen is about one thing. A question
 paper's screen holds its own conversation beside the paper

@@ -27,7 +27,11 @@ for the management implementation.
 | `document-generator.tsx` | Type-specific source form, live preview, PDF creation |
 | `finance-document-generator.tsx` | Posted billing-run and payment selection, finance preview, PDF creation |
 | `document-history.tsx` | Unified session history, downloads, deletion |
-| `document-templates.tsx` | Settings empty state, editor, sample preview, immutable revision save |
+| `document-templates.tsx` | Settings empty state, read-only PDF preview, and the editor's entry (keyed by revision) |
+| `template-workspace.tsx` | The template builder: header row, resizable AI/Code pane, PDF preview, working copy, assistant drafts, revision restore |
+| `template-assistant.tsx` | The builder's chat (`?chat=`), its seed, suggestions and drafts |
+| `template-pdf-preview.tsx` | A template source as its PDF (`previewDocumentTemplatePdf`), cached per source |
+| `template-revisions.tsx` | Revision select (`?revision=`), All revisions dialog, read-only revision with Restore |
 | `template-code-editor.tsx` | Dynamically loaded Monaco source editor and format action |
 | `document-template-settings.tsx` | Settings permission boundary and scope adapter |
 | `document-template-marketplace.tsx` | Catalog list, dedicated detail preview, import mutation |
@@ -61,9 +65,12 @@ document HTML is shown: an iframe with an **empty** `sandbox`. Its options:
   template, catalog, and history are server state managed by TanStack Query.
 - Use a component `key` when a selected type or immutable revision needs a clean
   form baseline. Do not synchronize a new baseline into an open dirty form.
-- Template-editor preview HTML is derived from a 650 ms debounced request or an
-  explicit refresh. Request versioning prevents an older response from replacing
-  the latest successful preview. Document-generation previews remain explicit.
+- The template editor's preview is a PDF query keyed by a hash of the source: typing
+  re-renders after a 900 ms pause (or *Refresh preview now*), an assistant draft,
+  footprint or print size at once, and the previous pages stay while the next one
+  converts. Document-generation previews remain explicit HTML.
+- The template on screen is derived (`editorSourceOf`) from the working copy and the
+  assistant's newest draft; no effect copies one into the other.
 - Cache invalidation after selecting/saving a template must refresh both the active
   template and any consumers that show template availability.
 - A missing template is a persistent setup condition: register one domain-scoped
@@ -85,20 +92,20 @@ document HTML is shown: an iframe with an **empty** `sandbox`. Its options:
 - `DocumentKindCards` is the type chooser in both Documents and the marketplace.
   It is a button group when cards launch workflows and a radiogroup when a selected
   `value` is supplied.
-- The editor and preview share one border with no inter-panel padding. Their
-  resizable divider and explicit editor control collapse the source panel. Keep
-  source before preview in DOM order so the stacked mobile layout follows the task
-  sequence.
+- The builder follows the question paper studio: it fills the window from md up
+  (`APP_SHELL_FILL_HEIGHT_MD_CLASS`), the editing pane (AI | Code tabs) and the
+  preview share a resizable divider, and *Hide editor* / *Show editor* fold the pane.
+  On a phone a *Preview | AI | Code* switch shows one section at a time, all mounted.
 - Monaco is client-only and uses HTML language services for Handlebars-containing
   markup. Preserve line numbers, wrapping, theme support, and the format action.
-- Preview controls offer scrollable and A4-page modes. Report cards use portrait
-  A4, timetables use landscape A4, ID cards are imposed on portrait A4, and
-  half-A4 admit/finance revisions visibly occupy one of two vertical sheet slots
-  without relaxing iframe sandboxing.
-- Edit with AI and Marketplace remain peer header actions. The marketplace should
-  not visually dominate source editing when a template is already selected.
-- At desktop, source and preview share the workspace. At 390 px and 320 px they
-  stack without feature-level horizontal overflow.
+- The preview is the printed PDF (`PdfPreview`): report cards portrait A4,
+  timetables landscape A4, ID cards imposed on portrait A4, half-A4 admit/finance
+  revisions in one of two vertical slots, exactly as generated.
+- *Ask for edit* (assistant users) or *Edit with AI* (everyone else) and Marketplace
+  remain peer header actions. The marketplace should not visually dominate source
+  editing when a template is already selected.
+- At 390 px and 320 px the header wraps and sections switch without feature-level
+  horizontal overflow.
 
 ## Route mapping
 

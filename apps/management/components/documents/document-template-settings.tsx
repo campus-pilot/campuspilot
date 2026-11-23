@@ -23,12 +23,11 @@ export function DocumentTemplateSettings({
         </DocumentNotice>
       }
     >
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 pb-12">
-        <DocumentTemplates
-          key={`${schoolId}-${documentType}`}
-          scope={{ schoolId, documentType }}
-        />
-      </div>
+      {/* Each state lays itself out: the pages in a centred column, the editor across the window. */}
+      <DocumentTemplates
+        key={`${schoolId}-${documentType}`}
+        scope={{ schoolId, documentType }}
+      />
     </DocumentPermission>
   );
 }

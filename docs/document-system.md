@@ -134,8 +134,9 @@ the generator.
 
 1. The marketplace opens with one document type selected.
 2. Cards show every server-owned design for that type.
-3. Preview navigates to a dedicated page and renders synthetic data in the same
-   sanitized iframe used by the editor.
+3. Preview navigates to a dedicated page and renders synthetic data in a
+   sanitized iframe (`DocumentPreview`). The editor's preview is the PDF
+   (`PdfPreview`), which is built to be reused here.
 4. Use template sends the catalog slug and `expectedRevisionId`.
 5. The server copies the catalog source to a new immutable, school-owned S3 object,
    creates an artifact row, and atomically selects that revision.
@@ -156,45 +157,108 @@ copy is what provides school ownership, provenance, and stable historical output
 When no revision is selected, Settings shows a focused blank state with one Browse
 marketplace action. It does not render a disabled or empty source editor.
 
-When a revision exists, an authorized editor sees:
+When a revision exists, an authorized editor sees the **template builder**, laid out
+like the question paper studio (`TemplateEditor` in `template-workspace.tsx`):
 
-- Edit with AI and Marketplace as peer actions in the header;
-- one integrated, resizable workspace with an explicit collapse/expand control for
-  the source panel on the left at wide widths and first in the stack on smaller
-  screens;
-- the template name and a Monaco Handlebars/HTML code editor with formatting,
-  syntax highlighting, line numbers, wrapping, and theme support;
-- for admit cards, bills, receipts, and statements, an explicit paper footprint:
-  half A4 (two documents per physical sheet) or full A4 (one per sheet);
-- for notices, a "Preview as" choice of a full-A4 or half-A4 notice instead:
-  a Notice design has no footprint (each notice chooses its size) and the
-  choice is never saved (the marketplace detail page of a Notice design offers
-  the same choice);
-- Save template and Reload saved revision actions;
-- a collapsible variable reference;
-- a sanitized sample preview on the right at wide widths and second in the stack
-  on smaller screens, with scrollable and A4-page modes plus a manual refresh.
+- From md up it fills the window under the app's header
+  (`APP_SHELL_FILL_HEIGHT_MD_CLASS`, the studio's class): one header row, then the
+  editing pane on the left and the preview on the right, each scrolling inside
+  itself, so the page never scrolls. The split is resizable (`ResizablePanelGroup`
+  from `@campuspilot/ui/components/resizable`, on `react-resizable-panels`) and the
+  editing pane folds away (*Hide editor*; *Show editor* in the preview's strip brings
+  it back). On a phone it is an ordinary page with a section switch (*Preview | AI |
+  Code*, the preview first) and one section at a time; every section stays mounted,
+  so switching loses nothing.
+- The **header row**: the template's title and state (*Saved*, *Unsaved changes*,
+  or *Draft n from the assistant, not saved*), the revision select and *All
+  revisions* (see "Revision history"), the AI action, *Marketplace*, *Reload saved*
+  and *Save template*. The AI action is *Ask for edit* (a sparkle) for someone who may
+  use the assistant (the question paper's gate, `useAssistantGate`: the school's
+  `assistant` feature and the user's assistant role; there is no other flag), and
+  the portable *Edit with AI* dialog for everyone else, unchanged. While the gate is
+  still loading neither is shown. *Ask for edit* opens the AI tab, unfolding the pane.
+- The **editing pane** has two tabs, *AI* (the assistant's chat, only for those who
+  may use it) and *Code*: the template name, for admit cards, bills, receipts and
+  statements an explicit paper footprint (half A4, two documents per physical sheet,
+  or full A4, one per sheet), the Monaco Handlebars/HTML code editor with formatting,
+  syntax highlighting, line numbers, wrapping and theme support, and a collapsible
+  variable reference (from `learn_document_template_editing`). Both tabs stay
+  mounted.
+- The **preview** is the template rendered with synthetic data **as the PDF it
+  prints as**, drawn page by page with pdf.js: the same `PdfPages` viewer, page
+  chrome, scrolling and skeleton as a question paper's saved version, through the
+  reusable `PdfPreview` (`packages/components/src/documents/pdf-preview.tsx`). For a
+  Notice design the strip offers *Preview as* (a full-A4 or half-A4 notice; a Notice
+  design has no footprint, each notice chooses its size, and the choice is never
+  saved; the marketplace detail page of a Notice design offers the same choice).
 
-Draft name and source remain local until Save. Source edits request a debounced
-sample render; the manual refresh bypasses that delay. Preview requests are
-versioned so an older, slower response cannot replace a newer draft. Preview never
-saves or selects a revision. Saving creates a new immutable object and makes it
-active. A keyed editor adopts the newly selected revision only after the query
-cache refreshes. Dirty navigation uses the application dialog and browser
-`beforeunload` fallback; it must not use `window.confirm`.
+Draft name and source remain local until Save. Typing re-renders the preview after a
+900 ms pause (each preview is one Gotenberg conversion), and the strip offers *Refresh
+preview now* meanwhile; a footprint or print-size change and a draft from the
+assistant render at once. Each source is converted once and cached by a hash of it
+(`useTemplatePdf`); the previous pages stay on screen with an *Updating preview…* badge
+while the next one converts, and a template the renderer refuses shows the renderer's
+own reason with *Try again*. Preview never saves or selects a revision. Saving creates
+a new immutable object and makes it active. A keyed editor adopts the newly selected
+revision only after the query cache refreshes. *Reload saved* discards the working
+copy (and any shown assistant draft) after the app's dirty dialog. Dirty navigation
+uses the application dialog and browser `beforeunload` fallback; it must not use
+`window.confirm`.
 
 The code editor is dynamically loaded in a client-only boundary because Monaco
-depends on browser APIs and is unnecessary for empty or read-only states. The
-preview stays in an empty-sandbox iframe. A4 mode uses portrait A4 for report
-cards and finance documents, shows half-A4 revisions in their two-up sheet
-placement, imposes student IDs on portrait A4, and uses landscape A4 for
-timetables; scrollable mode lets the rendered document use the full preview pane.
+depends on browser APIs and is unnecessary for empty or read-only states.
 
-Read-only users see the selected template preview but no source mutation controls.
+Read-only users see the selected template's PDF preview (with *Preview as* for a
+Notice design) but no source mutation controls.
+
+### The PDF preview (`previewDocumentTemplatePdf`)
+
+`previewDocumentTemplatePdf` renders unsaved source exactly as `previewDocumentTemplate`
+does (the same synthetic context, sanitising and CSP) and converts it with the same
+Gotenberg call as a generated document of the type (`previewTemplatePdf` in
+`document.template-source.ts`); a half-A4 Notice preview is imposed two copies per A4
+sheet like a published half notice. It stores nothing and returns the bytes base64 in
+its JSON result (a template preview is a few synthetic pages). It has the template
+read gate of `previewDocumentTemplate` and is `hidden` from MCP: each call costs a
+conversion, so it is a person's preview only (the assistant has the HTML preview and
+the draft check). The HTML `previewDocumentTemplate` stays for the marketplace and MCP.
+
+`PdfPreview` is presentational and API-free so the marketplace can reuse it: it takes
+a `LoadedPdf` (from `loadPdf(bytes)`), a `label`, the skeleton's `orientation`, an
+`updating` flag, an `error` sentence with `onRetry`, and takes its container's height
+(a pane, a tab or a full-screen dialog). The caller owns fetching and releasing the
+document (the app's query cache releases it when it drops the query).
+
+### Revision history
+
+Every save and every marketplace import is an immutable revision; the builder lets the
+user look at earlier ones, as the question paper studio does with versions:
+
+- The header's **revision select** lists *Working copy* (*Working copy (unsaved)* while
+  dirty) and the 20 newest revisions as *Revision n*, the one the school uses marked
+  *(in use)*; *All revisions* opens a dialog with every revision, a page at a time
+  (*Show older*), each with its name, how it was saved (in the editor or imported from
+  the marketplace), when, by whom, and *Preview*.
+- The revision shown lives in the address (`?revision=<id>`, like the studio's
+  `?version=n`). The preview pane then shows that revision read-only: a notice
+  (*Revision n · read-only*, its name and details) above its PDF, with *Back to working
+  copy* and **Restore**. The working copy and the chat stay as they are.
+- *Restore* loads the revision's source and footprint into the working copy; the name
+  stays the editor's. Nothing is saved: the user saves it like any edit, which creates
+  a new revision; no revision is overwritten or reselected. When the working copy has
+  unsaved changes, the app's confirmation dialog asks first (never `window.confirm`).
+- `revisionNo` numbers a type's revisions oldest first by creation; it is a label. The
+  id is `revisionId`. *In use* is the selection pointer's own fact, not "the newest".
+- Procedures: `listDocumentTemplateRevisions` (paged, newest first) and
+  `getDocumentTemplateRevision` (one revision with its source; NOT_FOUND for another
+  school's or type's id, or a PDF's). Both have exactly the template read gate of
+  `getActiveDocumentTemplate` (`READ_DOCUMENT_TEMPLATES` or the finance read action,
+  then the type's feature). They are advanced MCP reads in `documents`.
 
 ### Edit with an external AI application
 
-The AI helper is intentionally provider-neutral:
+For a user who may not use the in-app assistant, the AI helper is intentionally
+provider-neutral:
 
 1. The user enters an instruction in a dialog.
 2. CampusPilot constructs a prompt containing the print constraints, variable
@@ -204,7 +268,56 @@ The AI helper is intentionally provider-neutral:
 5. CampusPilot previews and saves only through the normal explicit actions.
 
 No AI provider, SDK, key, endpoint, or server request is involved. Never imply that
-CampusPilot sent the school's template or instructions to another service.
+CampusPilot sent the school's template or instructions to another service. The
+printing rules in the brief are the shared ones the in-app assistant reads
+(`templateRenderingContract` in `@campuspilot/assistant-contract/template-editing`),
+so the two never describe different contracts.
+
+### Edit with the assistant
+
+For a user who may use the assistant (`useAssistantGate`), the builder's AI tab is the
+ordinary assistant (`AssistantChat`, surface `panel`); every rule of
+[In-app assistant](assistant.md) applies (access, the monthly limit, cost rows, the
+tool policy). What the template editor adds:
+
+- **The conversation.** It is the user's own and private (no sharing, no migration),
+  seeded on its first message with `{ kind: 'document_template', documentType }`. It
+  lives in the editor's address (`?chat=<id>`), so a reload or a save (which remounts
+  the editor on the new revision) continues in it; *New chat* in the pane's header
+  starts another. Decision: a conversation is per editing session, not stored per
+  template or revision: a template has one school-wide selection that several people
+  edit, and a private chat tied to it would either be shared (a migration and the
+  question paper's whole sharing model) or invisible to colleagues. The assistant's
+  own page keeps the user's history.
+- **What the model reads.** `learn_document_template_editing` (the shared rendering
+  contract, how drafts reach the editor, `DOCUMENT_CONTEXT_HELP`). The editor's
+  current source goes with a message as `editorSource` whenever the conversation has
+  not seen it yet (always on the first message; then whenever it differs from the last
+  source sent or the assistant's own latest ready draft, which covers hand edits in the
+  Code tab), so the model edits exactly what the user sees and never a template cut by
+  a tool's result limit. It is stored on the user message and fenced as data in the
+  model's context (`<template_editor_source>`).
+- **How a change arrives.** The model proposes the complete template with
+  `validateDocumentTemplateDraft` (an advanced MCP read, module `documents`, the
+  template **manage** gate). It checks the source exactly as a save does
+  (`assertValidTemplateSource`, shared with `saveTemplate`: the Notice and Question
+  paper checks for those types, the sample render for the others), saves nothing, and
+  returns `{ valid, problems, draftId, characters }`, never echoing the source. A
+  succeeded call is a card in the chat (`ASSISTANT_CARD_TOOLS`,
+  `document_template_draft`): the problems when it would not save, else where it
+  stands for the editor (*Shown in the editor*, *Show in editor* for an earlier one,
+  or *Proposed before the template was last saved*).
+- **The working copy.** The template on screen is derived from two facts
+  (`editorSourceOf`): the person's own working copy and the newest ready draft of this
+  type proposed after the template was last saved (`latestTemplateDraftOf`, server
+  times both). A new draft is shown in the code and the preview at once (no effect); a
+  hand edit made after it keeps the hand edit until the next draft. Drafts are not
+  rows: they exist only in the conversation.
+- **Saving.** Only the person saves, with *Save template* (what is on screen becomes a
+  new revision through `saveDocumentTemplate`, as always). The seed and the guide tell
+  the model never to save from this chat; `saveDocumentTemplate` and
+  `selectMarketplaceTemplate` are writes without `skipsApproval`, so if a model calls
+  one anyway it waits for the user's approval card like any other write.
 
 ## Frontend architecture
 
@@ -218,9 +331,16 @@ callbacks and must not call APIs.
 | `DocumentGenerator` | Academic type-specific source fields, template dependency, preview, generation, and warnings |
 | `FinanceDocumentGenerator` | Posted billing-run/payment selection, finance preview, generation, download, and history handoff |
 | `DocumentHistory` | One session-wide artifact list, downloads, provenance, and deletion |
-| `DocumentTemplates` | Empty state, read-only preview, or authorized school-template editor |
+| `DocumentTemplates` | Empty state, read-only PDF preview, or authorized school-template editor |
+| `TemplateEditor` (`template-workspace.tsx`) | The template builder: header row, resizable AI/Code pane, PDF preview, working copy and assistant drafts, revision viewing and restore |
+| `TemplateAssistantPane`, `useTemplateChat` (`template-assistant.tsx`) | The editor's chat, its address (`?chat=`) and its drafts |
+| `TemplatePdfPreview`, `useTemplatePdf` (`template-pdf-preview.tsx`) | A source as its PDF through `previewDocumentTemplatePdf`, cached per source |
+| `RevisionPicker`, `RevisionHistoryDialog`, `RevisionPreview` (`template-revisions.tsx`) | Revision select, history dialog, read-only revision with Restore |
 | `TemplateCodeEditor` | Client-only Monaco wrapper and source-format action |
-| `TemplatePromptEditor` | Local portable-prompt dialog and clipboard operations |
+| `TemplatePromptEditor` | Local portable-prompt dialog and clipboard operations (users without the assistant) |
+| `PdfPreview` (components) | API-free pdf.js preview with skeleton, updating and error states; reused by the marketplace |
+| `TemplateDraftCard`, `template-draft-model.ts` (components) | The chat's template draft card and the pure reading of drafts and the working copy |
+| `TemplateRevisionList`, `TemplateRevisionNotice` (components) | API-free revision rows and the read-only revision notice |
 | `DocumentTemplateMarketplace` | Document-type selection and catalog cards |
 | `DocumentTemplateMarketplaceDetail` | Contextual catalog preview and import action |
 | `DocumentKindCards` | API-free accessible visual radiogroup shared by Documents and Marketplace |
@@ -233,7 +353,8 @@ and use TanStack Query invalidation/refetching for server state.
 
 ## API procedures and permission boundaries
 
-Frontend permission gates control visibility only. Every procedure enforces the
+Finance types use the finance template actions in each row (`READ_/MANAGE_FINANCE_DOCUMENT_TEMPLATES`),
+and every template procedure then checks the type's feature. Frontend permission gates control visibility only. Every procedure enforces the
 same boundary through server middleware.
 
 | Procedure | Purpose | School action |
@@ -243,7 +364,12 @@ same boundary through server middleware.
 | `getActiveDocumentTemplate` | Current immutable school revision or `null` | `READ_DOCUMENT_TEMPLATES` |
 | `selectMarketplaceTemplate` | Import and select a catalog design | `MANAGE_DOCUMENT_TEMPLATES` |
 | `saveDocumentTemplate` | Save and select a custom revision | `MANAGE_DOCUMENT_TEMPLATES` |
-| `previewDocumentTemplate` | Render source with synthetic data; also powers read-only selected-template previews | `READ_DOCUMENT_TEMPLATES` |
+| `previewDocumentTemplate` | Render source with synthetic data as HTML (marketplace, MCP) | `READ_DOCUMENT_TEMPLATES` |
+| `previewDocumentTemplatePdf` | The same render as a PDF for the editor and the read-only preview; hidden from MCP | `READ_DOCUMENT_TEMPLATES` |
+| `listDocumentTemplateRevisions` | Paged revision history, newest first | `READ_DOCUMENT_TEMPLATES` |
+| `getDocumentTemplateRevision` | One revision with its source | `READ_DOCUMENT_TEMPLATES` |
+| `learn_document_template_editing` | The rendering contract, the draft workflow and the variable reference (AI and editor) | `READ_DOCUMENT_TEMPLATES` |
+| `validateDocumentTemplateDraft` | Check a proposed template exactly as a save would; saves nothing | `MANAGE_DOCUMENT_TEMPLATES` |
 | `previewDocument` | Render authorized data without persistence | Academic: `GENERATE_DOCUMENTS`; finance: `GENERATE_FINANCE_DOCUMENTS` |
 | `generateDocument` | Render, convert, persist, and return a PDF artifact | Academic: `GENERATE_DOCUMENTS`; finance: `GENERATE_FINANCE_DOCUMENTS` |
 | `listDocumentArtifacts` | Paginated PDF history; explicit `all` requests form a chronological secure union | Requested academic and/or finance artifact read actions |
@@ -798,8 +924,11 @@ Browser verification must cover:
 - every document card and its required fields;
 - timetable generation without any classroom selector;
 - unified empty and populated history;
-- Settings empty state, read-only preview, editable split view, collapse behavior,
-  dirty navigation, preview, save, reload, and AI dialog;
+- Settings empty state, read-only PDF preview, the builder's resizable split, fold and
+  unfold, AI and Code tabs, dirty navigation, PDF preview (and its refused-template
+  error), save, reload, the AI dialog (no assistant) and the assistant's drafts
+  (assistant), revision select, history dialog, read-only revision and Restore (with
+  and without unsaved changes);
 - marketplace list, dedicated preview, active state, import conflict/error state;
 - desktop, 390 px, and the application minimum of 320 px;
 - page-level overflow, keyboard access, focus labels, permission-gated actions,
@@ -818,7 +947,10 @@ template merely to prove that an import button is clickable.
 - Do not use a frontend permission component as the authorization boundary.
 - Do not pass live tenant data into marketplace or editor sample previews.
 - Do not add `classId` to timetable generation.
-- Do not silently call an AI provider from Edit with AI.
+- Do not silently call an AI provider from the portable Edit with AI dialog; the
+  in-app assistant is the only AI path, behind its own gate.
+- Do not let the assistant save a template from the editor's chat, and do not store
+  its drafts: the person saves through Save template.
 - Do not weaken iframe sandboxing, sanitization, CSP, or Gotenberg network rules to
   accommodate a marketplace design.
 - Do not infer grades, attendance, approvals, registration, class membership, or
