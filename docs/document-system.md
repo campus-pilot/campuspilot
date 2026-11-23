@@ -812,8 +812,10 @@ the step's closure, which always settles (its slot is returned even when the
 step fails and Restate retries it) and never runs on a replay of a journaled
 step; a Restate attempt that ends mid-wait stops the wait. Slots are handed
 first come, first served. A wait longer than 10 minutes is journaled and
-waited again as a new step (`name:wait-N`), so it never uses the step's
-retries; after six waits the job fails as `worker_busy`. The API sweep
+waited again as a new step (`name:wait-N`) that keeps its place in the
+queue, so it never uses the step's retries; after six waits the job fails as
+`worker_busy` (the number of waits is part of the journal's shape: change it
+only when no document job is running). The API sweep
 (every 30 s) re-sends unaccepted jobs, fails a job Restate never accepted
 (10 minutes, `dispatch_failed`), never started (60 minutes, `not_started`) or
 that runs longer than 60 minutes (`not_finished`), and removes temporary objects
@@ -918,7 +920,11 @@ only when every `url(...)` / `image-set(...)` target is a raster `data:` image o
 one of the batch's exact asset names (none in a preview); a loading function
 written with any backslash (an escaped quote or parenthesis could make the
 checker read another target than Chromium) and an at-rule with a backslash in
-its name or prelude (`@i\mport`) are removed; `@import`, `image()`,
+its name or prelude (`@i\mport`) are removed; a value that loads anything and
+also uses `var()`, `env()` or `attr()` is removed (the browser substitutes them
+after the check); every `image-set()` candidate must be a literal `url()` or
+string whose target passes, and a loading function with no target read is
+refused; `@import`, `image()`,
 `cross-fade()`, `element()`, `paint()` and `src()` are removed, CSS escapes are
 decoded before checking, and CSS that does not parse is dropped. An SVG `data:`
 URI in CSS is therefore removed, as it is in `<img src>`. Previews never get this policy, question
