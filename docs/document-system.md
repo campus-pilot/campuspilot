@@ -248,8 +248,8 @@ same boundary through server middleware.
 | `previewDocumentTemplate` | Render source with synthetic data; also powers read-only selected-template previews | `READ_DOCUMENT_TEMPLATES` |
 | `previewDocument` | Render authorized data without persistence | Academic: `GENERATE_DOCUMENTS`; finance: `GENERATE_FINANCE_DOCUMENTS` |
 | `generateDocument` | Validate the request and queue a generation job; returns `{ jobId, job }` at once | Academic: `GENERATE_DOCUMENTS`; finance: `GENERATE_FINANCE_DOCUMENTS` |
-| `getDocumentGenerationJob` | Status, progress, `artifactId` once succeeded, `errorCode`/`errorMessage` once failed | Generate action of the job's type |
-| `listDocumentGenerationJobs` | A session's queued and running jobs and those failed in the last 7 days | Requested academic and/or finance artifact read actions |
+| `getDocumentGenerationJob` | Status, progress, `artifactId` once succeeded, `errorCode`/`errorMessage` once failed | What starting the job's type needs: generate action, source reads, the type's feature |
+| `listDocumentGenerationJobs` | A session's queued and running jobs and those failed in the last 7 days (paginated), of the types the caller could start | Requested academic and/or finance artifact read actions |
 | `listDocumentArtifacts` | Paginated PDF history; explicit `all` requests form a chronological secure union | Requested academic and/or finance artifact read actions |
 | `getDocumentDownload` | Issue a fresh short-lived signed URL | Type-aware academic or finance artifact read action |
 | `deleteDocumentArtifact` | Retry-safe PDF deletion | Type-aware academic or finance artifact delete action |
@@ -784,7 +784,10 @@ without a plan is refused by `requireAuth`, since starting a job is a write),
 checks the selected template revision (`CONFLICT` when it changed), builds every
 context once without reading any image (so relationships, approvals, the global
 receipt reversal check and the statement review hash refuse here, as before),
-refuses more than `MAX_DOCUMENT_SOURCE_ITEMS` (1,500) documents, inserts a
+refuses more than `MAX_DOCUMENT_SOURCE_ITEMS` (1,500) documents, refuses with
+`TOO_MANY_REQUESTS` when the school already has 3 queued or running jobs or the
+person 2 (counted under a per-school advisory lock, so two concurrent starts
+cannot both pass; `generateDocument` is also an MCP tool), inserts a
 `document_generation_job` row and returns. The row pins what the worker must
 reproduce: the template revision, `generated_at` (every document's
 `generatedAt`), the statement `review_hash`, and for finance documents
@@ -799,8 +802,13 @@ ingress-public document service. It checks the row and queues the job on the
 ingress-private Restate object `documentGeneration`, keyed by school: its
 handler is exclusive, so **at most one job per school runs at a time** (a
 partial unique index on running jobs guarantees it) and the school's other jobs
-wait in order while other schools run. Each worker process runs at most two
-Gotenberg conversions or merges at once (`conversion-slots.ts`). The API sweep
+wait in order while other schools run. Each worker process runs at most two batch
+steps or merges at once and one prepare step (`conversion-slots.ts`). A slot
+covers the whole step (reading the batch's images, rendering, converting,
+storing), so worker memory is bounded by the slots, and it is taken outside
+the journaled step: a long wait never runs a step twice, and a wait longer
+than 10 minutes gives up so Restate retries the invocation from its journal
+(the job does not fail). The API sweep
 (every 30 s) re-sends unaccepted jobs, fails a job Restate never accepted
 (10 minutes, `dispatch_failed`), never started (60 minutes, `not_started`) or
 that runs longer than 60 minutes (`not_finished`), and removes temporary objects
@@ -808,19 +816,29 @@ an ended job left behind.
 
 **Steps (worker, each journaled).** `claim` (queued to running) → `prepare` →
 `batch:N` per batch → `merge` (more than one batch) → `finish` → `cleanup`.
-Steps return only keys, counts, sizes and hashes.
+Steps return only ids, keys, counts, sizes and hashes: the source, the pinned
+cutoff and the other inputs are read from the job row by the steps that need
+them. `claim` re-checks the school's write access (`school-access`): a school
+suspended or left without a plan after the request fails the job
+(`school_suspended` / `no_plan`) before any work.
 
 - `prepare` builds every context in one repeatable-read, read-only transaction
   with the pinned cutoff (finance reads stop at the pinned sequences, so the
   documents describe the moment of Generate), compares a statement's review hash
   again, reads the size of every distinct image (`HEAD`), measures each
-  document's rendered HTML, splits the documents into batches and writes them as
+  document's rendered HTML under **one budget for the whole job** (a batch's
+  25 million units times the most batches a 1,500-document job has, 8; one
+  document at most one batch's budget), yielding to the event loop between
+  documents so the worker's other services keep running, records the document
+  count it really prints, splits the documents into batches and writes them as
   JSON under the job's private prefix `schools/{schoolId}/document-jobs/{jobId}/`
   with a manifest (name, student ids, finance source, warnings).
 - `batch:N` reads its JSON, reads its images once, renders with the pinned
   revision, converts, and stores `batch-NNNN.pdf` under a deterministic key (a
   repeated step overwrites; a single batch is stored straight at the final key).
-- `merge` streams the batch PDFs in order to Gotenberg `/forms/pdfengines/merge`
+- `merge` first adds up the batches' recorded sizes and fails the job
+  (`pdf_too_large`) when they pass the merged-PDF limit (1 GB); otherwise it
+  streams the batch PDFs in order to Gotenberg `/forms/pdfengines/merge`
   (it merges in file-name order) and streams the result into a multipart upload
   at `schools/{schoolId}/documents/{artifactId}.pdf`; no PDF is held in memory
   whole.
@@ -842,18 +860,28 @@ one document. A sheet whose images alone pass 20 MB fails (`images_too_large`).
 show (`DOCUMENT_GENERATION_JOB_FAILURES`): a refused input (`source_changed`,
 `invalid_source` with the builder's own message, `template_unavailable`,
 `images_invalid` naming whose photo, `images_too_large`, `document_too_large`)
-fails at once without retries; an infrastructure failure is retried by Restate
-(5 attempts with backoff) and then fails as `conversion_failed` or
-`internal_error`. A job already accepted keeps running if the school is
-suspended afterwards, like a queued notification.
+fails at once without retries, and so does a conversion that would fail the
+same way again (`conversion_refused` for a 4xx answer from Gotenberg,
+`pdf_too_large` for a batch PDF over 150 MB); an infrastructure failure (5xx,
+408, 429, a timeout, the network) is retried by Restate (5 attempts with
+backoff) and then fails as `conversion_failed` or `internal_error`. A job is refused at start for a suspended school (a write), and fails at
+claim if the school was suspended or lost its plan while it waited.
 
 **Screens.** The generators poll `getDocumentGenerationJob` with TanStack
 Query's `refetchInterval` (no effect) and show waiting, the part being created,
 the failure message, or the ready state with the download. A ledger row's
 receipt or bill action becomes a download button when its PDF is ready (a
 browser download must follow a click). History lists queued, running and
-recently failed jobs above the PDFs and reads both lists again while a job is in
-progress.
+recently failed jobs above the PDFs (only of the types the reader could start),
+reads both lists again while a job is in progress, and refreshes the PDF list
+from the query function that sees a job end. Reading a job
+(`getDocumentGenerationJob`) needs what starting one of its type needs: the
+generate action, the source's read actions and the type's feature.
+
+**Known cost.** A statement export still reads each admission's ledger with
+several queries per admission, which is slow for a whole school at once (the
+UI offers single-admission statements only). Bulk reads are designed in phase 3
+(bill due); until then this is accepted.
 
 **Data.** `document_generation_job` (migration `0084`) is school-owned and is
 deleted by `purge_demo_school`; its temporary objects are under the school's
@@ -875,10 +903,14 @@ Security (the second deliberate exception after question papers'
 generated names (`documentSanitizerOptions`); any other relative path,
 `http(s):` or `file:` URL is removed with its element. The CSP of that HTML adds
 `'self'` to `img-src` and nothing else, because the asset files load from
-Gotenberg's request directory. The policy cannot name files, so a template's
-CSS `url()` could name another file Chromium may read; Gotenberg's Chromium deny
-list keeps file access to its own `/tmp` (request directories have random names)
-and only an image could be drawn. Previews never get this policy, question
+Gotenberg's request directory. The policy cannot name files, so **the code is
+the boundary for CSS too** (`document.css.ts`, every document render, previews
+included): in `<style>` text and `style=""` attributes a declaration survives
+only when every `url(...)` / `image-set(...)` target is a raster `data:` image or
+one of the batch's exact asset names (none in a preview); `@import`, `image()`,
+`cross-fade()`, `element()`, `paint()` and `src()` are removed, CSS escapes are
+decoded before checking, and CSS that does not parse is dropped. An SVG `data:`
+URI in CSS is therefore removed, as it is in `<img src>`. Previews never get this policy, question
 papers never get it, and image limits stay: 5 MB per image, 20 MB of images per
 batch.
 

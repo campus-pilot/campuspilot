@@ -59,8 +59,9 @@ Only names, ids, sizes and durations are logged, never content.
 | `doc.sanitize` | the document sanitiser, for every document type | sync |
 | `doc.pdf.convert` | Gotenberg conversion (Chromium in its own container) | async |
 | `doc.pdf.pagecount` | the question paper page cap check | async |
-| `doc.template.measure` | measuring each document of a PDF job before batching | sync |
-| `doc.pdf.wait` | a PDF job waiting for one of the process's two conversion slots | async |
+| `doc.template.measure` | measuring one document of a PDF job before batching (the loop is free between documents) | sync |
+| `doc.pdf.wait` | a PDF job waiting for one of the process's two conversion slots (a batch or a merge) | async |
+| `doc.job.prepare.wait` | a PDF job waiting for the process's prepare slot | async |
 | `doc.pdf.merge` | Gotenberg merging a job's batch PDFs, streamed from and to storage | async |
 | `doc.job.contexts` | building every context of a PDF job (one repeatable-read transaction) | async |
 | `doc.job.images.head`, `doc.job.images.read` | sizing every image of a job; reading a batch's images | async |

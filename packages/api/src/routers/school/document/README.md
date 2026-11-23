@@ -110,7 +110,7 @@ CHROMIUM_DENY_PRIVATE_IPS=true
 CHROMIUM_DENY_PUBLIC_IPS=true
 ```
 
-Limits: 200 KB template source, 4,000-character editing instructions, 1,500 documents per export, 5 MB per image, 20 MB of images per conversion batch, about 5 MB of HTML and 200 documents per batch (25 MB hard), 30 MB per batch PDF. A batch conversion times out after 120 seconds and the merge after 10 minutes. Previews render the first two printed sheets only.
+Limits: 200 KB template source, 4,000-character editing instructions, 1,500 documents per export, 5 MB per image, 20 MB of images per conversion batch, about 5 MB of HTML and 200 documents per batch (25 MB hard), 150 MB per batch PDF (30 MB for other conversions), 1 GB merged; one render budget per job (8 batches' worth), 3 jobs in flight per school and 2 per person. A batch conversion times out after 120 seconds and the merge after 10 minutes. Previews render the first two printed sheets only.
 
 Gotenberg's multipart HTML route and data-URI support: https://gotenberg.dev/docs/convert-with-chromium/convert-html-to-pdf
 Outbound filtering configuration: https://gotenberg.dev/docs/configuration
