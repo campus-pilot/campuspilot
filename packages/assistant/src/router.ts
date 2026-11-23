@@ -50,6 +50,11 @@ export type AssistantRequestContext = { headers: Headers };
  * the contract.
  */
 async function assertSeedNamesAPaper(session: AssistantSession, schoolId: string, seed: NonNullable<AssistantMessageSeed>) {
+  // A template editor's seed names only a document type, an enum the contract
+  // already checked: there is no record to resolve and no free text in it. The
+  // template itself is read by the tools the model calls, behind the user's
+  // own template permissions.
+  if (seed.kind === 'document_template') return;
   try {
     // A standalone paper must be one of this school's standalone papers that the user reaches (their own, or any they
     // oversee): another person's paper is not found here either, so a seed cannot probe which paper ids exist.
@@ -440,6 +445,7 @@ export const assistantRouter = os.router({
           ...(attachments.length > 0 ? { attachments: attachments.map(toAttachmentRef) } : {}),
           ...(input.seed ? { seed: input.seed } : {}),
           ...(input.tier === 'pro' ? { tier: 'pro' as const } : {}),
+          ...(input.editorSource ? { editorSource: input.editorSource } : {}),
           author: { userId, name: context.session.user.name },
         },
         itemKey: userMessageItemKey(runId),

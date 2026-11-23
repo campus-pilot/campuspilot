@@ -88,7 +88,11 @@ sheet. The immutable selected revision is the authority for preview and generati
 
 Template editing uses TanStack Form, field-level Zod errors, explicit preview/save actions, and a callback-ref navigation guard. Users describe their edits and copy a context prompt, the latest unsaved HTML, or both together into their own AI application. The brief includes the document's print dimensions, rendering constraints, and server-owned variable reference. Returned HTML is pasted into the existing source editor, previewed, and explicitly saved as a new revision. Clipboard failures leave a selectable full prompt for manual copying.
 
-There is no integrated AI provider, provider configuration, SDK, AI permission, or AI endpoint. Building/copying the brief stays in the browser and sends no request to a model provider.
+The portable brief has no integrated AI provider, provider configuration, SDK, AI permission, or AI endpoint. Building/copying the brief stays in the browser and sends no request to a model provider.
+
+For users who may use the in-app assistant, the template editor instead embeds the assistant (docs/document-system.md, "Edit with the assistant"). The server side of that is in `document.template-source.ts`: `assertValidTemplateSource` (the one source check shared by `saveTemplate` and `validateDocumentTemplateDraft`), `checkTemplateDraft`, `templateEditingGuide` (`learn_document_template_editing`, built from the shared `templateRenderingContract`), and `previewTemplatePdf` (`previewDocumentTemplatePdf`, the editor's PDF preview). The assistant never saves: the person saves through `saveDocumentTemplate`.
+
+Revision history (`listDocumentTemplateRevisions`, `getDocumentTemplateRevision`, `document.template-revisions.ts`) reads the immutable template artifacts behind the template read gate; restoring one is saving its source again as a new revision.
 
 ## Rendering and deployment
 

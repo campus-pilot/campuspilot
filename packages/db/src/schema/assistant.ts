@@ -2,6 +2,7 @@ import type {
   AssistantAttachmentRef,
   AssistantMessageSeed,
 } from "@campuspilot/assistant-contract/attachments";
+import type { AssistantEditorSource } from "@campuspilot/assistant-contract/template-editing";
 import type { AssistantView } from "@campuspilot/assistant-contract/views";
 import { sql } from "drizzle-orm";
 import {
@@ -156,6 +157,8 @@ export type AssistantUserMessageBody = {
   author?: { userId: string; name: string };
   /** `pro` when the user picked Pro for this message (see `AssistantModelTier`); absent means the standard model. */
   tier?: 'pro';
+  /** The template editor's unsaved source, when the editor's assistant sent it with the message (docs/document-system.md). */
+  editorSource?: AssistantEditorSource;
 };
 
 export type AssistantAssistantMessageBody = {

@@ -7,6 +7,7 @@ import {
   questionPaperSeedSchema,
   standaloneQuestionPaperSeedSchema,
 } from './attachments';
+import { assistantEditorSourceSchema } from './template-editing';
 import { assistantViewSchema } from './views';
 
 export const assistantSurfaceSchema = z.enum(['panel', 'page', 'palette']);
@@ -80,6 +81,8 @@ export const assistantUserMessageItemSchema = z.object({
     seed: assistantMessageSeedSchema.optional(),
     /** `pro` when the message was sent with Pro picked; absent for the standard model. */
     tier: z.literal('pro').optional(),
+    /** The template editor's unsaved source sent with the message (see `assistantEditorSourceSchema`). */
+    editorSource: assistantEditorSourceSchema.optional(),
     /**
      * Who sent the message, as they were named when they sent it. A
      * conversation shared with a question paper is continued by several
@@ -368,6 +371,12 @@ export const sendAssistantMessageInputSchema = z.object({
   shareWithPaper: z.boolean().default(false),
   /** The model the user picked for this message (see `assistantModelTierSchema`). */
   tier: assistantModelTierSchema.default('standard'),
+  /**
+   * The template editor's unsaved source, sent by the editor's assistant when
+   * it differs from what the conversation already holds (the saved revision
+   * or the assistant's latest draft). See `assistantEditorSourceSchema`.
+   */
+  editorSource: assistantEditorSourceSchema.optional(),
 }).superRefine((value, ctx) => {
   if (value.text.length === 0 && value.attachmentIds.length === 0) {
     ctx.addIssue({ code: 'custom', path: ['text'], message: 'Write a message or attach an image.' });

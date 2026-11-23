@@ -904,4 +904,56 @@ describe('document templates, generation, and artifact lifecycle', () => {
       );
     }
   });
+  it('checks an assistant draft exactly as a save would, saving nothing, and previews a draft as its PDF', async () => {
+    const scope = { schoolId, documentType: 'id_card' as const };
+    const before = await manager.school.getActiveDocumentTemplate(scope);
+    const valid = await manager.school.validateDocumentTemplateDraft({ ...scope, content: '<p>{{school.name}}</p>' });
+    expect(valid).toMatchObject({ valid: true, problems: [], characters: 22 });
+    expect(valid.draftId).toMatch(/^[0-9a-f]{12}$/);
+    // The same source has the same id; the verdict never echoes the source.
+    expect((await manager.school.validateDocumentTemplateDraft({ ...scope, content: '<p>{{school.name}}</p>' })).draftId).toBe(valid.draftId);
+    expect(JSON.stringify(valid)).not.toContain('school.name');
+    const broken = await manager.school.validateDocumentTemplateDraft({ ...scope, content: '{{#each broken}}' });
+    expect(broken).toMatchObject({ valid: false, draftId: null });
+    expect(broken.problems.length).toBeGreaterThan(0);
+    // A helper the renderer refuses is a problem too, as on save.
+    expect((await manager.school.validateDocumentTemplateDraft({ ...scope, content: '{{log school.name}}' })).valid).toBe(false);
+    expect(await manager.school.getActiveDocumentTemplate(scope)).toEqual(before);
+    // Proposing a template is for those who may change it; reading the guide is for those who may read templates.
+    await expect(teacher.school.validateDocumentTemplateDraft({ schoolId, documentType: 'id_card', content: '<p>x</p>' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(outsider.school.learn_document_template_editing({ schoolId, documentType: 'id_card' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    const guide = await teacher.school.learn_document_template_editing({ schoolId, documentType: 'id_card' });
+    expect(guide.rules).toContain('86mm × 54mm');
+    expect(guide.rules).toContain('validateDocumentTemplateDraft');
+    expect(guide.contextHelp).toContain('student.');
+
+    const preview = await teacher.school.previewDocumentTemplatePdf({ schoolId, documentType: 'id_card', content: '<p>{{student.name}}</p>' });
+    const pdf = await PDFDocument.load(Buffer.from(preview.pdfBase64, 'base64'));
+    expect(pdf.getPageCount()).toBe(1);
+    await expect(
+      teacher.school.previewDocumentTemplatePdf({ schoolId, documentType: 'id_card', content: '{{#each broken}}' }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      outsider.school.previewDocumentTemplatePdf({ schoolId, documentType: 'id_card', content: '<p>x</p>' }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+  it('lists every revision of a template newest first and reads one, behind the template read gate', async () => {
+    const scope = { schoolId, documentType: 'admit_card' as const };
+    const current = await manager.school.getActiveDocumentTemplate(scope);
+    const first = await manager.school.saveDocumentTemplate({ ...scope, name: 'First', content: '<p>one {{school.name}}</p>', pageSize: 'full', expectedRevisionId: current?.revisionId ?? null });
+    const second = await manager.school.saveDocumentTemplate({ ...scope, name: 'Second', content: '<p>two</p>', pageSize: 'half', expectedRevisionId: first.revisionId });
+    const listed = await teacher.school.listDocumentTemplateRevisions({ ...scope, limit: 20 });
+    const [newest, older] = listed.items;
+    expect(newest).toMatchObject({ revisionId: second.revisionId, name: 'Second', pageSize: 'half', selected: true });
+    expect(older).toMatchObject({ revisionId: first.revisionId, name: 'First', selected: false });
+    expect(newest!.revisionNo).toBe(older!.revisionNo + 1);
+    expect(newest!.createdByName).toEqual(expect.any(String));
+    expect(listed.pagination.totalItems).toBe(newest!.revisionNo);
+    const read = await teacher.school.getDocumentTemplateRevision({ ...scope, revisionId: first.revisionId });
+    expect(read).toMatchObject({ content: '<p>one {{school.name}}</p>', revision: { revisionId: first.revisionId, selected: false } });
+    // A revision of another type is not found here, and the gate is the template read gate.
+    await expect(teacher.school.getDocumentTemplateRevision({ schoolId, documentType: 'id_card', revisionId: first.revisionId })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(outsider.school.listDocumentTemplateRevisions({ ...scope, limit: 20 })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(outsider.school.getDocumentTemplateRevision({ ...scope, revisionId: first.revisionId })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
 });

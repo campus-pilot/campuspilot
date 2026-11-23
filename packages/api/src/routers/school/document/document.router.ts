@@ -1,8 +1,3 @@
-import { assertValidSchoolNoticeTemplate } from "../notice/notice.render";
-import {
-  assertValidSchoolQuestionPaperTemplate,
-  renderSampleQuestionPaperDocument,
-} from "../question-paper/question-paper.render";
 import { z } from "zod";
 import { alias } from "drizzle-orm/pg-core";
 import { and, asc, count, desc, eq, ilike, inArray, ne, notInArray, sql } from "drizzle-orm";
@@ -27,13 +22,10 @@ import * as dto from "./document.dto";
 import {
   DOCUMENT_CONTEXT_HELP,
   DOCUMENT_MARKETPLACE,
-  sampleDocumentContext,
-  SAMPLE_NOTICE_CONTEXT,
 } from "./document.catalog";
 import {
   combineDocuments,
   convertDocumentPdf,
-  renderDocument,
   renderDocuments,
 } from "./document.render";
 import {
@@ -45,6 +37,14 @@ import { requireSchoolFeature } from "../../../permissions/feature";
 import { buildDocumentContexts } from "./document.context";
 import { buildFinanceDocumentContexts } from "./finance-document.context";
 import { getSelectedDocumentTemplate as getTemplate } from "./document.selected-template";
+import { getTemplateRevision, listTemplateRevisions } from "./document.template-revisions";
+import {
+  assertValidTemplateSource,
+  checkTemplateDraft,
+  previewTemplateHtml,
+  previewTemplatePdf,
+  templateEditingGuide,
+} from "./document.template-source";
 
 const isFinanceDocument = dto.isFinanceDocumentType;
 
@@ -147,27 +147,6 @@ function page<T>(
   });
 }
 /**
- * A template rendered with synthetic data for a preview. A Notice design is
- * laid out at the requested notice print size (`printSize`, full when
- * omitted) and told that size as `print.size`, exactly as a plain notice of
- * that size is printed; every other type uses its revision's footprint.
- */
-function previewTemplateHtml(
-  content: string,
-  documentType: dto.DocumentType,
-  pageSize: dto.DocumentTemplatePageSize,
-  printSize: dto.DocumentTemplatePageSize | undefined,
-) {
-  if (documentType === "notice") {
-    const size = printSize ?? "full";
-    return combineDocuments([renderDocument(content, { ...SAMPLE_NOTICE_CONTEXT, print: { size } })], "notice", size);
-  }
-  // Rendered like a real paper (template budget, one body slot, logo limit),
-  // with the English example paper as the body so an author sees a real page.
-  if (documentType === "question_paper") return renderSampleQuestionPaperDocument(content);
-  return combineDocuments([renderDocument(content, sampleDocumentContext(documentType))], documentType, pageSize);
-}
-/**
  * The CONFLICT for a stale `expectedRevisionId`. It names the revision selected
  * now because MCP and assistant callers receive only the code and message:
  * without the id, a model cannot tell which value to send and retries with the
@@ -193,11 +172,8 @@ export async function saveTemplate(
   input: z.infer<typeof dto.saveTemplateSchema>,
   marketplaceSlug: string | null,
 ) {
-  // A Notice template is checked the way notices render it (their output
-  // budget and logo limit), so a design no notice could print is refused here.
-  if (input.documentType === "notice") assertValidSchoolNoticeTemplate(input.content);
-  else if (input.documentType === "question_paper") assertValidSchoolQuestionPaperTemplate(input.content);
-  else renderDocument(input.content, sampleDocumentContext(input.documentType));
+  // The same check the assistant's drafts pass (`validateDocumentTemplateDraft`).
+  assertValidTemplateSource(input.documentType, input.content);
   const id = generateId("artifact");
   return persistDocumentObject(
     db,
@@ -432,6 +408,61 @@ export const schoolDocumentRouter = {
         throw toRpcError(error);
       }
     }),
+  /**
+   * The template editor's revision history. Reading a revision is reading the
+   * school's template, so it has exactly the template read gate of
+   * `getActiveDocumentTemplate` (the type's read action, then its feature).
+   */
+  listDocumentTemplateRevisions: protectedProcedure
+    .route(
+      route(
+        "List a school template's revisions",
+        "Page through every saved revision of the school's template of a document type, newest first: its number, name, footprint, who saved it, when, and whether it is the selected one. Revisions are immutable; restoring one means saving its source again.",
+      ),
+    )
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "read",
+        destructive: false,
+        module: "documents",
+      },
+    })
+    .input(dto.listTemplateRevisionsSchema)
+    .use(requireDocumentTypePermission(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES))
+    .output(dto.listTemplateRevisionsOutputSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        return await listTemplateRevisions(context.db, input);
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+  getDocumentTemplateRevision: protectedProcedure
+    .route(
+      route(
+        "Get a school template revision",
+        "Read one saved revision of the school's template of a document type with its source, by its revisionId from listDocumentTemplateRevisions. It changes nothing; the selected revision is read with getActiveDocumentTemplate.",
+      ),
+    )
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "read",
+        destructive: false,
+        module: "documents",
+      },
+    })
+    .input(dto.templateRevisionInputSchema)
+    .use(requireDocumentTypePermission(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES))
+    .output(dto.templateRevisionOutputSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        return await getTemplateRevision(context.db, input);
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
   selectMarketplaceTemplate: protectedProcedure
     .route(
       route(
@@ -523,6 +554,93 @@ export const schoolDocumentRouter = {
       html: previewTemplateHtml(input.content, input.documentType, input.pageSize, input.printSize),
       contextHelp: DOCUMENT_CONTEXT_HELP,
     })),
+  /**
+   * The template editor's preview as the PDF it prints as (the same pdf.js
+   * viewer as a question paper's versions). Each call is one Gotenberg
+   * conversion, so it is a person's action only (`hidden`: never offered to
+   * MCP clients or the assistant, which have the HTML preview and the draft
+   * check). The editor asks for it for a debounced draft and caches it by
+   * source; read permission, like the HTML preview.
+   */
+  previewDocumentTemplatePdf: protectedProcedure
+    .route(
+      route(
+        "Preview template changes as a PDF",
+        "Render unsaved Handlebars source with synthetic data and convert it to the PDF it prints as. Does not change the selected school template and stores nothing.",
+      ),
+    )
+    .meta({
+      mcp: {
+        exposure: "hidden",
+        access: "read",
+        destructive: false,
+        module: "documents",
+      },
+    })
+    .input(dto.previewTemplateSchema)
+    .use(requireDocumentTypePermission(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES))
+    .output(dto.previewTemplatePdfOutputSchema)
+    .handler(async ({ input, signal }) => {
+      try {
+        const bytes = await previewTemplatePdf(input.content, input.documentType, input.pageSize, input.printSize, signal);
+        return { pdfBase64: Buffer.from(bytes).toString("base64") };
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+  learn_document_template_editing: protectedProcedure
+    .route(
+      route(
+        "Learn document template editing",
+        "Call this first whenever you are going to change a school document template. Returns the printing rules for the document type, how a proposed template reaches the template editor (validateDocumentTemplateDraft), and the reference of every template variable. It reads no school data.",
+      ),
+    )
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "read",
+        destructive: false,
+        module: "documents",
+      },
+    })
+    .input(dto.templateScopeSchema)
+    .use(requireDocumentTypePermission(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES))
+    .output(dto.templateEditingGuideOutputSchema)
+    .handler(({ input }) => templateEditingGuide(input.documentType)),
+  /**
+   * The assistant's way to propose a template (docs/document-system.md,
+   * "Edit with the assistant"): it checks the complete source exactly as a
+   * save would and saves nothing. In the template editor the chat renders the
+   * call as a draft card and a valid draft becomes the editor's unsaved
+   * source; the person saves it through the editor's own Save, which creates
+   * the immutable revision as always. Manage permission, because a draft is
+   * only ever proposed to be saved.
+   */
+  validateDocumentTemplateDraft: protectedProcedure
+    .route(
+      route(
+        "Validate a document template draft",
+        "Call learn_document_template_editing first. Check a complete proposed template (HTML with Handlebars bindings) exactly as saving it would, without saving anything. Returns valid, the problems to fix and a draftId. When valid, the template editor shows it to the user, who saves it there.",
+      ),
+    )
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "read",
+        destructive: false,
+        module: "documents",
+      },
+    })
+    .input(dto.validateTemplateDraftSchema)
+    .use(requireDocumentTypePermission(SCHOOL_ACTIONS.MANAGE_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.MANAGE_FINANCE_DOCUMENT_TEMPLATES))
+    .output(dto.validateTemplateDraftOutputSchema)
+    .handler(({ input }) => {
+      try {
+        return checkTemplateDraft(input.documentType, input.content);
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
   previewDocument: protectedProcedure
     .route(
       route(

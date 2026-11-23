@@ -844,6 +844,20 @@ describe('assistant service view', () => {
     expect(tools.map((tool) => tool.name)).toEqual(expect.arrayContaining(['school.saveQuestionPaperVersion', 'school.listQuestionPapers']));
   });
 
+  it('gives the in-app assistant the template editing reads, keeps template saves behind approval and withholds the PDF preview', () => {
+    const byName = new Map(exposedTools().map((tool) => [tool.name, tool]));
+    for (const name of ['school.learn_document_template_editing', 'school.validateDocumentTemplateDraft']) {
+      const tool = byName.get(name);
+      expect(tool, name).toBeDefined();
+      expect(tool!.mcp.module).toBe('documents');
+      expect(assistantToolDecision(tool!.mcp), name).toEqual({ allowed: true, requiresApproval: false });
+    }
+    // A save from the template editor's chat is the person's own (the editor's Save); any other save still asks.
+    expect(assistantToolDecision(byName.get('school.saveDocumentTemplate')!.mcp)).toEqual({ allowed: true, requiresApproval: true });
+    // One Gotenberg conversion per call: a person's preview only.
+    expect(byName.has('school.previewDocumentTemplatePdf')).toBe(false);
+  });
+
   /** The question paper tools by name: what each is for, and how the in-app assistant and external clients reach it. */
   const QUESTION_PAPER_TOOLS = {
     reads: ['school.listQuestionPapers', 'school.getQuestionPaper', 'school.listQuestionPaperVersions', 'school.getQuestionPaperDraft', 'school.learn_question_paper_generation', 'school.validateQuestionPaperDraft'],
