@@ -1,23 +1,20 @@
-import { notFound } from 'next/navigation';
-import { DocumentTemplateMarketplaceDetail } from '@/components/documents/document-template-marketplace';
+import { notFound, redirect } from 'next/navigation';
 import { documentTypeSchema } from '@campuspilot/api/routers/school/document/document.dto';
+import { marketplaceHref } from '@/components/documents/marketplace-model';
 
+/**
+ * The former dedicated preview page of a marketplace design. Links to it keep
+ * working: it opens the marketplace on that type and design with the
+ * full-screen preview open. A design the catalog no longer lists is said so
+ * there, beside the type's other designs.
+ */
 export default async function Page({
   params,
 }: {
-  params: Promise<{
-    schoolId: string;
-    documentType: string;
-    slug: string;
-  }>;
+  params: Promise<{ schoolId: string; documentType: string; slug: string }>;
 }) {
   const { schoolId, documentType, slug } = await params;
   const type = documentTypeSchema.safeParse(documentType);
   if (!type.success) notFound();
-  return (
-    <DocumentTemplateMarketplaceDetail
-      scope={{ schoolId, documentType: type.data }}
-      slug={slug}
-    />
-  );
+  redirect(marketplaceHref(schoolId, { type: type.data, template: slug, preview: true }));
 }

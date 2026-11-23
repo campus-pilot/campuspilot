@@ -1,75 +1,27 @@
 'use client';
 
-import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import {
-  useCallback,
-  useRef,
-  useSyncExternalStore,
-  type ReactNode,
-} from 'react';
-import { useForm } from '@tanstack/react-form';
+import { type ReactNode } from 'react';
+import { useForm, useStore } from '@tanstack/react-form';
 import { useQuery } from '@tanstack/react-query';
-import { resolveQueryBoundary } from '@campuspilot/components/query-boundary';
-import {
-  FileText,
-  Maximize2,
-  PanelLeftOpen,
-  RefreshCw,
-  Save,
-  ScrollText,
-  Store,
-} from 'lucide-react';
 import { z } from 'zod';
+import { resolveQueryBoundary } from '@campuspilot/components/query-boundary';
+import { Store } from 'lucide-react';
+import { DocumentButton, DocumentPanel } from '@campuspilot/components/documents/document-controls';
+import { OptionSelect } from '@campuspilot/components/option-select';
+import { orpc } from '@/lib/orpc';
+import { marketplaceHref as marketplaceHrefOf } from './marketplace-model';
+import { noticePreviewPrintSizeSchema, noticePrintSizeOptions, type NoticePreviewPrintSize } from './notice-print-size-preview';
 import {
-  HALF_PAGE_DOCUMENT_TYPES,
-  type activeTemplateSchema,
-} from '@campuspilot/api/routers/school/document/document.dto';
-import {
-  DocumentButton,
-  DocumentErrors,
-  DocumentField,
-  DocumentPanel,
-  DocumentPreview,
-  DocumentSelect,
-} from '@campuspilot/components/documents/document-controls';
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-  useResizablePanelRef,
-} from '@campuspilot/ui/components/resizable';
-import { client, orpc } from '@/lib/orpc';
-import { confirmNavigation } from '@/lib/navigation-guard';
-import { TemplatePromptEditor } from './template-prompt-editor';
-import { noticePreviewPrintSizeSchema, noticePrintSizeOptions } from './notice-print-size-preview';
-import {
-  DocumentDirtyGuard,
   DocumentLoading,
   DocumentPermission,
   DocumentReadError,
-  SCHOOL_ACTIONS,
   templateManageAction,
-  useDocumentCache,
+  type ActiveTemplate,
   type DocumentTemplateScope,
 } from './document-common';
-
-type ActiveTemplate = z.infer<typeof activeTemplateSchema>;
-
-const TemplateCodeEditor = dynamic(
-  () =>
-    import('./template-code-editor').then(
-      (module) => module.TemplateCodeEditor,
-    ),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="grid h-full min-h-96 place-items-center bg-card text-sm text-muted-foreground">
-        Loading code editor…
-      </div>
-    ),
-  },
-);
+import { TemplateRevisionPdfPreview } from './template-pdf-preview';
+import { TemplateEditor, useTemplateWorkspaceView } from './template-workspace';
 
 const TEMPLATE_TITLES: Record<DocumentTemplateScope['documentType'], string> = {
   report_card: 'Report Cards Template',
@@ -83,18 +35,14 @@ const TEMPLATE_TITLES: Record<DocumentTemplateScope['documentType'], string> = {
   question_paper: 'Question Paper Template',
 };
 
-const halfPageDocumentTypes = new Set<DocumentTemplateScope['documentType']>(
-  HALF_PAGE_DOCUMENT_TYPES,
-);
-const pageSizeOptions = [
-  { value: 'half', label: 'Half A4 · two per sheet' },
-  { value: 'full', label: 'Full A4 · one per sheet' },
-] as const;
-const DESKTOP_WORKSPACE_QUERY = '(min-width: 1280px)';
-const MM_TO_PX = 96 / 25.4;
-
+/** The marketplace on this type; it opens on the design the school uses when that came from the marketplace. */
 function marketplaceHref(scope: DocumentTemplateScope) {
-  return `/school/${encodeURIComponent(scope.schoolId)}/marketplace/templates?type=${scope.documentType}`;
+  return marketplaceHrefOf(scope.schoolId, { type: scope.documentType });
+}
+
+/** The centred column of the states that are pages (no template, read-only, loading); the editor fills the window instead. */
+function TemplatePageFrame({ children }: { children: ReactNode }) {
+  return <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 pb-12">{children}</div>;
 }
 
 function TemplatePageHeader({
@@ -132,9 +80,20 @@ export function DocumentTemplates({ scope }: { scope: DocumentTemplateScope }) {
   // The template already loaded (and the editor with unsaved code under it)
   // stays when a background refetch fails; see `resolveQueryBoundary`.
   const state = resolveQueryBoundary(active);
-  if (state.kind === 'pending') return <DocumentLoading />;
-  if (state.kind === 'failed')
-    return <DocumentReadError error={state.error} retry={active.refetch} />;
+  if (state.kind === 'pending') {
+    return (
+      <TemplatePageFrame>
+        <DocumentLoading />
+      </TemplatePageFrame>
+    );
+  }
+  if (state.kind === 'failed') {
+    return (
+      <TemplatePageFrame>
+        <DocumentReadError error={state.error} retry={active.refetch} />
+      </TemplatePageFrame>
+    );
+  }
   const template = state.data;
 
   if (!template) {
@@ -148,15 +107,41 @@ export function DocumentTemplates({ scope }: { scope: DocumentTemplateScope }) {
       fallback={<SavedTemplatePreview scope={scope} template={template} />}
       pending={<SavedTemplatePreview scope={scope} template={template} />}
     >
-      <TemplateEditor
-        key={template.artifact.id}
-        scope={scope}
-        template={template}
-        onReload={async () => {
-          await active.refetch();
-        }}
-      />
+      <EditableTemplate scope={scope} template={template} onReload={async () => void (await active.refetch())} />
     </DocumentPermission>
+  );
+}
+
+/**
+ * The editor of the selected revision, keyed by it: a save (or a colleague's)
+ * adopts the new revision only after the query cache refreshes, as a fresh
+ * editor. What the builder shows (its tool and phone section) is kept here,
+ * above the key. The variable reference comes from the server's template
+ * contract.
+ */
+function EditableTemplate({
+  scope,
+  template,
+  onReload,
+}: {
+  scope: DocumentTemplateScope;
+  template: ActiveTemplate;
+  onReload: () => Promise<void>;
+}) {
+  const help = useQuery(orpc.school.learn_document_template_editing.queryOptions({ input: scope, staleTime: Number.POSITIVE_INFINITY }));
+  // Above the key, so the tool and section on screen survive the remount a save causes.
+  const view = useTemplateWorkspaceView();
+  return (
+    <TemplateEditor
+      key={template.artifact.id}
+      scope={scope}
+      template={template}
+      title={TEMPLATE_TITLES[scope.documentType]}
+      contextHelp={help.data?.contextHelp}
+      marketplaceHref={marketplaceHref(scope)}
+      view={view}
+      onReload={onReload}
+    />
   );
 }
 
@@ -189,7 +174,7 @@ function noTemplateCopy(documentType: DocumentTemplateScope['documentType']) {
 function NoTemplateSelected({ scope }: { scope: DocumentTemplateScope }) {
   const copy = noTemplateCopy(scope.documentType);
   return (
-    <div className="flex flex-col gap-5">
+    <TemplatePageFrame>
       <TemplatePageHeader scope={scope} />
       <DocumentPanel title={copy.title} description={copy.description}>
         <div className="flex min-h-64 flex-col items-center justify-center gap-4 rounded-lg border border-dashed px-6 text-center">
@@ -203,10 +188,17 @@ function NoTemplateSelected({ scope }: { scope: DocumentTemplateScope }) {
           </DocumentButton>
         </div>
       </DocumentPanel>
-    </div>
+    </TemplatePageFrame>
   );
 }
 
+/**
+ * The selected template for someone who may read but not change it: the same
+ * PDF preview as the editor's, with sample data, asked for by the selected
+ * revision's id (`previewDocumentTemplateRevisionPdf`: converting source of
+ * one's own needs the manage permission). A Notice design is previewed at
+ * either print size (a view choice, never saved).
+ */
 function SavedTemplatePreview({
   scope,
   template,
@@ -214,633 +206,29 @@ function SavedTemplatePreview({
   scope: DocumentTemplateScope;
   template: ActiveTemplate;
 }) {
-  const preview = useQuery(
-    orpc.school.previewDocumentTemplate.queryOptions({
-      input: {
-        ...scope,
-        content: template.content,
-        pageSize: template.artifact.pageSize,
-      },
-    }),
-  );
-  return (
-    <div className="flex flex-col gap-5">
-      <TemplatePageHeader scope={scope} />
-      {preview.isError && preview.data === undefined ? (
-        <DocumentReadError error={preview.error} retry={preview.refetch} />
-      ) : (
-        <DocumentPreview
-          html={preview.data?.html}
-          label={template.artifact.name}
-          sample
-        />
-      )}
-    </div>
-  );
-}
-
-/** Draft content remains local until an explicit save creates a new revision;
- * preview responses never replace the active template.
- */
-function useDocumentTemplateForm(
-  scope: DocumentTemplateScope,
-  template: ActiveTemplate,
-) {
-  const cache = useDocumentCache();
-  const previewVersion = useRef(0);
-  const initialPreview = useQuery(
-    orpc.school.previewDocumentTemplate.queryOptions({
-      input: {
-        ...scope,
-        content: template.content,
-        pageSize: template.artifact.pageSize,
-      },
-    }),
-  );
-  const form = useForm({
-    defaultValues: {
-      name: template.artifact.name,
-      content: template.content,
-      pageSize: template.artifact.pageSize,
-      preview: '',
-      previewContent: '',
-      previewPageSize: '' as '' | 'full' | 'half',
-      /** Notice designs only: the notice print size the preview renders at (not saved). */
-      printSize: 'full' as 'full' | 'half',
-      previewPrintSize: 'full' as 'full' | 'half',
-      error: '',
-      previewing: false,
-    },
-    validators: {
-      onChange: z.object({
-        name: z.string().trim().min(1, 'Give this template a name').max(120),
-        content: z.string().trim().min(1, 'Add template HTML').max(200_000),
-        pageSize: z.enum(['full', 'half']),
-        preview: z.string(),
-        previewContent: z.string(),
-        previewPageSize: z.enum(['', 'full', 'half']),
-        printSize: noticePreviewPrintSizeSchema,
-        previewPrintSize: noticePreviewPrintSizeSchema,
-        error: z.string(),
-        previewing: z.boolean(),
-      }),
-    },
-    onSubmit: async ({ value }) => {
-      form.setFieldValue('error', '');
-      try {
-        await client.school.saveDocumentTemplate({
-          ...scope,
-          name: value.name,
-          content: value.content,
-          pageSize: value.pageSize,
-          expectedRevisionId: template.revisionId,
-        });
-        await cache.templates(scope);
-      } catch (error) {
-        form.setFieldValue(
-          'error',
-          error instanceof Error
-            ? error.message
-            : 'Unable to update this template.',
-        );
-      }
-    },
-  });
-
-  /** Only the newest preview request may update the iframe. This prevents a
-   * slower response for an older draft from replacing a newer render.
-   */
-  const renderPreview = useCallback(
-    async (content: string, pageSize: 'full' | 'half') => {
-      const version = previewVersion.current + 1;
-      previewVersion.current = version;
-      form.setFieldValue('error', '');
-      form.setFieldValue('previewing', true);
-      const printSize = form.getFieldValue('printSize');
-      try {
-        const result = await client.school.previewDocumentTemplate({
-          ...scope,
-          content,
-          pageSize,
-          ...(scope.documentType === 'notice' ? { printSize } : {}),
-        });
-        if (previewVersion.current !== version) return;
-        form.setFieldValue('preview', result.html);
-        form.setFieldValue('previewContent', content);
-        form.setFieldValue('previewPageSize', pageSize);
-        form.setFieldValue('previewPrintSize', printSize);
-      } catch (error) {
-        if (previewVersion.current !== version) return;
-        form.setFieldValue(
-          'error',
-          error instanceof Error
-            ? error.message
-            : 'Unable to render this template.',
-        );
-      } finally {
-        if (previewVersion.current === version) {
-          form.setFieldValue('previewing', false);
-        }
-      }
-    },
-    [form, scope],
-  );
-
-  return { form, initialPreview, renderPreview };
-}
-
-function subscribeToDesktopWorkspace(onChange: () => void) {
-  const query = window.matchMedia(DESKTOP_WORKSPACE_QUERY);
-  query.addEventListener('change', onChange);
-  return () => query.removeEventListener('change', onChange);
-}
-
-function getDesktopWorkspaceSnapshot() {
-  return window.matchMedia(DESKTOP_WORKSPACE_QUERY).matches;
-}
-
-/** matchMedia is consumed as an external store so responsive panel direction
- * does not require an effect or duplicate the stateful Monaco editor.
- */
-function useDesktopWorkspace() {
-  return useSyncExternalStore(
-    subscribeToDesktopWorkspace,
-    getDesktopWorkspaceSnapshot,
-    () => false,
-  );
-}
-
-function TemplateEditor({
-  scope,
-  template,
-  onReload,
-}: {
-  scope: DocumentTemplateScope;
-  template: ActiveTemplate;
-  onReload: () => Promise<void>;
-}) {
-  const { form, initialPreview, renderPreview } = useDocumentTemplateForm(
-    scope,
-    template,
-  );
-  const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const sourcePanelRef = useResizablePanelRef();
-  const workspace = useForm({
-    defaultValues: { sourceOpen: true },
-    validators: {
-      onChange: z.object({ sourceOpen: z.boolean() }),
-    },
-  });
-  const desktop = useDesktopWorkspace();
-  const schedulePreview = useCallback(
-    (content: string, pageSize: 'full' | 'half') => {
-      if (previewTimer.current) clearTimeout(previewTimer.current);
-      previewTimer.current = setTimeout(() => {
-        previewTimer.current = null;
-        void renderPreview(content, pageSize);
-      }, 650);
-    },
-    [renderPreview],
-  );
-  const refreshPreview = useCallback(
-    (content: string, pageSize: 'full' | 'half') => {
-      if (previewTimer.current) clearTimeout(previewTimer.current);
-      previewTimer.current = null;
-      return renderPreview(content, pageSize);
-    },
-    [renderPreview],
-  );
-  const workspaceRef = useCallback((node: HTMLDivElement | null) => {
-    if (!node) return;
-    return () => {
-      if (previewTimer.current) clearTimeout(previewTimer.current);
-    };
-  }, []);
-
-  return (
-    <div className="flex min-w-0 flex-col gap-5">
-      <form.Subscribe
-        selector={(state) => ({
-          content: state.values.content,
-          pageSize: state.values.pageSize,
-        })}
-      >
-        {({ content, pageSize }) => (
-          <TemplatePageHeader
-            scope={scope}
-            actions={
-              <TemplatePromptEditor
-                documentType={scope.documentType}
-                content={content}
-                pageSize={pageSize}
-                contextHelp={initialPreview.data?.contextHelp}
-              />
-            }
-          />
-        )}
-      </form.Subscribe>
-      <form.Subscribe selector={(state) => state.values}>
-        {(values) => (
-          <DocumentDirtyGuard
-            dirty={
-              values.name !== template.artifact.name ||
-              values.content !== template.content ||
-              values.pageSize !== template.artifact.pageSize
-            }
-          />
-        )}
-      </form.Subscribe>
-      <div
-        ref={workspaceRef}
-        className="h-[70rem] min-w-0 overflow-hidden rounded-xl border bg-card xl:h-[46rem]"
-      >
-        <ResizablePanelGroup
-          key={desktop ? 'desktop' : 'mobile'}
-          orientation={desktop ? 'horizontal' : 'vertical'}
-        >
-          <ResizablePanel
-            defaultSize="50"
-            minSize={desktop ? '28' : '34'}
-            collapsible
-            collapsedSize="0"
-            panelRef={sourcePanelRef}
-            onResize={(size) => {
-              workspace.setFieldValue('sourceOpen', size.asPercentage > 0);
-            }}
-          >
-            <TemplateSourceForm
-              form={form}
-              template={template}
-              onReload={onReload}
-              onDraftChange={schedulePreview}
-              contextHelp={initialPreview.data?.contextHelp}
-              onCollapse={() => sourcePanelRef.current?.collapse()}
-            />
-          </ResizablePanel>
-          <ResizableHandle withHandle />
-          <ResizablePanel defaultSize="50" minSize={desktop ? '28' : '34'}>
-            <workspace.Subscribe
-              selector={(state) => state.values.sourceOpen}
-            >
-              {(sourceOpen) => (
-                <TemplateDraftPreview
-                  form={form}
-                  scope={scope}
-                  template={template}
-                  initialHtml={initialPreview.data?.html}
-                  onRefresh={refreshPreview}
-                  sourceOpen={sourceOpen}
-                  onExpand={() => sourcePanelRef.current?.expand()}
-                />
-              )}
-            </workspace.Subscribe>
-          </ResizablePanel>
-        </ResizablePanelGroup>
-      </div>
-    </div>
-  );
-}
-
-type TemplateForm = ReturnType<typeof useDocumentTemplateForm>['form'];
-
-function TemplateSourceForm({
-  form,
-  template,
-  onReload,
-  onDraftChange,
-  contextHelp,
-  onCollapse,
-}: {
-  form: TemplateForm;
-  template: ActiveTemplate;
-  onReload: () => Promise<void>;
-  onDraftChange: (content: string, pageSize: 'full' | 'half') => void;
-  contextHelp?: string;
-  onCollapse: () => void;
-}) {
-  return (
-    <form
-      className="flex h-full min-h-0 min-w-0 flex-col"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void form.handleSubmit();
-      }}
-    >
-      <div className="shrink-0 border-b p-3">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <form.Field name="name">
-            {(field) => <DocumentField field={field} label="Template name" />}
-          </form.Field>
-          {halfPageDocumentTypes.has(template.artifact.documentType) ? (
-            <form.Field name="pageSize">
-              {(field) => (
-                <DocumentSelect
-                  field={field}
-                  label="Paper footprint"
-                  options={pageSizeOptions}
-                  onValueChange={(pageSize) =>
-                    onDraftChange(form.getFieldValue('content'), pageSize)
-                  }
-                />
-              )}
-            </form.Field>
-          ) : template.artifact.documentType === 'notice' ? (
-            <form.Field name="printSize">
-              {(field) => (
-                <DocumentSelect
-                  field={field}
-                  label="Preview as"
-                  options={noticePrintSizeOptions}
-                  onValueChange={() =>
-                    onDraftChange(
-                      form.getFieldValue('content'),
-                      form.getFieldValue('pageSize'),
-                    )
-                  }
-                />
-              )}
-            </form.Field>
-          ) : null}
-        </div>
-      </div>
-      <form.Subscribe selector={(state) => state.values.pageSize}>
-        {(pageSize) => (
-          <form.Field name="content">
-            {(field) => (
-              <TemplateCodeEditor
-                value={field.state.value}
-                onBlur={field.handleBlur}
-                onCollapse={onCollapse}
-                onChange={(content) => {
-                  field.handleChange(content);
-                  onDraftChange(content, pageSize);
-                }}
-              />
-            )}
-          </form.Field>
-        )}
-      </form.Subscribe>
-      <form.Subscribe
-        selector={(state) => ({
-          values: state.values,
-          submitting: state.isSubmitting,
-          canSubmit: state.canSubmit,
-          errors: state.errors,
-        })}
-      >
-        {({ values, submitting, canSubmit, errors }) => (
-          <div className="flex shrink-0 flex-col gap-3 border-t p-3">
-            <DocumentErrors errors={errors} />
-            {values.error ? (
-              <p role="alert" className="text-sm text-destructive">
-                {values.error} Your edits are still here. Reload the saved
-                revision if someone else changed the template.
-              </p>
-            ) : null}
-            <div className="flex flex-wrap gap-2">
-              <DocumentButton
-                type="submit"
-                disabled={
-                  submitting ||
-                  !canSubmit ||
-                  (values.name === template.artifact.name &&
-                    values.content === template.content &&
-                    values.pageSize === template.artifact.pageSize)
-                }
-              >
-                <Save />
-                {submitting ? 'Saving…' : 'Save template'}
-              </DocumentButton>
-              <DocumentButton
-                variant="ghost"
-                disabled={submitting}
-                onClick={async () => {
-                  if (await confirmNavigation()) void onReload();
-                }}
-              >
-                Reload saved revision
-              </DocumentButton>
-            </div>
-            <details className="border-t pt-3">
-              <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
-                Template variable reference
-              </summary>
-              <pre className="mt-3 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">
-                {contextHelp ?? 'Loading variable reference…'}
-              </pre>
-            </details>
-          </div>
-        )}
-      </form.Subscribe>
-    </form>
-  );
-}
-
-function TemplateDraftPreview({
-  form,
-  scope,
-  template,
-  initialHtml,
-  onRefresh,
-  sourceOpen,
-  onExpand,
-}: {
-  form: TemplateForm;
-  scope: DocumentTemplateScope;
-  template: ActiveTemplate;
-  initialHtml?: string;
-  onRefresh: (content: string, pageSize: 'full' | 'half') => Promise<void>;
-  sourceOpen: boolean;
-  onExpand: () => void;
-}) {
   const view = useForm({
-    defaultValues: {
-      mode: 'scroll' as 'scroll' | 'page',
-      width: 720,
-    },
-    validators: {
-      onChange: z.object({
-        mode: z.enum(['scroll', 'page']),
-        width: z.number().positive(),
-      }),
-    },
+    defaultValues: { printSize: 'full' as NoticePreviewPrintSize },
+    validators: { onChange: z.object({ printSize: noticePreviewPrintSizeSchema }) },
   });
-  const measurePreview = useCallback(
-    (node: HTMLDivElement | null) => {
-      if (!node) return;
-      const updateWidth = () => {
-        view.setFieldValue('width', node.getBoundingClientRect().width);
-      };
-      updateWidth();
-      const observer = new ResizeObserver(updateWidth);
-      observer.observe(node);
-      return () => observer.disconnect();
-    },
-    [view],
-  );
-
+  const printSize = useStore(view.store, (state) => state.values.printSize);
   return (
-    <form.Subscribe selector={(state) => state.values}>
-      {(values) => {
-        const previewSource = values.preview
-          ? values.previewContent
-          : template.content;
-        const previewPageSize = values.preview
-          ? values.previewPageSize
-          : template.artifact.pageSize;
-        const stale =
-          previewSource !== values.content ||
-          previewPageSize !== values.pageSize ||
-          (values.preview !== '' &&
-            values.previewPrintSize !== values.printSize);
-        return (
-          <section className="flex h-full min-w-0 flex-col bg-muted/30">
-            <header className="flex min-h-11 shrink-0 flex-wrap items-center justify-between gap-2 border-b bg-card px-3 py-1.5">
-              <div className="flex min-w-0 items-center gap-2">
-                <FileText className="size-3.5 shrink-0 text-muted-foreground" />
-                <span className="text-xs font-medium">Template preview</span>
-                <span
-                  className="text-xs text-muted-foreground"
-                  aria-live="polite"
-                >
-                  {values.previewing
-                    ? 'Refreshing…'
-                    : stale
-                      ? 'Waiting to refresh…'
-                      : 'Sample data'}
-                </span>
-              </div>
-              <div className="flex items-center gap-1">
-                {!sourceOpen ? (
-                  <DocumentButton
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label="Expand code editor"
-                    title="Expand code editor"
-                    onClick={onExpand}
-                  >
-                    <PanelLeftOpen />
-                  </DocumentButton>
-                ) : null}
-                <view.Subscribe selector={(state) => state.values.mode}>
-                  {(mode) => (
-                    <>
-                      <DocumentButton
-                        size="sm"
-                        variant={mode === 'scroll' ? 'secondary' : 'ghost'}
-                        aria-pressed={mode === 'scroll'}
-                        onClick={() => view.setFieldValue('mode', 'scroll')}
-                      >
-                        <ScrollText />
-                        Scrollable
-                      </DocumentButton>
-                      <DocumentButton
-                        size="sm"
-                        variant={mode === 'page' ? 'secondary' : 'ghost'}
-                        aria-pressed={mode === 'page'}
-                        onClick={() => view.setFieldValue('mode', 'page')}
-                      >
-                        <Maximize2 />
-                        A4 page
-                      </DocumentButton>
-                    </>
-                  )}
-                </view.Subscribe>
-                <DocumentButton
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label="Refresh template preview"
-                  disabled={values.previewing}
-                  onClick={() =>
-                    void onRefresh(values.content, values.pageSize)
-                  }
-                >
-                  <RefreshCw
-                    className={values.previewing ? 'animate-spin' : undefined}
-                  />
-                </DocumentButton>
-              </div>
-            </header>
-            <div ref={measurePreview} className="min-h-0 flex-1 overflow-auto">
-              <view.Subscribe selector={(state) => state.values}>
-                {(viewValues) => (
-                  <TemplatePreviewCanvas
-                    documentType={scope.documentType}
-                    html={values.preview || initialHtml}
-                    mode={viewValues.mode}
-                    width={viewValues.width}
-                  />
-                )}
-              </view.Subscribe>
-            </div>
-          </section>
-        );
-      }}
-    </form.Subscribe>
-  );
-}
-
-function TemplatePreviewCanvas({
-  documentType,
-  html,
-  mode,
-  width,
-}: {
-  documentType: DocumentTemplateScope['documentType'];
-  html?: string;
-  mode: 'scroll' | 'page';
-  width: number;
-}) {
-  if (!html) {
-    return (
-      <div className="grid h-full min-h-96 place-items-center text-sm text-muted-foreground">
-        Your preview will appear here.
-      </div>
-    );
-  }
-
-  if (mode === 'scroll') {
-    return (
-      <iframe
-        title="Scrollable template preview"
-        sandbox=""
-        referrerPolicy="no-referrer"
-        srcDoc={html}
-        className="block h-full min-h-[40rem] w-full border-0 bg-white"
+    <TemplatePageFrame>
+      <TemplatePageHeader
+        scope={scope}
+        actions={
+          scope.documentType === 'notice' ? (
+            <OptionSelect
+              value={printSize}
+              options={noticePrintSizeOptions}
+              onValueChange={(next) => view.setFieldValue('printSize', next)}
+              triggerProps={{ 'aria-label': 'Preview as', className: 'w-56 max-sm:w-full' }}
+            />
+          ) : null
+        }
       />
-    );
-  }
-
-  const landscape = documentType === 'timetable';
-  const pageWidth = (landscape ? 297 : 210) * MM_TO_PX;
-  const pageHeight = (landscape ? 210 : 297) * MM_TO_PX;
-  const scale = Math.min(Math.max((width - 32) / pageWidth, 0.25), 1);
-
-  return (
-    <div className="flex min-h-full justify-center p-4">
-      <div
-        className="relative shrink-0"
-        style={{ width: pageWidth * scale, height: pageHeight * scale }}
-      >
-        <div
-          className="absolute left-0 top-0 flex overflow-hidden border bg-white shadow-lg"
-          style={{
-            width: pageWidth,
-            height: pageHeight,
-            transform: `scale(${scale})`,
-            transformOrigin: 'top left',
-          }}
-        >
-          <iframe
-            title="A4 template preview"
-            sandbox=""
-            referrerPolicy="no-referrer"
-            srcDoc={html}
-            className="block shrink-0 border-0 bg-white"
-            style={{ width: pageWidth, height: pageHeight }}
-          />
-        </div>
+      <div className="h-[80dvh] min-h-96">
+        <TemplateRevisionPdfPreview scope={scope} revisionId={template.revisionId} printSize={printSize} label={`${template.artifact.name} preview`} />
       </div>
-    </div>
+    </TemplatePageFrame>
   );
 }

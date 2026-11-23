@@ -34,6 +34,8 @@ export const ASSISTANT_TOOL_META = {
 export const ASSISTANT_CARD_TOOLS = {
   'school.validateQuestionPaperDraft': 'question_paper_draft',
   'school.validateStandalonePaperDraft': 'standalone_paper_draft',
+  /** A template the assistant proposed in the template editor; the editor shows it in its preview (docs/document-system.md). */
+  'school.validateDocumentTemplateDraft': 'document_template_draft',
 } as const;
 export type AssistantCardKind = (typeof ASSISTANT_CARD_TOOLS)[keyof typeof ASSISTANT_CARD_TOOLS];
 

@@ -73,6 +73,11 @@ const CORE_TOOLS = [
 ];
 
 const HIDDEN_TOOLS = [
+  // Template PDF previews: each call is a Gotenberg conversion for a person
+  // looking at the editor or the marketplace, never an agent tool.
+  'school.previewDocumentTemplatePdf',
+  'school.previewDocumentTemplateRevisionPdf',
+  'school.previewMarketplaceTemplatePdf',
   'auth.setPassword',
   'auth.getOAuthConsentClient',
   'auth.listOAuthConnections',
@@ -327,8 +332,9 @@ describe('catalog metadata', () => {
     // +1 systemAdmin.getPersonalSpaceStats (the admin dashboard's personal space counts);
     // +4 school.addClassSubject, updateClassSubject, removeClassSubject and
     // moveClassSubjectToClassroom (one subject at a time, subjects added from an exam);
-    // +1 school.listDocumentGenerationJobs (PDFs being created, and recent failures).
-    expect(catalog.advanced).toHaveLength(135);
+    // +1 school.listDocumentGenerationJobs (PDFs being created, and recent failures);
+    // +4 template tools (list and get revisions, learn template editing, validate a template draft).
+    expect(catalog.advanced).toHaveLength(139);
   });
 });
 
@@ -858,6 +864,22 @@ describe('assistant service view', () => {
     // Procedures the assistant may not use are not listed at all.
     expect(tools.map((tool) => tool.name)).not.toContain('school.startQuestionPaperGeneration');
     expect(tools.map((tool) => tool.name)).toEqual(expect.arrayContaining(['school.saveQuestionPaperVersion', 'school.listQuestionPapers']));
+  });
+
+  it('gives the in-app assistant the template editing reads, keeps template saves behind approval and withholds the PDF preview', () => {
+    const byName = new Map(exposedTools().map((tool) => [tool.name, tool]));
+    for (const name of ['school.learn_document_template_editing', 'school.validateDocumentTemplateDraft']) {
+      const tool = byName.get(name);
+      expect(tool, name).toBeDefined();
+      expect(tool!.mcp.module).toBe('documents');
+      expect(assistantToolDecision(tool!.mcp), name).toEqual({ allowed: true, requiresApproval: false });
+    }
+    // A save from the template editor's chat is the person's own (the editor's Save); any other save still asks.
+    expect(assistantToolDecision(byName.get('school.saveDocumentTemplate')!.mcp)).toEqual({ allowed: true, requiresApproval: true });
+    // One Gotenberg conversion per call: a person's preview only.
+    expect(byName.has('school.previewDocumentTemplatePdf')).toBe(false);
+    expect(byName.has('school.previewMarketplaceTemplatePdf')).toBe(false);
+    expect(byName.has('school.previewDocumentTemplateRevisionPdf')).toBe(false);
   });
 
   /** The question paper tools by name: what each is for, and how the in-app assistant and external clients reach it. */

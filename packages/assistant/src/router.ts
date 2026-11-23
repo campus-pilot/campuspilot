@@ -50,6 +50,11 @@ export type AssistantRequestContext = { headers: Headers };
  * the contract.
  */
 async function assertSeedNamesAPaper(session: AssistantSession, schoolId: string, seed: NonNullable<AssistantMessageSeed>) {
+  // A template editor's seed names only a document type, an enum the contract
+  // already checked: there is no record to resolve and no free text in it. The
+  // template itself is read by the tools the model calls, behind the user's
+  // own template permissions.
+  if (seed.kind === 'document_template') return;
   try {
     // A standalone paper must be one of this school's standalone papers that the user reaches (their own, or any they
     // oversee): another person's paper is not found here either, so a seed cannot probe which paper ids exist.
@@ -61,6 +66,29 @@ async function assertSeedNamesAPaper(session: AssistantSession, schoolId: string
       throw new ORPCError('BAD_REQUEST', { message: 'The question paper this chat was started from was not found. Start a new chat from the Question paper screen.' });
     }
     throw error;
+  }
+}
+
+/**
+ * Refuses the template editor's source (`editorSource`) in any conversation
+ * but one started from that template's editor: a new conversation must start
+ * with the `document_template` seed of the same document type, and a
+ * continued one must have been started with it (`store.templateEditorTypeOf`,
+ * the seed of its first message). So a template's source never lands in an
+ * unrelated chat, and the model only ever reads it where the editor's rules
+ * (drafts shown in the editor, template writes refused) hold.
+ */
+async function assertEditorSourceBelongs(input: { conversationId?: string | null; seed?: AssistantMessageSeed | null; editorSource?: { documentType: string } | null }) {
+  if (!input.editorSource) return;
+  const started = input.conversationId
+    ? await store.templateEditorTypeOf(db, input.conversationId)
+    : input.seed?.kind === 'document_template'
+      ? input.seed.documentType
+      : null;
+  if (started !== input.editorSource.documentType) {
+    throw new ORPCError('BAD_REQUEST', {
+      message: "This chat was not started from this template's editor, so the editor's template cannot be sent in it. Start a new chat in the template editor.",
+    });
   }
 }
 
@@ -390,6 +418,9 @@ export const assistantRouter = os.router({
       });
     }
 
+    // Checked once the conversation is known to be the user's to continue, so it reveals nothing about another one.
+    await assertEditorSourceBelongs(input);
+
     const conversationId = input.conversationId ?? generateId('conversation');
     const runId = generateId('run');
     // The token is requested before anything is saved: if the API refuses,
@@ -440,6 +471,7 @@ export const assistantRouter = os.router({
           ...(attachments.length > 0 ? { attachments: attachments.map(toAttachmentRef) } : {}),
           ...(input.seed ? { seed: input.seed } : {}),
           ...(input.tier === 'pro' ? { tier: 'pro' as const } : {}),
+          ...(input.editorSource ? { editorSource: input.editorSource } : {}),
           author: { userId, name: context.session.user.name },
         },
         itemKey: userMessageItemKey(runId),

@@ -51,8 +51,8 @@ Do not infer one surface's state from another fact. In particular:
 | `/school/:schoolId/settings/templates/statement` | Admission account-statement template editor |
 | `/school/:schoolId/settings/templates/notice` | Notice template editor (schools with the `notices` feature only) |
 | `/school/:schoolId/sessions/:sessionId/billing/documents` | Compatibility redirect to session-wide document history |
-| `/school/:schoolId/marketplace/templates?type=:documentType` | Marketplace filtered to one document type |
-| `/school/:schoolId/marketplace/templates/:documentType/:slug` | Dedicated marketplace preview and import action |
+| `/school/:schoolId/marketplace/templates?type=:documentType&template=:slug&preview=1` | Marketplace on one document type tab and one design (each parameter optional); `preview=1` opens that design's full-screen preview |
+| `/school/:schoolId/marketplace/templates/:documentType/:slug` | Former dedicated preview page: redirects to the marketplace with that type, design and the preview open |
 
 The marketplace is intentionally school-scoped rather than session-scoped. The
 settings slugs are existing human-facing configuration names and are not required
@@ -134,14 +134,52 @@ the generator.
 
 ### Browse and import a marketplace template
 
-1. The marketplace opens with one document type selected.
-2. Cards show every server-owned design for that type.
-3. Preview navigates to a dedicated page and renders synthetic data in the same
-   sanitized iframe used by the editor.
-4. Use template sends the catalog slug and `expectedRevisionId`.
-5. The server copies the catalog source to a new immutable, school-owned S3 object,
+1. The marketplace shows the school's document types as a row of line tabs that
+   scrolls sideways when they do not fit (`ScrollableTabsList`, as in the
+   examination workspace). Only types the school has are offered (the `notices`
+   and `assistant` features add Notices and Question papers; the rest belong to
+   student management); the tabs wait for those flags rather than switching once
+   they arrive. A requested type the school does not have opens the first one. When
+   the flags cannot be read the page says so with *Retry* (`FeatureUnknown`), never
+   that there are no templates; a school with no such type gets a notice saying where
+   templates come from.
+2. Under the type, its designs are a second, pill-style scrollable tab row; the
+   design the school uses now carries a check (and "(in use)" for assistive
+   technology). Under that the selected design shows its name, paper, description
+   and actions, then **its PDF with sample data** (`PdfPreview`, the builder's
+   viewer) in a frame most of the screen tall. The design shown is the requested
+   one, else the one the school uses when it was imported from the catalog and is
+   still listed (`artifact.marketplaceSlug`), else the first. A requested design
+   the catalog no longer lists says so and shows that fallback. The design tabs
+   activate on Enter or a click, not on focus (`activationMode="manual"`), so
+   arrowing along the row converts nothing.
+3. Only the open type's catalog is read and only the selected design is converted
+   (Radix mounts only the active tab's content), never a page of thumbnails. See
+   "Marketplace PDF previews" below for the cost guard.
+4. *Preview* opens the design full screen (the whole screen on a phone, all but a
+   small margin on a larger one; `PreviewDialogContent` size `full`, the dialog
+   shell the question paper chat uses for drafts). It shows the page's cached
+   conversion, scrolls page by page, and offers the same actions (*Use template*,
+   *Open current template*, and *Preview as* for a Notice design) beside its title.
+   *Preview* is the dialog's `DialogTrigger`, so focus returns to it on close.
+5. Type, design and the open preview live in the address (`marketplace-model.ts`:
+   `?type=&template=&preview=1`), so a reload or a shared link restores the view. The
+   address is rewritten with the History API, never `router.*` (the route is an
+   async server component: a router navigation refetches its payload on every tab,
+   and the tabs and the dialog waited for it). Picking a type or design replaces the
+   entry (`replaceState`); opening the preview pushes one, marked in `history.state`,
+   so Back closes the full-screen preview instead of leaving the marketplace. Closing
+   the dialog goes back past that entry, or, when the preview was opened by a link,
+   replaces the entry without `preview`. A design and the preview are only honoured
+   with the type they were asked with, and the dialog opens only for the design asked
+   for, never for a fallback. The `template` value is any slug the API would accept
+   (1 to 100 characters), so an old link to a delisted design is told apart from no
+   request. The former `/:documentType/:slug` page redirects to this address with the
+   preview open.
+6. Use template sends the catalog slug and `expectedRevisionId`.
+7. The server copies the catalog source to a new immutable, school-owned S3 object,
    creates an artifact row, and atomically selects that revision.
-6. A stale `expectedRevisionId` returns `CONFLICT`; the client must reload instead
+8. A stale `expectedRevisionId` returns `CONFLICT`; the client must reload instead
    of overwriting a change it has not seen. The value to send is the `revisionId`
    that `getActiveDocumentTemplate` (and every save or selection) returns, or
    `null` only when no revision is selected. It is not the artifact's `sha256` and
@@ -158,45 +196,192 @@ copy is what provides school ownership, provenance, and stable historical output
 When no revision is selected, Settings shows a focused blank state with one Browse
 marketplace action. It does not render a disabled or empty source editor.
 
-When a revision exists, an authorized editor sees:
+When a revision exists, an authorized editor sees the **template builder**, laid out
+like the question paper studio (`TemplateEditor` in `template-workspace.tsx`):
 
-- Edit with AI and Marketplace as peer actions in the header;
-- one integrated, resizable workspace with an explicit collapse/expand control for
-  the source panel on the left at wide widths and first in the stack on smaller
-  screens;
-- the template name and a Monaco Handlebars/HTML code editor with formatting,
-  syntax highlighting, line numbers, wrapping, and theme support;
-- for admit cards, bills, receipts, and statements, an explicit paper footprint:
-  half A4 (two documents per physical sheet) or full A4 (one per sheet);
-- for notices, a "Preview as" choice of a full-A4 or half-A4 notice instead:
-  a Notice design has no footprint (each notice chooses its size) and the
-  choice is never saved (the marketplace detail page of a Notice design offers
-  the same choice);
-- Save template and Reload saved revision actions;
-- a collapsible variable reference;
-- a sanitized sample preview on the right at wide widths and second in the stack
-  on smaller screens, with scrollable and A4-page modes plus a manual refresh.
+- From md up it fills the window under the app's header
+  (`APP_SHELL_FILL_HEIGHT_MD_CLASS`, the studio's class): one header row, then the
+  editing pane on the left and the preview on the right, each scrolling inside
+  itself, so the page never scrolls. The split is resizable (`ResizablePanelGroup`
+  from `@campuspilot/ui/components/resizable`, on `react-resizable-panels`) and the
+  editing pane folds away (*Hide editor*; *Show editor* in the preview's strip brings
+  it back). On a phone it is an ordinary page with a section switch (*Preview | AI |
+  Code*, the preview first) and one section at a time; every section stays mounted,
+  so switching loses nothing.
+- The **header row**: the template's title and state (*Saved*, *Unsaved changes*,
+  or *Draft n from the assistant, not saved*), the revision select and *All
+  revisions* (see "Revision history"), the AI action, *Marketplace*, *Reload saved*
+  and *Save template*. The AI action is *Ask for edit* (a sparkle) for someone who may
+  use the assistant (the question paper's gate, `useAssistantGate`: the school's
+  `assistant` feature and the user's assistant role; there is no other flag), and
+  the portable *Edit with AI* dialog for everyone else, unchanged. While the gate is
+  still loading neither is shown. *Ask for edit* opens the AI tab, unfolding the pane.
+- The **editing pane** has two tabs, *AI* (the assistant's chat, only for those who
+  may use it) and *Code*: the template name, for admit cards, bills, receipts and
+  statements an explicit paper footprint (half A4, two documents per physical sheet,
+  or full A4, one per sheet), the Monaco Handlebars/HTML code editor with formatting,
+  syntax highlighting, line numbers, wrapping and theme support, and a collapsible
+  variable reference (from `learn_document_template_editing`). Both tabs stay
+  mounted.
+- The **preview** is the template rendered with synthetic data **as the PDF it
+  prints as**, drawn page by page with pdf.js: the same `PdfPages` viewer, page
+  chrome, scrolling and skeleton as a question paper's saved version, through the
+  reusable `PdfPreview` (`packages/components/src/documents/pdf-preview.tsx`). For a
+  Notice design the strip offers *Preview as* (a full-A4 or half-A4 notice; a Notice
+  design has no footprint, each notice chooses its size, and the choice is never
+  saved; the marketplace offers the same choice for its Notice designs).
 
-Draft name and source remain local until Save. Source edits request a debounced
-sample render; the manual refresh bypasses that delay. Preview requests are
-versioned so an older, slower response cannot replace a newer draft. Preview never
-saves or selects a revision. Saving creates a new immutable object and makes it
-active. A keyed editor adopts the newly selected revision only after the query
-cache refreshes. Dirty navigation uses the application dialog and browser
-`beforeunload` fallback; it must not use `window.confirm`.
+Draft name and source remain local until Save. Typing re-renders the preview after a
+900 ms pause (each preview is one Gotenberg conversion), and the strip offers *Refresh
+preview now* meanwhile; a footprint or print-size change and a draft from the
+assistant render at once. Each source is converted once and cached by a hash of it
+(`useTemplatePdf`); the previous pages stay on screen with an *Updating preview…* badge
+while the next one converts, and a failed render says why over the last good pages
+(the renderer's own reason for a template it refuses, or a limit, see "Preview
+limits") with *Try again*. A preview is asked again by itself only when the server
+said the person has several previews in flight; a failure or a timeout is never
+repeated behind their back. Preview never saves or selects a revision. Saving creates
+a new immutable object and makes it active. A keyed editor adopts the newly selected
+revision only after the query cache refreshes. *Reload saved* discards the working
+copy (and any shown assistant draft) after the app's dirty dialog. Dirty navigation
+uses the application dialog and browser `beforeunload` fallback; it must not use
+`window.confirm`.
 
 The code editor is dynamically loaded in a client-only boundary because Monaco
-depends on browser APIs and is unnecessary for empty or read-only states. The
-preview stays in an empty-sandbox iframe. A4 mode uses portrait A4 for report
-cards and finance documents, shows half-A4 revisions in their two-up sheet
-placement, imposes student IDs on portrait A4, and uses landscape A4 for
-timetables; scrollable mode lets the rendered document use the full preview pane.
+depends on browser APIs and is unnecessary for empty or read-only states.
 
-Read-only users see the selected template preview but no source mutation controls.
+Read-only users see the selected template's PDF preview (with *Preview as* for a
+Notice design) but no source mutation controls. Their preview is asked for by the
+selected revision's id (`previewDocumentTemplateRevisionPdf`), never by its source:
+converting source of one's own needs the manage permission.
+
+### The PDF preview (`previewDocumentTemplatePdf`, `previewDocumentTemplateRevisionPdf`)
+
+`previewDocumentTemplatePdf` renders unsaved source exactly as `previewDocumentTemplate`
+does (the same synthetic context, sanitising and CSP) and converts it with the same
+Gotenberg call as a generated document of the type (`previewTemplatePdf` in
+`document.template-source.ts`); a half-A4 Notice preview is imposed two copies per A4
+sheet like a published half notice. It stores nothing and returns the bytes base64 in
+its JSON result (a template preview is a few synthetic pages under a page cap). It has
+the template **manage** gate (`MANAGE_DOCUMENT_TEMPLATES` or the finance manage
+action, then the type's feature): it converts source the caller wrote, which only
+someone who may change the template needs. `previewDocumentTemplateRevisionPdf`
+previews a saved revision by its id (the input of `getDocumentTemplateRevision`): the
+server reads the source, so it has the template **read** gate; it serves the read-only
+template page and the builder's revision view. Both are `hidden` from MCP: each call
+costs a conversion, so it is a person's preview only (the assistant has the HTML
+preview and the draft check). The HTML `previewDocumentTemplate` stays for MCP.
+
+### Preview limits
+
+Every template PDF preview (the two above and the marketplace's) is one Chromium
+conversion of source someone chose, so each is bounded on its own
+(`TEMPLATE_PREVIEW_LIMITS` in `document.template-source.ts`). The render budget also
+holds for the HTML previews that share the render (`previewDocumentTemplate`,
+`getMarketplaceTemplate`):
+
+| Bound | Preview | A generated document |
+| --- | --- | --- |
+| Render budget (`maxOutputChars`) | 2,000,000 (the Notice and Question paper template budget) | 25,000,000 |
+| Conversion timeout | 20 seconds, then BAD_REQUEST `PREVIEW_TIMEOUT_MESSAGE` (not a 500) | 120 seconds (question paper 60) |
+| Pages | A cap per type; the converter prints one page more and the preview is refused with a sentence, never cut | Question papers only (40) |
+
+The page caps follow what the single synthetic sample prints:
+
+| Type | Cap | Why |
+| --- | --- | --- |
+| Report card, ID card, admit card, bill, receipt, statement | 4 | One document, which the print wrapper puts on exactly one sheet (8 ID cards or 2 half documents to a sheet); the rest is room for a design whose CSS lets content spill past the sheet |
+| Timetable | 8 | One landscape document holding the grid of every classroom of the exam (the all-classroom invariant: never split per class), which a design may paginate over several sheets |
+| Notice | 6 | Notices flow; the sample prints on one full page or one to two half pages (counted before two half pages are put on a sheet) |
+| Question paper | 40 | The example paper flows like a real one, so the paper cap (`QUESTION_PAPER_LIMITS.pdfPages`) applies as it does to every paper |
+
+Previews of source and of revisions also take one of the person's **conversion slots**
+(`withPreviewConversionSlot`, `document.preview-slots.ts`): at most
+`PREVIEW_CONVERSIONS_PER_USER` (3) in flight per user across every server replica, as
+a sorted set per user in Redis taken and checked atomically (a Lua script); one more is
+refused with TOO_MANY_REQUESTS, which the editor asks again after a moment. A slot is
+freed when its conversion ends however it ends (a cancelled query aborts the request,
+and the server aborts its conversion), and a slot a crashed replica never freed
+expires after `PREVIEW_SLOT_TTL_MS` (45 seconds, longer than a preview can run). Three
+because the editor has one preview in flight at a time, but a cancelled one frees its
+slot only when the abort reaches the server, and a second tab or a revision beside the
+editor adds one. When Redis cannot be reached the conversion runs without a slot
+(logged as `doc.preview.slot.unavailable`): the per-conversion bounds still hold. The
+marketplace takes no slot: it converts each catalog design once per process, so what
+it can make anyone convert is bounded by the catalog.
+
+What the slots do not bound is the converter as a whole: many people (or many
+accounts) previewing at once can still queue conversions in Gotenberg. That would
+need a converter-wide queue or a per-school budget, which do not exist yet.
+
+### Marketplace PDF previews (`previewMarketplaceTemplatePdf`)
+
+The marketplace previews a design by its slug (`previewMarketplaceTemplatePdf`, the
+input of `getMarketplaceTemplate`), so the browser never downloads a design's source
+and HTML just to look at it. The render and conversion are those of
+`previewDocumentTemplatePdf`, within the same limits; the gate is the same template
+read gate as `getMarketplaceTemplate`; it is `hidden` from MCP and the assistant; it
+stores nothing. A design converts to the same PDF for the life of a server process (the
+catalog ships with the code, and the sample data is fixed), so
+`previewMarketplaceTemplatePdf` in `document.template-source.ts` converts and encodes
+each design, and each print size of a Notice design, once per process and shares a
+conversion in flight; a failed one is forgotten so the next preview tries again. The
+map is bounded by the catalog. In the browser `useMarketplaceTemplatePdf` never
+refetches a design it holds (`staleTime: Infinity`) and, unlike the editor, keeps no
+previous data, so another design's pages never stand in for the one selected: a
+design not yet converted shows the page-shaped skeleton (and a failure shows no other
+design's pages either). The page and the full-screen dialog share one query.
+
+`PdfPreview` is presentational and API-free so the marketplace can reuse it: it takes
+a `LoadedPdf` (from `loadPdf(bytes, signal)`), a `label`, the skeleton's `orientation`,
+an `updating` flag, an `error` sentence with `onRetry`, and takes its container's height
+(a pane, a tab or a full-screen dialog). The caller owns fetching the document.
+
+A `LoadedPdf` has two holders, each its own fact: its owner (the app's query cache)
+calls `release` once when it drops the query, and every `PdfPages` showing it holds it
+with `retain` (in its ref callback) while it is mounted with it. pdf.js frees the
+document only when both are done, so a document still on screen (a previous render kept
+while the next one converts, or the last good one under a failure) is never destroyed
+under the viewer, whatever the query's `gcTime`. The template preview queries use a
+short `gcTime` (30 seconds), so typing does not pile up parsed PDFs. Every document
+parses in one pdf.js worker shared by the page (`loadPdf`), and a document finished
+after its query was cancelled is freed by `loadPdf` itself.
+
+### Revision history
+
+Every save and every marketplace import is an immutable revision; the builder lets the
+user look at earlier ones, as the question paper studio does with versions:
+
+- The header's **revision select** lists *Working copy* (*Working copy (unsaved)* while
+  dirty) and the 20 newest revisions as *Revision n*, the one the school uses marked
+  *(in use)*; *All revisions* opens a dialog with every revision, a page at a time
+  (*Show older*), each with its name, how it was saved (in the editor or imported from
+  the marketplace), when, by whom, and *Preview*.
+- The revision shown lives in the address (`?revision=<id>`, like the studio's
+  `?version=n`), rewritten in place with `replaceState` (`replaceSearchParam`), so
+  looking through revisions is not a trail for Back and nothing is refetched. The
+  preview pane then shows that revision read-only: a notice (*Revision n · read-only*,
+  its name and details) above its PDF (by its id, `previewDocumentTemplateRevisionPdf`),
+  with *Back to working copy* and **Restore**. The working copy and the chat stay as
+  they are. While the revision loads, or when it cannot be read (an old or mistyped
+  link), *Back to working copy* is offered all the same, and the select names it
+  (*Loading revision…* / *Revision not found*) so choosing *Working copy* leaves it.
+- *Restore* loads the revision's source and footprint into the working copy; the name
+  stays the editor's. Nothing is saved: the user saves it like any edit, which creates
+  a new revision; no revision is overwritten or reselected. When the working copy has
+  unsaved changes, the app's confirmation dialog asks first (never `window.confirm`).
+- `revisionNo` numbers a type's revisions oldest first by creation; it is a label. The
+  id is `revisionId`. *In use* is the selection pointer's own fact, not "the newest".
+- Procedures: `listDocumentTemplateRevisions` (paged, newest first) and
+  `getDocumentTemplateRevision` (one revision with its source; NOT_FOUND for another
+  school's or type's id, or a PDF's). Both have exactly the template read gate of
+  `getActiveDocumentTemplate` (`READ_DOCUMENT_TEMPLATES` or the finance read action,
+  then the type's feature). They are advanced MCP reads in `documents`.
 
 ### Edit with an external AI application
 
-The AI helper is intentionally provider-neutral:
+For a user who may not use the in-app assistant, the AI helper is intentionally
+provider-neutral:
 
 1. The user enters an instruction in a dialog.
 2. CampusPilot constructs a prompt containing the print constraints, variable
@@ -206,7 +391,75 @@ The AI helper is intentionally provider-neutral:
 5. CampusPilot previews and saves only through the normal explicit actions.
 
 No AI provider, SDK, key, endpoint, or server request is involved. Never imply that
-CampusPilot sent the school's template or instructions to another service.
+CampusPilot sent the school's template or instructions to another service. The
+printing rules in the brief are the shared ones the in-app assistant reads
+(`templateRenderingContract` in `@campuspilot/assistant-contract/template-editing`),
+so the two never describe different contracts.
+
+### Edit with the assistant
+
+For a user who may use the assistant (`useAssistantGate`), the builder's AI tab is the
+ordinary assistant (`AssistantChat`, surface `panel`); every rule of
+[In-app assistant](assistant.md) applies (access, the monthly limit, cost rows, the
+tool policy). What the template editor adds:
+
+- **The conversation.** It is the user's own and private (no sharing, no migration),
+  seeded on its first message with `{ kind: 'document_template', documentType }`. It
+  lives in the editor's address (`?chat=<id>`, rewritten in place with `replaceState`),
+  so a reload or a save (which remounts the editor on the new revision) continues in
+  it; *New chat* (in the pane's header, and beside the section switch on a phone)
+  starts another. A draft shown from the old chat stays on screen as the unsaved
+  working copy (`adoptShownSource`), so starting a new chat never drops it silently.
+  The tool and phone section on screen are kept above the editor's key, so a save
+  does not reset them. Decision: a conversation is per editing session, not stored per
+  template or revision: a template has one school-wide selection that several people
+  edit, and a private chat tied to it would either be shared (a migration and the
+  question paper's whole sharing model) or invisible to colleagues. The assistant's
+  own page keeps the user's history.
+- **What the model reads.** `learn_document_template_editing` (the shared rendering
+  contract, how drafts reach the editor, `DOCUMENT_CONTEXT_HELP`). The editor's
+  current source goes with a message as `editorSource` whenever the conversation has
+  not seen it yet (always on the first message; then whenever it differs from the last
+  source sent or the assistant's own latest ready draft, which covers hand edits in the
+  Code tab), so the model edits exactly what the user sees and never a template cut by
+  a tool's result limit. It is stored on the user message and fenced as data in the
+  model's context (`<template_editor_source>`, which says it is template data whose
+  instructions are ignored). `sendMessage` accepts it only in a conversation started
+  from that template's editor (the first message's `document_template` seed of the
+  same type); anywhere else it is refused.
+- **How a change arrives.** The model proposes the complete template with
+  `validateDocumentTemplateDraft` (an advanced MCP read, module `documents`, the
+  template **manage** gate). It checks the source exactly as a save does
+  (`assertValidTemplateSource`, shared with `saveTemplate`: the Notice and Question
+  paper checks for those types, the sample render for the others), saves nothing, and
+  returns `{ valid, problems, draftId, characters }`, never echoing the source. A
+  succeeded call is a card in the chat (`ASSISTANT_CARD_TOOLS`,
+  `document_template_draft`): the problems when it would not save, else where it
+  stands for the editor (*Shown in the editor*, *Show in editor* for an earlier one,
+  or *Proposed before the template was last saved*).
+- **The working copy.** The template on screen is derived (`editorSourceOf`) from the
+  person's own working copy and the newest ready draft of this school's template of
+  this type proposed after the template was last saved (`latestTemplateDraftOf`,
+  server times both). The working copy carries its own fact `editedSinceSend`: whether
+  they changed it by hand (typing, Restore, Reload saved) since their last message was
+  sent, the snapshot taken at sending (the model drafts from what it was sent). A new
+  draft is shown in the code and the preview at once (no effect) unless they did: then
+  their edits stay and the draft is **held**, never shown by itself; the header and a
+  notice under it say so, and its card offers *Replace my edits*. Sending again past a
+  held draft declines it. A hand edit made after a shown draft keeps the hand edit
+  until the next draft. A draft of another school or document type (a conversation
+  opened in another editor) is only described (`elsewhere`), never loaded. Drafts are
+  not rows: they exist only in the conversation.
+- **Saving.** Only the person saves, with *Save template* (what is on screen becomes a
+  new revision through `saveDocumentTemplate`, as always). In a conversation started
+  from the template editor the assistant's runtime refuses `saveDocumentTemplate` and
+  `selectMarketplaceTemplate` before any approval card (`TEMPLATE_EDITOR_REFUSED_TOOLS`
+  in `@campuspilot/assistant-contract/template-editing`; FORBIDDEN, telling the model
+  to propose a draft instead), so it does not rest on the model following the seed and
+  the guide. Anywhere else they are ordinary writes that wait for the approval card.
+  The guide (`learn_document_template_editing`) words its workflow for both callers: in
+  the editor's conversation a draft is shown there; an MCP client or another chat has
+  no editor, so a valid draft only means it would save.
 
 ## Frontend architecture
 
@@ -220,12 +473,21 @@ callbacks and must not call APIs.
 | `DocumentGenerator` | Academic type-specific source fields, template dependency, preview, generation, and warnings |
 | `FinanceDocumentGenerator` | Posted billing-run/payment selection, finance preview, generation, download, and history handoff |
 | `DocumentHistory` | One session-wide artifact list, downloads, provenance, and deletion |
-| `DocumentTemplates` | Empty state, read-only preview, or authorized school-template editor |
+| `DocumentTemplates` | Empty state, read-only PDF preview, or authorized school-template editor |
+| `TemplateEditor` (`template-workspace.tsx`) | The template builder: header row, resizable AI/Code pane, PDF preview, working copy and assistant drafts, revision viewing and restore |
+| `TemplateAssistantPane`, `useTemplateChat` (`template-assistant.tsx`) | The editor's chat, its address (`?chat=`) and its drafts |
+| `TemplatePdfPreview`, `useTemplatePdf` (`template-pdf-preview.tsx`) | A source as its PDF through `previewDocumentTemplatePdf`, cached per source |
+| `RevisionPicker`, `RevisionHistoryDialog`, `RevisionPreview` (`template-revisions.tsx`) | Revision select, history dialog, read-only revision with Restore |
 | `TemplateCodeEditor` | Client-only Monaco wrapper and source-format action |
-| `TemplatePromptEditor` | Local portable-prompt dialog and clipboard operations |
-| `DocumentTemplateMarketplace` | Document-type selection and catalog cards |
-| `DocumentTemplateMarketplaceDetail` | Contextual catalog preview and import action |
-| `DocumentKindCards` | API-free accessible visual radiogroup shared by Documents and Marketplace |
+| `TemplatePromptEditor` | Local portable-prompt dialog and clipboard operations (users without the assistant) |
+| `PdfPreview` (components) | API-free pdf.js preview with skeleton, updating and error states; reused by the marketplace |
+| `TemplateDraftCard`, `template-draft-model.ts` (components) | The chat's template draft card and the pure reading of drafts and the working copy |
+| `TemplateRevisionList`, `TemplateRevisionNotice` (components) | API-free revision rows and the read-only revision notice |
+| `DocumentTemplateMarketplace` (`document-template-marketplace.tsx`) | Type tabs, design tabs, the selected design's PDF, the full-screen preview and Use template; its address in `marketplace-model.ts` |
+| `TemplatePdfPreview`, `TemplateRevisionPdfPreview`, `MarketplaceTemplatePdfPreview` (`template-pdf-preview.tsx`) | A source, a saved revision by id, or a marketplace design by slug, as its PDF; shared query defaults |
+| `PreviewDialogContent` (components) | API-free preview dialog shell: `tall` (the chat's draft and version previews) or `full` (the marketplace) |
+| `ScrollableTabsList` (components) | A tab row that scrolls sideways instead of squeezing (marketplace, examination workspace) |
+| `DocumentKindCards` | API-free accessible visual card group for the Documents workspace |
 | `DocumentPreview` | Restrictive empty-sandbox iframe for already sanitized HTML |
 
 All user input and submission state uses TanStack Form with Zod validators. Do not
@@ -235,7 +497,8 @@ and use TanStack Query invalidation/refetching for server state.
 
 ## API procedures and permission boundaries
 
-Frontend permission gates control visibility only. Every procedure enforces the
+Finance types use the finance template actions in each row (`READ_/MANAGE_FINANCE_DOCUMENT_TEMPLATES`),
+and every template procedure then checks the type's feature. Frontend permission gates control visibility only. Every procedure enforces the
 same boundary through server middleware.
 
 | Procedure | Purpose | School action |
@@ -245,7 +508,14 @@ same boundary through server middleware.
 | `getActiveDocumentTemplate` | Current immutable school revision or `null` | `READ_DOCUMENT_TEMPLATES` |
 | `selectMarketplaceTemplate` | Import and select a catalog design | `MANAGE_DOCUMENT_TEMPLATES` |
 | `saveDocumentTemplate` | Save and select a custom revision | `MANAGE_DOCUMENT_TEMPLATES` |
-| `previewDocumentTemplate` | Render source with synthetic data; also powers read-only selected-template previews | `READ_DOCUMENT_TEMPLATES` |
+| `previewMarketplaceTemplatePdf` | A catalog design by slug as its PDF with synthetic data; converted once per process; hidden from MCP | `READ_DOCUMENT_TEMPLATES` |
+| `previewDocumentTemplate` | Render source with synthetic data as HTML (MCP) | `READ_DOCUMENT_TEMPLATES` |
+| `previewDocumentTemplatePdf` | The same render as a PDF for the editor, within the preview limits and a conversion slot; hidden from MCP | `MANAGE_DOCUMENT_TEMPLATES` |
+| `previewDocumentTemplateRevisionPdf` | A saved revision by id as its PDF, for the read-only preview and the revision view; same limits; hidden from MCP | `READ_DOCUMENT_TEMPLATES` |
+| `listDocumentTemplateRevisions` | Paged revision history, newest first | `READ_DOCUMENT_TEMPLATES` |
+| `getDocumentTemplateRevision` | One revision with its source | `READ_DOCUMENT_TEMPLATES` |
+| `learn_document_template_editing` | The rendering contract, the draft workflow and the variable reference (AI and editor) | `READ_DOCUMENT_TEMPLATES` |
+| `validateDocumentTemplateDraft` | Check a proposed template exactly as a save would; saves nothing | `MANAGE_DOCUMENT_TEMPLATES` |
 | `previewDocument` | Render authorized data without persistence | Academic: `GENERATE_DOCUMENTS`; finance: `GENERATE_FINANCE_DOCUMENTS` |
 | `generateDocument` | Validate the request and queue a generation job; returns `{ jobId, job }` at once | Academic: `GENERATE_DOCUMENTS`; finance: `GENERATE_FINANCE_DOCUMENTS` |
 | `getDocumentGenerationJob` | Status, progress, `artifactId` once succeeded, `errorCode`/`errorMessage` once failed | What starting the job's type needs: generate action, source reads, the type's feature |
@@ -521,7 +791,8 @@ Important shapes and semantics:
    design-specific invariant.
 7. For a half design, verify two recipients produce one PDF page and three
    recipients produce two pages.
-8. Check marketplace list and detail pages at desktop, 390 px, and 320 px.
+8. Check the marketplace's type and design tabs, the design's PDF and its
+   full-screen preview at desktop, 390 px, and 320 px.
 
 ### Add or change a template variable
 
@@ -968,9 +1239,17 @@ Browser verification must cover:
 - every document card and its required fields;
 - timetable generation without any classroom selector;
 - unified empty and populated history;
-- Settings empty state, read-only preview, editable split view, collapse behavior,
-  dirty navigation, preview, save, reload, and AI dialog;
-- marketplace list, dedicated preview, active state, import conflict/error state;
+- Settings empty state, read-only PDF preview, the builder's resizable split, fold and
+  unfold, AI and Code tabs, dirty navigation, PDF preview (and its refused-template
+  error), save, reload, the AI dialog (no assistant) and the assistant's drafts
+  (assistant), a draft held while you typed after sending (*Replace my edits*), New
+  chat with a shown draft, revision select, history dialog, read-only revision and
+  Restore (with and without unsaved changes), an unknown `?revision=`;
+- marketplace type and design tabs (scrolling at 390 px; arrow keys move focus
+  without converting), the selected design's PDF, the full-screen preview (deep link,
+  close, Back closes it, focus back on *Preview*, Use template from it), the old
+  `/:documentType/:slug` redirect, a design no longer listed, active state, import
+  conflict/error state;
 - desktop, 390 px, and the application minimum of 320 px;
 - page-level overflow, keyboard access, focus labels, permission-gated actions,
   iframe output, and console errors.
@@ -988,7 +1267,10 @@ template merely to prove that an import button is clickable.
 - Do not use a frontend permission component as the authorization boundary.
 - Do not pass live tenant data into marketplace or editor sample previews.
 - Do not add `classId` to timetable generation.
-- Do not silently call an AI provider from Edit with AI.
+- Do not silently call an AI provider from the portable Edit with AI dialog; the
+  in-app assistant is the only AI path, behind its own gate.
+- Do not let the assistant save a template from the editor's chat, and do not store
+  its drafts: the person saves through Save template.
 - Do not weaken iframe sandboxing, sanitization, CSP, or Gotenberg network rules to
   accommodate a marketplace design.
 - Do not infer grades, attendance, approvals, registration, class membership, or

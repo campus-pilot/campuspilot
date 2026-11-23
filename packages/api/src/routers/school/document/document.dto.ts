@@ -268,6 +268,80 @@ export const previewTemplateSchema = templateScopeSchema
   })
   .superRefine(validateTemplatePageSize)
   .superRefine(validateNoticePrintSize);
+/**
+ * One saved revision of a school template (an immutable `artifact` of kind
+ * `template`), as the template editor's revision history lists it.
+ * `revisionNo` counts the type's revisions oldest first (1, 2, …) from their
+ * creation order; it is a label, never an identifier: `revisionId` is.
+ * `selected` is its own fact (the school's selection pointer names it), never
+ * inferred from being the newest: an imported or reselected design can be
+ * selected while a newer revision exists.
+ */
+export const templateRevisionSchema = z.object({
+  revisionId: z.string(),
+  revisionNo: z.number().int().positive(),
+  name: z.string(),
+  pageSize: documentTemplatePageSizeSchema,
+  marketplaceSlug: z.string().nullable(),
+  createdAt: z.string(),
+  /** Who saved it, as named now; null when that account no longer exists. */
+  createdByName: z.string().nullable(),
+  selected: z.boolean(),
+});
+export type TemplateRevision = z.infer<typeof templateRevisionSchema>;
+export const listTemplateRevisionsSchema = createListInputSchema({ ...templateScopeSchema.shape });
+export const listTemplateRevisionsOutputSchema = createPaginatedOutputSchema(templateRevisionSchema);
+export const templateRevisionInputSchema = templateScopeSchema.extend({
+  revisionId: id.describe("A revisionId from listDocumentTemplateRevisions (an art_… id)."),
+});
+export const templateRevisionOutputSchema = z.object({
+  revision: templateRevisionSchema,
+  content: z.string(),
+});
+/**
+ * A saved revision previewed as its PDF, named by its id: the server reads
+ * its source, so someone who may only read the school's templates previews
+ * what was saved, never source of their own (that preview,
+ * `previewDocumentTemplatePdf`, is for those who may change templates).
+ */
+export const previewTemplateRevisionPdfSchema = templateRevisionInputSchema
+  .extend({ printSize: noticePrintSizeSchema })
+  .superRefine(validateNoticePrintSize);
+/**
+ * A template the assistant proposes in the template editor's chat. Only the
+ * source: the name and the paper footprint stay the editor's own fields, and
+ * the check does not depend on them (a save checks the source against the
+ * type's sample, whatever its footprint).
+ */
+export const validateTemplateDraftSchema = templateScopeSchema.extend({
+  content: templateContentSchema.describe(
+    "The COMPLETE template (HTML with Handlebars bindings) as the editor should hold it, never a fragment or a diff. Call learn_document_template_editing first.",
+  ),
+});
+/**
+ * The verdict on a proposed template. It never echoes the source (the caller
+ * has it); `draftId` names it in the conversation and is null when invalid.
+ * Kept short (one or two problem lines) so the chat's stored copy of the
+ * result, cut at 4,000 characters, is always whole.
+ */
+export const validateTemplateDraftOutputSchema = z.object({
+  valid: z.boolean(),
+  problems: z.array(z.string()).describe("Why the template cannot be saved; fix them and validate again. Empty when valid."),
+  draftId: z.string().nullable(),
+  characters: z.number().int(),
+});
+export const templateEditingGuideOutputSchema = z.object({
+  documentType: documentTypeSchema,
+  rules: z.string(),
+  workflow: z.array(z.string()),
+  contextHelp: z.string(),
+});
+/**
+ * A preview as its PDF, base64-encoded: a template preview is a few synthetic
+ * pages under a page cap (`TEMPLATE_PREVIEW_LIMITS`), so the bytes travel in
+ * the procedure's JSON result.
+ */
+export const previewTemplatePdfOutputSchema = z.object({ pdfBase64: z.string() });
 export const marketplaceTemplateInputSchema = templateScopeSchema
   .extend({ slug: z.string().min(1).max(100), printSize: noticePrintSizeSchema })
   .superRefine(validateNoticePrintSize);

@@ -6,7 +6,8 @@ import {
   SCHOOL_ACTIONS,
   type PermissionCheck,
 } from '@campuspilot/api/routers/authorization/authorization.dto';
-import type { DocumentType } from '@campuspilot/api/routers/school/document/document.dto';
+import type { activeTemplateSchema, DocumentType } from '@campuspilot/api/routers/school/document/document.dto';
+import type { z } from 'zod';
 import {
   DocumentButton,
   DocumentNotice,
@@ -19,6 +20,8 @@ export type DocumentTemplateScope = {
   schoolId: string;
   documentType: DocumentType;
 };
+/** The school's selected template revision, as `getActiveDocumentTemplate` returns it. */
+export type ActiveTemplate = z.infer<typeof activeTemplateSchema>;
 export const isFinanceDocumentType = (type: DocumentType) =>
   type === 'bill' || type === 'receipt' || type === 'statement';
 export const templateReadAction = (type: DocumentType) =>
@@ -95,10 +98,16 @@ export function DocumentLoading() {
 export function useDocumentCache() {
   const cache = useQueryClient();
   return {
+    /** The selected revision and the revision history (a save or an import adds a revision). */
     templates: (scope: DocumentTemplateScope) =>
-      cache.invalidateQueries({
-        queryKey: orpc.school.getActiveDocumentTemplate.key({ input: scope }),
-      }),
+      Promise.all([
+        cache.invalidateQueries({
+          queryKey: orpc.school.getActiveDocumentTemplate.key({ input: scope }),
+        }),
+        cache.invalidateQueries({
+          queryKey: orpc.school.listDocumentTemplateRevisions.key(),
+        }),
+      ]),
     artifacts: (schoolId: string) =>
       cache.invalidateQueries({
         queryKey: orpc.school.listDocumentArtifacts.key({

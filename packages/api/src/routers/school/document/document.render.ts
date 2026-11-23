@@ -1155,23 +1155,52 @@ export function documentsPerSheet(
   if (type === "id_card") return 8;
   return pageSize === "half" ? 2 : 1;
 }
-/** How long the converter may work on one question paper (the other documents get 120 seconds). */
+/** How long the converter may work on one question paper (the other documents get {@link DOCUMENT_CONVERSION_TIMEOUT_MS} unless the caller sets less). */
 const QUESTION_PAPER_CONVERSION_TIMEOUT_MS = 60_000;
+/** How long the converter may work on one generated document. */
+const DOCUMENT_CONVERSION_TIMEOUT_MS = 120_000;
+
+/**
+ * A ceiling on the pages one conversion may print. The converter is asked
+ * for ONE page more than `pages` (`nativePageRanges`), so a document over the
+ * cap is detected and refused with `message` (a BAD_REQUEST) instead of being
+ * silently cut, and Chromium never prints the rest.
+ */
+export type ConversionPageLimit = { pages: number; message: string };
+
+/**
+ * What a caller may tighten for one conversion: a page ceiling
+ * ({@link ConversionPageLimit}) and a shorter timeout. A question paper
+ * always has its own (`QUESTION_PAPER_LIMITS.pdfPages`, 60 seconds), which a
+ * caller cannot loosen; template previews set theirs
+ * (`TEMPLATE_PREVIEW_LIMITS` in `document.template-source.ts`).
+ */
+export type ConversionLimits = { pageLimit?: ConversionPageLimit; timeoutMs?: number };
 
 /**
  * Question papers are untrusted markup in the end (a model wrote them): the
  * converter prints at most {@link QUESTION_PAPER_LIMITS.pdfPages} pages and
- * stops after {@link QUESTION_PAPER_CONVERSION_TIMEOUT_MS}. The page range
- * asks for ONE page more than the cap, so a paper over the cap is detected
- * (and refused with a clear message) instead of being silently cut.
+ * stops after {@link QUESTION_PAPER_CONVERSION_TIMEOUT_MS}.
  */
-async function assertQuestionPaperPageCount(bytes: Buffer) {
+const QUESTION_PAPER_PAGE_LIMIT: ConversionPageLimit = {
+  pages: QUESTION_PAPER_LIMITS.pdfPages,
+  message: `This paper would print on more than ${QUESTION_PAPER_LIMITS.pdfPages} pages, which is the limit. Shorten it or reduce font sizes, spacing and heights.`,
+};
+
+/** Refuses a PDF with more pages than its limit (the converter printed one page past it, see {@link ConversionPageLimit}). */
+async function assertPageCount(bytes: Buffer, limit: ConversionPageLimit) {
   const pages = (await PDFDocument.load(bytes, { updateMetadata: false })).getPageCount();
-  if (pages > QUESTION_PAPER_LIMITS.pdfPages) {
-    throw rpcError.badRequest(
-      `This paper would print on more than ${QUESTION_PAPER_LIMITS.pdfPages} pages, which is the limit. Shorten it or reduce font sizes, spacing and heights.`,
-    );
-  }
+  if (pages > limit.pages) throw rpcError.badRequest(limit.message);
+}
+
+/**
+ * Whether a conversion failed because its own time ran out (the
+ * `AbortSignal.timeout` given to the request), as opposed to the caller
+ * aborting it or the converter failing. A caller that knows the document is
+ * the likely cause (a template preview) turns it into a refusal.
+ */
+export function isConversionTimeout(error: unknown): boolean {
+  return error instanceof Error && error.name === "TimeoutError";
 }
 
 /** An image sent to Gotenberg as a form file next to `index.html` (see `document.images.ts`). */
@@ -1225,10 +1254,13 @@ export async function convertDocumentPdf(
   type: DocumentType,
   signal?: AbortSignal,
   assets: readonly DocumentConversionAsset[] = [],
-  options: { maxPdfBytes?: number } = {},
+  options: { maxPdfBytes?: number } & ConversionLimits = {},
 ) {
   const questionPaper = type === "question_paper";
   const maxPdfBytes = options.maxPdfBytes ?? DOCUMENT_PDF_MAX_BYTES;
+  const pageLimit = questionPaper ? QUESTION_PAPER_PAGE_LIMIT : options.pageLimit;
+  const ceiling = questionPaper ? QUESTION_PAPER_CONVERSION_TIMEOUT_MS : DOCUMENT_CONVERSION_TIMEOUT_MS;
+  const timeoutMs = Math.min(ceiling, options.timeoutMs ?? ceiling);
   if (questionPaper && assets.length > 0)
     throw new Error("Question papers are converted without assets.");
   assetNames(new Set(assets.map((asset) => asset.name)));
@@ -1240,7 +1272,7 @@ export async function convertDocumentPdf(
   form.append("paperHeight", type === "timetable" ? "8.27" : "11.7");
   form.append("preferCssPageSize", "true");
   form.append("printBackground", "true");
-  if (questionPaper) form.append("nativePageRanges", `1-${QUESTION_PAPER_LIMITS.pdfPages + 1}`);
+  if (pageLimit) form.append("nativePageRanges", `1-${pageLimit.pages + 1}`);
   // Gotenberg (Chromium) does the layout in its own container: this step is waiting, not CPU in this process.
   const bytes = await measure("doc.pdf.convert", async () => {
     const response = await fetch(
@@ -1248,10 +1280,7 @@ export async function convertDocumentPdf(
       {
         method: "POST",
         body: form,
-        signal: AbortSignal.any([
-          AbortSignal.timeout(questionPaper ? QUESTION_PAPER_CONVERSION_TIMEOUT_MS : 120_000),
-          ...(signal ? [signal] : []),
-        ]),
+        signal: AbortSignal.any([AbortSignal.timeout(timeoutMs), ...(signal ? [signal] : [])]),
       },
     );
     if (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429)
@@ -1263,6 +1292,6 @@ export async function convertDocumentPdf(
   annotateTiming({ pdfHtmlBytes: Buffer.byteLength(html, "utf8"), pdfBytes: bytes.length });
   if (bytes.subarray(0, 5).toString() !== "%PDF-")
     throw new Error("PDF converter returned an invalid document.");
-  if (questionPaper) await measure("doc.pdf.pagecount", () => assertQuestionPaperPageCount(bytes));
+  if (pageLimit) await measure("doc.pdf.pagecount", () => assertPageCount(bytes, pageLimit));
   return bytes;
 }

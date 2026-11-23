@@ -17,9 +17,10 @@ export const noticePrintSizeOptions = [
 ] as const satisfies readonly { value: NoticePreviewPrintSize; label: string }[];
 
 /**
- * The `getMarketplaceTemplate` input of a marketplace preview. `printSize`
- * is sent for Notice designs only: the server refuses it for every other
- * document type rather than ignoring it.
+ * The input of a marketplace design's preview (`previewMarketplaceTemplatePdf`,
+ * and `getMarketplaceTemplate` for its HTML). `printSize` is sent for Notice
+ * designs only: the server refuses it for every other document type rather
+ * than ignoring it.
  */
 export function marketplaceTemplatePreviewInput(
   scope: { schoolId: string; documentType: DocumentType },

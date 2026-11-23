@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { templateDocumentTypeSchema } from './template-editing';
+
 /**
  * Files a user attaches to a chat message (design G1, decisions D30/D38):
  * images and PDF documents, the two kinds both model providers read natively.
@@ -193,7 +195,24 @@ export const standaloneQuestionPaperSeedSchema = z.object({
 });
 export type StandaloneQuestionPaperSeed = z.infer<typeof standaloneQuestionPaperSeedSchema>;
 
-export const assistantMessageSeedSchema = z.discriminatedUnion('kind', [questionPaperSeedSchema, standaloneQuestionPaperSeedSchema]);
+/**
+ * The school's template of one document type, from its template editor
+ * (docs/document-system.md, "Edit with the assistant"). Only the type: an enum,
+ * so no free text reaches the model's context, and the school's template is
+ * read by the tools the model calls, behind the user's own template
+ * permissions. The conversation stays private to the user.
+ */
+export const documentTemplateSeedSchema = z.object({
+  kind: z.literal('document_template'),
+  documentType: templateDocumentTypeSchema,
+});
+export type DocumentTemplateSeed = z.infer<typeof documentTemplateSeedSchema>;
+
+export const assistantMessageSeedSchema = z.discriminatedUnion('kind', [
+  questionPaperSeedSchema,
+  standaloneQuestionPaperSeedSchema,
+  documentTemplateSeedSchema,
+]);
 export type AssistantMessageSeed = z.infer<typeof assistantMessageSeedSchema>;
 export type QuestionPaperSeed = z.infer<typeof questionPaperSeedSchema>;
 
