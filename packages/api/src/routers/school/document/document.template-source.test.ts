@@ -14,10 +14,14 @@ import {
   TEMPLATE_PREVIEW_LIMITS,
 } from './document.template-source';
 
-/** A PDF of `pages` blank pages, as the converter would return it. */
+/**
+ * A PDF of `pages` pages, as the converter would return it. Each page draws a
+ * mark: a page pdf-lib adds bare has no content stream, which a converted page
+ * always has and which half-A4 imposition needs to embed it.
+ */
 async function pdfWithPages(pages: number) {
   const pdf = await PDFDocument.create();
-  for (let page = 0; page < pages; page += 1) pdf.addPage();
+  for (let page = 0; page < pages; page += 1) pdf.addPage().drawRectangle({ x: 10, y: 10, width: 10, height: 10 });
   return Buffer.from(await pdf.save());
 }
 
