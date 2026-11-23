@@ -893,7 +893,7 @@ several queries per admission, which is slow for a whole school at once (the
 UI offers single-admission statements only). Bulk reads are designed in phase 3
 (bill due); until then this is accepted.
 
-**Data.** `document_generation_job` (migration `0084`) is school-owned and is
+**Data.** `document_generation_job` (migration `0085`) is school-owned and is
 deleted by `purge_demo_school`; its temporary objects are under the school's
 prefix, which the demo purge workflow sweeps.
 

@@ -1,5 +1,5 @@
 {
-  "id": "34cd55a1-52bf-48be-9e49-5e356fe78a35",
+  "id": "ea14542b-9b53-45e7-b840-f4c6b49b9dad",
   "prevId": "468c17de-650d-4711-b0eb-1e0faf307f6c",
   "version": "7",
   "dialect": "postgresql",
@@ -6503,365 +6503,6 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.document_generation_job": {
-      "name": "document_generation_job",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "school_id": {
-          "name": "school_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "session_id": {
-          "name": "session_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "document_type": {
-          "name": "document_type",
-          "type": "document_type",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "requested_by": {
-          "name": "requested_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "document_generation_job_status",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'queued'"
-        },
-        "source": {
-          "name": "source",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "template_revision_id": {
-          "name": "template_revision_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "artifact_id": {
-          "name": "artifact_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "document_count": {
-          "name": "document_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "printed_document_count": {
-          "name": "printed_document_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "warnings": {
-          "name": "warnings",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
-        "generated_at": {
-          "name": "generated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "review_hash": {
-          "name": "review_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ledger_cutoff": {
-          "name": "ledger_cutoff",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "batch_count": {
-          "name": "batch_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "batches_done": {
-          "name": "batches_done",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "error_code": {
-          "name": "error_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "error_message": {
-          "name": "error_message",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "error_detail": {
-          "name": "error_detail",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "handed_over_at": {
-          "name": "handed_over_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "handover_attempts": {
-          "name": "handover_attempts",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "last_handover_error": {
-          "name": "last_handover_error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "started_at": {
-          "name": "started_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "completed_at": {
-          "name": "completed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "temporary_objects_deleted_at": {
-          "name": "temporary_objects_deleted_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "document_generation_job_school_session_idx": {
-          "name": "document_generation_job_school_session_idx",
-          "columns": [
-            {
-              "expression": "school_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "session_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "document_generation_job_template_idx": {
-          "name": "document_generation_job_template_idx",
-          "columns": [
-            {
-              "expression": "template_revision_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "document_generation_job_running_school_unique": {
-          "name": "document_generation_job_running_school_unique",
-          "columns": [
-            {
-              "expression": "school_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"document_generation_job\".\"status\" = 'running'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "document_generation_job_unsent_idx": {
-          "name": "document_generation_job_unsent_idx",
-          "columns": [
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"document_generation_job\".\"handed_over_at\" is null and \"document_generation_job\".\"status\" = 'queued'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "document_generation_job_unstarted_idx": {
-          "name": "document_generation_job_unstarted_idx",
-          "columns": [
-            {
-              "expression": "handed_over_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"document_generation_job\".\"started_at\" is null and \"document_generation_job\".\"status\" = 'queued'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "document_generation_job_running_idx": {
-          "name": "document_generation_job_running_idx",
-          "columns": [
-            {
-              "expression": "started_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"document_generation_job\".\"status\" = 'running'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "document_generation_job_cleanup_idx": {
-          "name": "document_generation_job_cleanup_idx",
-          "columns": [
-            {
-              "expression": "completed_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"document_generation_job\".\"temporary_objects_deleted_at\" is null and \"document_generation_job\".\"status\" in ('succeeded', 'failed')",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "document_generation_job_school_id_school_id_fk": {
-          "name": "document_generation_job_school_id_school_id_fk",
-          "tableFrom": "document_generation_job",
-          "tableTo": "school",
-          "columnsFrom": [
-            "school_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "document_generation_job_template_revision_id_artifact_id_fk": {
-          "name": "document_generation_job_template_revision_id_artifact_id_fk",
-          "tableFrom": "document_generation_job",
-          "tableTo": "artifact",
-          "columnsFrom": [
-            "template_revision_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "document_generation_job_artifact_id_unique": {
-          "name": "document_generation_job_artifact_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "artifact_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "document_generation_job_facts_check": {
-          "name": "document_generation_job_facts_check",
-          "value": "(\"document_generation_job\".\"status\" in ('succeeded', 'failed')) = (\"document_generation_job\".\"completed_at\" is not null)\n        and (\"document_generation_job\".\"status\" = 'failed') = (\"document_generation_job\".\"error_code\" is not null)\n        and (\"document_generation_job\".\"status\" <> 'queued' or \"document_generation_job\".\"started_at\" is null)\n        and (\"document_generation_job\".\"status\" not in ('running', 'succeeded') or \"document_generation_job\".\"started_at\" is not null)"
-        },
-        "document_generation_job_progress_check": {
-          "name": "document_generation_job_progress_check",
-          "value": "\"document_generation_job\".\"batches_done\" >= 0 and (\"document_generation_job\".\"batch_count\" is null or (\"document_generation_job\".\"batch_count\" >= 1 and \"document_generation_job\".\"batches_done\" <= \"document_generation_job\".\"batch_count\"))"
-        },
-        "document_generation_job_documents_check": {
-          "name": "document_generation_job_documents_check",
-          "value": "\"document_generation_job\".\"document_count\" >= 1 and (\"document_generation_job\".\"printed_document_count\" is null or \"document_generation_job\".\"printed_document_count\" >= 1)"
-        }
-      },
       "isRLSEnabled": false
     },
     "public.exam_question_paper_figure": {
@@ -16056,6 +15697,453 @@
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
+    },
+    "public.school_registration_request": {
+      "name": "school_registration_request",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "form_version": {
+          "name": "form_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "submission_id": {
+          "name": "submission_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "response": {
+          "name": "response",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "logo_s3_key": {
+          "name": "logo_s3_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "logo_content_type": {
+          "name": "logo_content_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "logo_bytes": {
+          "name": "logo_bytes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "voice_note_s3_key": {
+          "name": "voice_note_s3_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "voice_note_content_type": {
+          "name": "voice_note_content_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "voice_note_bytes": {
+          "name": "voice_note_bytes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_path": {
+          "name": "source_path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "user_agent": {
+          "name": "user_agent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "alert_status": {
+          "name": "alert_status",
+          "type": "lead_alert_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "alert_handed_over_at": {
+          "name": "alert_handed_over_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "alert_handover_attempts": {
+          "name": "alert_handover_attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "alert_last_handover_error": {
+          "name": "alert_last_handover_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "alert_sent_at": {
+          "name": "alert_sent_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "alert_message_id": {
+          "name": "alert_message_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "alert_error": {
+          "name": "alert_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "school_registration_request_submission_id_unique": {
+          "name": "school_registration_request_submission_id_unique",
+          "columns": [
+            {
+              "expression": "submission_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "school_registration_request_created_at_idx": {
+          "name": "school_registration_request_created_at_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "school_registration_request_alert_unsent_idx": {
+          "name": "school_registration_request_alert_unsent_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"school_registration_request\".\"alert_status\" = 'pending' and \"school_registration_request\".\"alert_handed_over_at\" is null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.school_setup": {
+      "name": "school_setup",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "draft": {
+          "name": "draft",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "draft_step": {
+          "name": "draft_step",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "draft_updated_at": {
+          "name": "draft_updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "draft_updated_by": {
+          "name": "draft_updated_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "school_setup_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'draft'"
+        },
+        "requested_by": {
+          "name": "requested_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "school_id": {
+          "name": "school_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "current_step": {
+          "name": "current_step",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "completed_steps": {
+          "name": "completed_steps",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "result": {
+          "name": "result",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "error": {
+          "name": "error",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "attempt": {
+          "name": "attempt",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "start_requested_at": {
+          "name": "start_requested_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "submitted_at": {
+          "name": "submitted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "submit_invocation_id": {
+          "name": "submit_invocation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "submit_attempts": {
+          "name": "submit_attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "last_submit_error": {
+          "name": "last_submit_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "invocation_id": {
+          "name": "invocation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "finished_at": {
+          "name": "finished_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "school_setup_request_unique": {
+          "name": "school_setup_request_unique",
+          "columns": [
+            {
+              "expression": "request_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "school_setup_school_unique": {
+          "name": "school_setup_school_unique",
+          "columns": [
+            {
+              "expression": "school_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "school_setup_status_idx": {
+          "name": "school_setup_status_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "submitted_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "school_setup_request_id_school_registration_request_id_fk": {
+          "name": "school_setup_request_id_school_registration_request_id_fk",
+          "tableFrom": "school_setup",
+          "tableTo": "school_registration_request",
+          "columnsFrom": [
+            "request_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "school_setup_draft_updated_by_user_id_fk": {
+          "name": "school_setup_draft_updated_by_user_id_fk",
+          "tableFrom": "school_setup",
+          "tableTo": "user",
+          "columnsFrom": [
+            "draft_updated_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "school_setup_requested_by_user_id_fk": {
+          "name": "school_setup_requested_by_user_id_fk",
+          "tableFrom": "school_setup",
+          "tableTo": "user",
+          "columnsFrom": [
+            "requested_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "school_setup_school_id_school_id_fk": {
+          "name": "school_setup_school_id_school_id_fk",
+          "tableFrom": "school_setup",
+          "tableTo": "school",
+          "columnsFrom": [
+            "school_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
     }
   },
   "enums": {
@@ -16232,16 +16320,6 @@
         "pending",
         "scheduled",
         "completed",
-        "failed"
-      ]
-    },
-    "public.document_generation_job_status": {
-      "name": "document_generation_job_status",
-      "schema": "public",
-      "values": [
-        "queued",
-        "running",
-        "succeeded",
         "failed"
       ]
     },
@@ -16534,6 +16612,17 @@
       "values": [
         "pending",
         "sent",
+        "failed"
+      ]
+    },
+    "public.school_setup_status": {
+      "name": "school_setup_status",
+      "schema": "public",
+      "values": [
+        "draft",
+        "queued",
+        "running",
+        "succeeded",
         "failed"
       ]
     }

@@ -9,7 +9,7 @@ export const LEAD_CONTROL_SERVICE_NAME = 'LeadControl';
 export const LEAD_ALERT_WORKFLOW_NAME = 'leadAlert';
 
 /** Handlers of `LeadControl`; each signature is bound to one. */
-export type LeadControlHandler = 'scheduleAlert';
+export type LeadControlHandler = 'scheduleAlert' | 'scheduleOnboardingAlert';
 
 /** The Restate idempotency key of a lead's alert hand-over; every re-send joins the first. */
 export function leadAlertIdempotencyKey(leadId: string): string {
@@ -37,3 +37,33 @@ export function leadAlertWorkflowKey(leadId: string): string {
  */
 export const LEAD_ALERT_TEMPLATE_NAME = 'demo_lead_alert';
 export const LEAD_ALERT_TEMPLATE_LANGUAGE = 'en';
+
+/** The workflow sending the alert of a School Onboarding form submission. */
+export const SCHOOL_ONBOARDING_ALERT_WORKFLOW_NAME = 'schoolOnboardingAlert';
+
+export function schoolOnboardingAlertIdempotencyKey(requestId: string): string {
+  return `school-onboarding-alert:${requestId}`;
+}
+
+/**
+ * The WhatsApp template of a School Onboarding submission's alert, a Utility
+ * template in English (`en`) with named parameters, registered in Meta on the
+ * production Campuspilot account. Its body:
+ *
+ * "A school has sent the School Onboarding form.
+ * School: {{school}}
+ * Phone: {{phone}}
+ * Email: {{email}}
+ * Classes: {{classes}}
+ * Reference: {{reference}}
+ * Open School onboarding in the admin app to see the address, sections,
+ * subjects and notes."
+ *
+ * (Meta refuses a parameter at the very start or end of a body, so the
+ * reference is not last.) Submitted on 2026-11-24 as template 1515131521676495
+ * in the Campuspilot account. Parameter names here must match the template in
+ * Meta. Until Meta approves it, sends are refused and the workflow keeps
+ * retrying for a day.
+ */
+export const SCHOOL_ONBOARDING_ALERT_TEMPLATE_NAME = 'school_onboarding_alert';
+export const SCHOOL_ONBOARDING_ALERT_TEMPLATE_LANGUAGE = 'en';

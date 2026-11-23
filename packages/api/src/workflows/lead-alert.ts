@@ -4,3 +4,4 @@
  */
 export { leadControlService, type LeadControlService } from './lead-alert/control-service';
 export { leadAlertWorkflow, type LeadAlertWorkflow } from './lead-alert/workflow';
+export { schoolOnboardingAlertWorkflow } from './lead-alert/onboarding-workflow';

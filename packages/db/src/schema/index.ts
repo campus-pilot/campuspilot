@@ -24,3 +24,5 @@ export * from "./assistant";
 export * from "./exam-question-paper";
 export * from "./lead";
 export * from "./document-generation-job";
+export * from "./school-registration-request";
+export * from "./school-setup";

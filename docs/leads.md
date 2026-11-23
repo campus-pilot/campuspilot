@@ -35,6 +35,10 @@ a second lead.
 columns (`alert_*`) are the outbox and the alert's outcome. Leads are not
 school data and are not touched by the demo purge.
 
+The standalone School Onboarding form (`/onboarding`) reuses this
+proof-of-work challenge and CORS rule but saves to its own table; see
+[School Onboarding form](school-onboarding-form.md).
+
 Platform admins read leads on the admin app's **Demo requests** page
 (`systemAdmin.listLeads`, OPA action `system.lead.read`), which lists every
 answer as key and value.

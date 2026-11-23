@@ -53,6 +53,8 @@ export const PREFIX_MAP = {
   subscriptionPrice: "price",
   schoolCreation: "schcr",
   schoolCreationRequest: "schrq",
+  schoolRegistrationRequest: "srreq",
+  schoolSetup: "ssetup",
   schoolSession: "sess",
   student: "stu",
 } as const;

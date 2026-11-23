@@ -25,6 +25,8 @@ import { sweepResultPublications } from '@campuspilot/api/notifications/emitters
 import { sweepWhatsAppFailureAlerts } from '@campuspilot/api/notifications/failure-alerts';
 import { startRuntimeMonitor } from '@campuspilot/logger/perf';
 import { sweepLeadAlertOutbox } from '@campuspilot/api/leads/lead.outbox';
+import { sweepOnboardingAlertOutbox } from '@campuspilot/api/leads/school-onboarding.alert-outbox';
+import { sweepSchoolSetupOutbox } from '@campuspilot/api/school-setup/school-setup.outbox';
 import { registerGoogleSignUpHandler } from '@campuspilot/auth/google-sign-up';
 import { createPersonalSpaceAfterGoogleSignUp } from '@campuspilot/api/personal-space/personal-space.service';
 
@@ -130,6 +132,17 @@ async function sweepImages() {
 async function sweepLeadAlerts() {
   const result = await sweepLeadAlertOutbox();
   if (Object.values(result).some((value) => value > 0)) log.info(result, 'lead-alert.outbox.ok');
+  const onboarding = await sweepOnboardingAlertOutbox();
+  if (Object.values(onboarding).some((value) => value > 0)) log.info(onboarding, 'school-onboarding-alert.outbox.ok');
+}
+
+/**
+ * One school setup sweep: hands over setups whose start was not accepted by
+ * Restate, and fails setups that can no longer progress (docs/school-onboarding-form.md).
+ */
+async function sweepSchoolSetups() {
+  const result = await sweepSchoolSetupOutbox();
+  if (Object.values(result).some((value) => value > 0)) log.info(result, 'school-setup.outbox.ok');
 }
 
 /** Finishes result publications whose deliveries settled (publisher notified once). */
@@ -151,6 +164,7 @@ const OUTBOX_SWEEPS: ReadonlyArray<{ errorMessage: string; run: () => Promise<vo
   { errorMessage: 'document-generation.outbox.error', run: sweepDocumentJobs },
   { errorMessage: 'image-derivatives.outbox.error', run: sweepImages },
   { errorMessage: 'lead-alert.outbox.error', run: sweepLeadAlerts },
+  { errorMessage: 'school-setup.outbox.error', run: sweepSchoolSetups },
   { errorMessage: 'notification.results.sweep.error', run: sweepPublications },
   // Reports failed WhatsApp deliveries to staff granted to receive them (D-30).
   { errorMessage: 'notification.failure-alerts.error', run: async () => { await sweepWhatsAppFailureAlerts(); } },
