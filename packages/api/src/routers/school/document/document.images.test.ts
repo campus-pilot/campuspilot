@@ -123,3 +123,24 @@ describe('CSS may load only what an image may (review S4)', () => {
     expect(html).toContain(png);
   });
 });
+
+describe('CSS escapes cannot change what is loaded (review round 2)', () => {
+  const name = documentAssetName('d'.repeat(64), 'image/png');
+  const sheet = (css: string) => batchHtml(`<style>${css}</style>`, {}, [name]);
+
+  it('refuses a URL with an escaped quote that would leave the batch folder', () => {
+    const html = sheet(`.a{background:url("${name}\\")/../../../../tmp/other/x.png")}`);
+    expect(html).not.toContain('url(');
+    expect(html).not.toContain('/tmp/other');
+  });
+
+  it('refuses any loading function written with a backslash, even to an allowed name', () => {
+    expect(sheet(`.a{background:url("${name.replace('a', '\\61')}")}`)).not.toContain('url(');
+  });
+
+  it('drops an at-rule whose name is escaped (@i\\mport)', () => {
+    const html = sheet('@i\\mport "x.css";.a{color:red}');
+    expect(html).not.toContain('mport');
+    expect(html).toContain('color:red');
+  });
+});

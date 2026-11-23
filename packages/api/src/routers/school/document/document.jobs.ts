@@ -22,6 +22,7 @@ export function serializeDocumentJob(row: JobRow): dto.DocumentGenerationJobDto 
     status: row.status,
     name: row.name,
     documentCount: row.documentCount,
+    printedDocumentCount: row.printedDocumentCount,
     warnings: row.warnings,
     batchCount: row.batchCount,
     batchesDone: row.batchesDone,
@@ -74,10 +75,13 @@ export async function startDocumentGeneration(
       `This selection has ${data.contexts.length.toLocaleString("en-IN")} documents. Create at most ${dto.MAX_DOCUMENT_SOURCE_ITEMS.toLocaleString("en-IN")} at a time.`,
     );
   const row = await db.transaction(async (tx) => {
-    // One start at a time per school, so two concurrent requests cannot both
-    // pass the counts below (a transaction-scoped advisory lock: no row is
-    // locked and nothing else waits on it).
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`document-jobs:${input.schoolId}`}, 0))`);
+    // One start at a time per person and per school, so two concurrent
+    // requests cannot both pass the counts below (transaction-scoped advisory
+    // locks: no row is locked). The person's lock is always taken first and
+    // the school's second, so two starts can never wait on each other in a
+    // cycle; the person's lock also covers their jobs in other schools.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`document-jobs:user:${input.requestedBy}`}, 0))`);
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`document-jobs:school:${input.schoolId}`}, 0))`);
     const active = inArray(documentGenerationJobTable.status, ["queued", "running"]);
     const [school] = await tx
       .select({ value: count() })

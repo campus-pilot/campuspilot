@@ -964,8 +964,10 @@ export async function measureDocumentSizes(
       sizes.push({ htmlBytes: Buffer.byteLength(raw, "utf8"), budget: current.chars + current.steps });
       spent += current.chars + current.steps;
     } catch (cause) {
-      // The job's budget ran out (not this document's): say so.
-      if (cause instanceof ORPCError && remaining < limits.documentBudget && current.chars + current.steps > remaining)
+      // The limit of this render was the job's remainder, not the document's
+      // share, and that limit is what refused it (the output helper refuses a
+      // value before counting it, so the meter alone cannot tell): say so.
+      if (cause instanceof ORPCError && remaining < limits.documentBudget && cause.message === OVERSIZE_MESSAGE)
         throw rpcError.badRequest(JOB_BUDGET_MESSAGE);
       if (cause instanceof ORPCError) throw cause;
       throw rpcError.badRequest(SYNTAX_MESSAGE, cause);
@@ -1202,8 +1204,11 @@ export class DocumentConversionRefused extends Error {
 /** Reads a response body, stopping as soon as it passes `maxBytes`. */
 async function readCapped(response: Response, maxBytes: number) {
   const declared = Number(response.headers.get("content-length") ?? "NaN");
-  if (Number.isFinite(declared) && declared > maxBytes)
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    // Refused without reading it: release the connection.
+    await response.body?.cancel().catch(() => undefined);
     throw new DocumentConversionRefused("too_large", "The PDF is larger than the converter may return.");
+  }
   if (!response.body) return Buffer.alloc(0);
   const chunks: Uint8Array[] = [];
   let size = 0;

@@ -17,7 +17,7 @@ import { SCHOOL_ACTIONS } from "@campuspilot/opa/policies/school";
 import { o, protectedProcedure } from "../../../index";
 import { rpcError, toRpcError } from "../../../errors";
 import { assertPermission, checkPermissions } from "../../../permissions/authorization";
-import { assertSchoolFeatureEnabled } from "../../../feature-flags/feature-flags.service";
+import { assertSchoolFeatureEnabled, isSchoolFeatureEnabled } from "../../../feature-flags/feature-flags.service";
 import {
   createNextPageCursor,
   createPaginatedResult,
@@ -90,14 +90,14 @@ const GENERATOR_DOCUMENT_TYPES = dto.documentTypeSchema.options.filter(
   (type): type is GeneratorDocumentType => !(dto.TEMPLATE_ONLY_DOCUMENT_TYPES as readonly string[]).includes(type),
 );
 /**
- * Every action starting a document of `type` needs: its generate action and
- * the reads of its source data. Decided by the type alone (no source field
- * changes it), so starting, reading and listing jobs share one rule.
+ * The reads of a document type's source data (its template and the records
+ * it prints), checked besides its generate action. Decided by the type alone
+ * (no source field changes it), so starting, reading and listing jobs share
+ * one rule.
  */
-function startActions(type: dto.DocumentType) {
+function sourceReadActions(type: dto.DocumentType) {
   if (isFinanceDocument(type))
     return [
-      SCHOOL_ACTIONS.GENERATE_FINANCE_DOCUMENTS,
       SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES,
       SCHOOL_ACTIONS.READ_SESSION_FINANCE,
       SCHOOL_ACTIONS.READ_ADMISSION_LEDGER,
@@ -111,11 +111,17 @@ function startActions(type: dto.DocumentType) {
           ? [SCHOOL_ACTIONS.READ_STUDENT, SCHOOL_ACTIONS.READ_EXAM_TIMETABLE, SCHOOL_ACTIONS.READ_EXAMS]
           : [SCHOOL_ACTIONS.READ_STUDENT];
   return [
-    SCHOOL_ACTIONS.GENERATE_DOCUMENTS,
     SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES,
     SCHOOL_ACTIONS.READ_SESSION,
     SCHOOL_ACTIONS.READ_CLASS,
     ...sourceReads,
+  ];
+}
+/** Every action starting a document of `type` needs: its generate action and its source reads. */
+function startActions(type: dto.DocumentType) {
+  return [
+    isFinanceDocument(type) ? SCHOOL_ACTIONS.GENERATE_FINANCE_DOCUMENTS : SCHOOL_ACTIONS.GENERATE_DOCUMENTS,
+    ...sourceReadActions(type),
   ];
 }
 /**
@@ -153,8 +159,8 @@ async function startableDocumentTypes(
   const startable: GeneratorDocumentType[] = [];
   for (const type of allowed) {
     const feature = dto.DOCUMENT_TYPE_FEATURE[type];
-    if (!features.has(feature))
-      features.set(feature, await assertSchoolFeatureEnabled(context.db, input.schoolId, feature).then(() => true, () => false));
+    // A database error surfaces; only a feature that is off leaves its types out.
+    if (!features.has(feature)) features.set(feature, await isSchoolFeatureEnabled(context.db, input.schoolId, feature));
     if (features.get(feature)) startable.push(type);
   }
   return startable;
@@ -347,7 +353,8 @@ const requireSourcePermissions = o.middleware<
   Record<never, never>,
   z.infer<typeof dto.generateDocumentSchema>
 >(async ({ context, next, signal }, input) => {
-  for (const action of startActions(input.source.documentType).slice(1))
+  // The generate action itself is checked by `requireSourceTypePermission`.
+  for (const action of sourceReadActions(input.source.documentType))
     await assertPermission(context, { action, resource: { kind: "school", schoolId: input.schoolId } }, signal);
   return next();
 });

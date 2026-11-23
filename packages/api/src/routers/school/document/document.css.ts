@@ -44,11 +44,20 @@ function urlTargets(value: string): string[] | null {
   return opened === found ? targets : null;
 }
 
-/** Whether a declaration value (or at-rule prelude) loads only allowed targets. */
+/**
+ * Whether a declaration value (or at-rule prelude) loads only allowed
+ * targets. Escapes are decoded only to FIND loading functions (`u\72l(` is
+ * `url(`); a value that loads anything and contains a backslash at all is
+ * refused, because an escaped quote or parenthesis inside a URL string
+ * (`url("a.png\")/../x.png")`) would make the checker read a different
+ * target than Chromium resolves. Generated names and base64 data never need
+ * a backslash.
+ */
 export function cssValueAllowed(raw: string, assets: ReadonlySet<string>): boolean {
   const value = decodeCssEscapes(raw);
   const functions = [...value.matchAll(LOADING_FUNCTION)].map((match) => match[1]!.toLowerCase());
   if (functions.length === 0) return true;
+  if (raw.includes("\\")) return false;
   if (functions.some((name) => name !== "url" && name !== "image-set" && name !== "-webkit-image-set")) return false;
   const targets = urlTargets(value);
   if (targets === null) return false;
@@ -64,7 +73,10 @@ export function cssValueAllowed(raw: string, assets: ReadonlySet<string>): boole
 function cleanContainer(container: Container, assets: ReadonlySet<string>) {
   container.each((node: ChildNode) => {
     if (node.type === "atrule") {
-      if (node.name.toLowerCase() === "import" || !cssValueAllowed(node.params, assets)) {
+      // An escaped at-rule name (`@i\mport`) ends at the backslash for postcss
+      // (name `i`, the rest in the prelude) but Chromium reads `@import`: an
+      // at-rule with a backslash in its name or prelude is dropped.
+      if (node.name.includes("\\") || node.params.includes("\\") || node.name.toLowerCase() === "import" || !cssValueAllowed(node.params, assets)) {
         node.remove();
         return;
       }

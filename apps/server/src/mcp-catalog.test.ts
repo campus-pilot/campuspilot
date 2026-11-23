@@ -301,6 +301,8 @@ describe('catalog metadata', () => {
 
     expect(classified).toEqual([...leafNames].sort());
     expect(catalog.core.map(({ name }) => name).sort()).toEqual(CORE_TOOLS);
+    // 37 since getDocumentGenerationJob (deliberate: generation is a background job, and the
+    // assistant cannot fetch a PDF it generated without reading the job; packages/api/AGENTS.md).
     expect(catalog.core).toHaveLength(37);
     // 85 on main, plus releaseExamToCadet, withdrawExamFromCadet,
     // get/saveStudentExamRemark and get/updateCadetPortalSettings (+6);

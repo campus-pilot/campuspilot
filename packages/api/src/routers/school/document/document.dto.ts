@@ -441,7 +441,10 @@ export const documentGenerationJobDtoSchema = z.object({
   documentType: documentTypeSchema,
   status: documentGenerationJobStatusSchema,
   name: z.string(),
+  /** Documents the selection had when the job was requested. */
   documentCount: z.number().int(),
+  /** Documents the PDF prints, known once the worker prepared the job (null before). */
+  printedDocumentCount: z.number().int().nullable(),
   warnings: z.array(z.string()),
   /** Null until the documents are split into batches. */
   batchCount: z.number().int().nullable(),
