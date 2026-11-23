@@ -17,8 +17,9 @@ import { studentTable } from "@campuspilot/db/schema/student";
 import { sessionConfigSchema } from "@campuspilot/db/schema/jsonb/session-config";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { rpcError } from "../../../errors";
-import type { DocumentSource } from "./document.dto";
+import { MAX_DOCUMENT_SOURCE_ITEMS, type DocumentSource } from "./document.dto";
 import { documentImage } from "./document.storage";
+import { documentImageRef, type DocumentImageRef } from "./document.images";
 import { withReportModeLayout } from "./document.report-modes";
 import { gradeLabel, scorePercent } from "../exam/exam-scoring";
 import { shareableAttendance, shareableCoScholastics } from "../exam/exam-assessment-rules";
@@ -63,22 +64,68 @@ export function documentScheduleSlot(row: {
 }
 
 /**
+ * How a context builder hands images to the renderer (`document.images.ts`):
+ * - `embed` (the default): `data:` URIs read now, as every caller outside
+ *   generation jobs and previews expects (notifications, the Cadet Portal
+ *   timetable, tests);
+ * - `reference`: a {@link DocumentImageRef} per image and no image read at
+ *   all. Previews resolve the references of their sample only; a generation
+ *   job resolves them per batch into conversion assets.
+ */
+export type DocumentImageMode = "embed" | "reference";
+
+/** Options every document context builder accepts. */
+export type DocumentContextOptions = {
+  images?: DocumentImageMode;
+  /**
+   * The instant every document prints as `generatedAt`. A generation job
+   * passes the moment its request was accepted, so a retried or resumed
+   * job prints the same value; otherwise it is now.
+   */
+  generatedAt?: Date;
+};
+
+type SchoolIdentity = {
+  name: string;
+  location: string | null;
+  registrationNo: string | null;
+  logoS3Key: string | null;
+};
+
+/**
  * The `school` block every document context carries: public identity facts
  * and the logo embedded as a data URI (null without a logo). The one builder
  * for academic, finance and notice documents, so the block cannot drift
  * between them.
  */
-export async function buildSchoolDocumentContext(school: {
-  name: string;
-  location: string | null;
-  registrationNo: string | null;
-  logoS3Key: string | null;
-}) {
+export async function buildSchoolDocumentContext(school: SchoolIdentity) {
   return {
     name: school.name,
     location: school.location,
     registrationNo: school.registrationNo,
     logoUrl: await documentImage(school.logoS3Key),
+  };
+}
+
+/**
+ * The same `school` block for a builder in `images` mode: embedded as
+ * {@link buildSchoolDocumentContext} does, or with the logo as a reference.
+ */
+export async function schoolDocumentContextFor(
+  school: SchoolIdentity,
+  images: DocumentImageMode = "embed",
+): Promise<{
+  name: string;
+  location: string | null;
+  registrationNo: string | null;
+  logoUrl: string | DocumentImageRef | null;
+}> {
+  if (images === "embed") return buildSchoolDocumentContext(school);
+  return {
+    name: school.name,
+    location: school.location,
+    registrationNo: school.registrationNo,
+    logoUrl: documentImageRef(school.logoS3Key),
   };
 }
 
@@ -90,7 +137,9 @@ export async function buildDocumentContexts(
   db: DatabaseExecutor,
   schoolId: string,
   source: DocumentSource,
+  options: DocumentContextOptions = {},
 ) {
+  const images = options.images ?? "embed";
   if (source.documentType === "bill" || source.documentType === "receipt" || source.documentType === "statement") {
     throw rpcError.badRequest("Finance documents use the immutable finance context builder.");
   }
@@ -170,7 +219,7 @@ export async function buildDocumentContexts(
         )
         .limit(1)
     : [];
-  const schoolContext = await buildSchoolDocumentContext(school);
+  const schoolContext = await schoolDocumentContextFor(school, images);
   const [lifecycle] = examSlug
     ? await db
         .select()
@@ -198,7 +247,7 @@ export async function buildDocumentContexts(
           completedAt: lifecycle?.completedAt?.toISOString() ?? null,
         }
       : null,
-    generatedAt: new Date().toISOString(),
+    generatedAt: (options.generatedAt ?? new Date()).toISOString(),
   };
   const sortedRows = [...(grid?.config.rows ?? [])].sort(
     (a, b) =>
@@ -379,16 +428,16 @@ export async function buildDocumentContexts(
       asc(admissionTable.name),
       asc(studentTable.id),
     )
-    .limit(501);
+    .limit(MAX_DOCUMENT_SOURCE_ITEMS + 1);
   if (source.studentIds && enrolled.length !== source.studentIds.length)
     throw rpcError.notFound("One or more selected enrolled students");
   if (!enrolled.length)
     throw rpcError.badRequest(
       "This selection has no registered students in the selected session.",
     );
-  if (enrolled.length > 500)
+  if (enrolled.length > MAX_DOCUMENT_SOURCE_ITEMS)
     throw rpcError.badRequest(
-      "Select up to 500 students per document request.",
+      `Select up to ${MAX_DOCUMENT_SOURCE_ITEMS.toLocaleString("en-IN")} students per document request.`,
     );
   const results = source.documentType === "report_card" && plans.length
     ? await db
@@ -443,6 +492,13 @@ export async function buildDocumentContexts(
   const assessmentByStudent = new Map(
     assessments.map((row) => [row.studentId, row]),
   );
+  // One lookup per student and plan instead of scanning every result for
+  // each (quadratic in the class size, seconds of blocked CPU at 1,500
+  // students). A student has at most one result per plan (unique).
+  const resultKey = (studentId: string, planId: string) => `${studentId}\u0000${planId}`;
+  const resultByStudentPlan = new Map(
+    results.map((result) => [resultKey(result.studentId, result.examPlanId), result]),
+  );
   const requiresAssessment =
     source.documentType === "report_card" &&
     ((source.reportSections.includeAttendance &&
@@ -479,13 +535,8 @@ export async function buildDocumentContexts(
     if (source.documentType === "report_card") {
       const marksApproved =
         studentPlans.length > 0 &&
-        studentPlans.every((plan) =>
-          results.some(
-            (result) =>
-              result.studentId === student.id &&
-              result.examPlanId === plan.id &&
-              result.approved,
-          ),
+        studentPlans.every(
+          (plan) => resultByStudentPlan.get(resultKey(student.id, plan.id))?.approved === true,
         );
       if (!marksApproved || (requiresAssessment && !assessment?.approved)) {
         if (source.resultPolicy === "approved_only" && !source.studentIds) {
@@ -510,20 +561,27 @@ export async function buildDocumentContexts(
       className: schoolClass.label,
       sectionName: section?.label ?? null,
       rollNo: student.rollNo?.toString() ?? null,
-      photoUrl: await documentImage(admission.photoS3Key),
+      photoUrl:
+        images === "embed"
+          ? await documentImage(admission.photoS3Key)
+          : documentImageRef(admission.photoS3Key),
     };
-    embeddedBytes +=
-      (identity.photoUrl?.length ?? 0) + (schoolContext.logoUrl?.length ?? 0);
-    if (embeddedBytes > 20_000_000)
-      throw rpcError.badRequest(
-        "The selected photos exceed the document size limit. Select fewer students or use smaller photos.",
-      );
+    // Embedded images travel inside the one HTML document, so they share
+    // its limit. Referenced images are limited per conversion batch instead
+    // (`DOCUMENT_BATCH_IMAGE_MAX_BYTES`).
+    if (images === "embed") {
+      embeddedBytes +=
+        (typeof identity.photoUrl === "string" ? identity.photoUrl.length : 0) +
+        (typeof schoolContext.logoUrl === "string" ? schoolContext.logoUrl.length : 0);
+      if (embeddedBytes > 20_000_000)
+        throw rpcError.badRequest(
+          "The selected photos exceed the document size limit. Select fewer students or use smaller photos.",
+        );
+    }
     const subjects =
       source.documentType === "report_card"
         ? studentPlans.map((plan) => {
-            const result = results.find(
-              (r) => r.examPlanId === plan.id && r.studentId === student.id,
-            );
+            const result = resultByStudentPlan.get(resultKey(student.id, plan.id));
             if (!result?.approved)
               throw rpcError.badRequest(
                 `Approve every subject result for ${admission.name} before generating report cards.`,

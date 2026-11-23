@@ -193,7 +193,7 @@ export async function previewTemplatePdf(
   let converted: Uint8Array;
   try {
     converted = new Uint8Array(
-      await convertDocumentPdf(html, documentType, signal, {
+      await convertDocumentPdf(html, documentType, signal, [], {
         // A question paper keeps the converter's own cap and message.
         ...(documentType === "question_paper" ? {} : { pageLimit: { pages, message: previewPageLimitMessage(pages) } }),
         timeoutMs: TEMPLATE_PREVIEW_LIMITS.timeoutMs,

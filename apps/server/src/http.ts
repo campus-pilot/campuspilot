@@ -28,6 +28,8 @@ import {
 import { handleSchoolLogoUpload } from '@campuspilot/api/routers/system-admin/school/school.http';
 import { DEMO_REQUEST_PATH, LEAD_CHALLENGE_PATH } from '@campuspilot/api/leads/demo-request';
 import { handleDemoRequestSubmit, handleLeadChallenge } from '@campuspilot/api/leads/lead.http';
+import { SCHOOL_ONBOARDING_PATH } from '@campuspilot/api/leads/school-onboarding';
+import { handleSchoolOnboardingSubmit } from '@campuspilot/api/leads/school-onboarding.http';
 import { handleSchoolLogoBlob } from '@campuspilot/api/routers/school/logo/logo.blob';
 import {
   handleQuestionPaperPageRead,
@@ -164,6 +166,22 @@ app.post(DEMO_REQUEST_PATH, leadSubmitRateLimit, async (context) => {
   } catch (error) {
     context.var.logger.error({ err: error }, 'lead.submit.error');
     return context.json({ code: 'INTERNAL_SERVER_ERROR', message: 'The request could not be saved. Try again.' }, 500);
+  }
+});
+
+/**
+ * The website's School Onboarding form (`/onboarding`), public and without a
+ * session, gated like the demo request form: the same proof-of-work
+ * challenge, plus 5 submissions per client IP per 10 minutes (see
+ * `@campuspilot/api/leads/school-onboarding.http`).
+ */
+const schoolOnboardingRateLimit = createRateLimit({ id: 'school-onboarding-submit', limit: 5, windowMs: 10 * 60_000 });
+app.post(SCHOOL_ONBOARDING_PATH, schoolOnboardingRateLimit, async (context) => {
+  try {
+    return await handleSchoolOnboardingSubmit(context.req.raw, { db, redis: getRedisClient() });
+  } catch (error) {
+    context.var.logger.error({ err: error }, 'school-onboarding.submit.error');
+    return context.json({ code: 'INTERNAL_SERVER_ERROR', message: 'The form could not be saved. Try again.' }, 500);
   }
 });
 

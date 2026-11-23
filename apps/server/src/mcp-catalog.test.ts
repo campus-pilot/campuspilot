@@ -43,6 +43,8 @@ const CORE_TOOLS = [
   'school.getCollectionRegister',
   'school.getDashboard',
   'school.getDocumentDownload',
+  // Generation is a background job: generateDocument returns it, this reads its outcome.
+  'school.getDocumentGenerationJob',
   'school.getExam',
   'school.getExamOverview',
   'school.getExamResult',
@@ -115,6 +117,13 @@ const HIDDEN_TOOLS = [
   'systemAdmin.requestDataMigrationRun',
   // Website leads carry prospects' contact details: platform admins only.
   'systemAdmin.listLeads',
+  // School Onboarding submissions carry a school's contact details and recordings.
+  'systemAdmin.listSchoolRegistrationRequests',
+  'systemAdmin.getSchoolRegistrationRequestMedia',
+  // Setting up a school from a submission creates schools and accounts: a human decision.
+  'systemAdmin.getSchoolSetup',
+  'systemAdmin.saveSchoolSetupDraft',
+  'systemAdmin.startSchoolSetup',
   // Demo provisioning, credentials and purge stay human admin actions.
   'systemAdmin.listDemoClassCatalogue',
   'systemAdmin.createDemoSchool',
@@ -215,7 +224,9 @@ const HIDDEN_TOOLS = [
  * is paid in model tokens on every conversation, so growing it must be a
  * deliberate decision.
  */
-const CORE_LISTING_BUDGET_CHARS = 38_000;
+// 38,500 since getDocumentGenerationJob joined core (37 tools; packages/api/AGENTS.md):
+// tightening the generation descriptions could not bring the listing back under 38,000.
+const CORE_LISTING_BUDGET_CHARS = 38_500;
 
 let appRouter: AnyRouter;
 let catalog: McpCatalog;
@@ -304,7 +315,9 @@ describe('catalog metadata', () => {
 
     expect(classified).toEqual([...leafNames].sort());
     expect(catalog.core.map(({ name }) => name).sort()).toEqual(CORE_TOOLS);
-    expect(catalog.core).toHaveLength(36);
+    // 37 since getDocumentGenerationJob (deliberate: generation is a background job, and the
+    // assistant cannot fetch a PDF it generated without reading the job; packages/api/AGENTS.md).
+    expect(catalog.core).toHaveLength(37);
     // 85 on main, plus releaseExamToCadet, withdrawExamFromCadet,
     // get/saveStudentExamRemark and get/updateCadetPortalSettings (+6);
     // +4 result notification tools (release preview, release batch read,
@@ -319,8 +332,9 @@ describe('catalog metadata', () => {
     // +1 systemAdmin.getPersonalSpaceStats (the admin dashboard's personal space counts);
     // +4 school.addClassSubject, updateClassSubject, removeClassSubject and
     // moveClassSubjectToClassroom (one subject at a time, subjects added from an exam);
+    // +1 school.listDocumentGenerationJobs (PDFs being created, and recent failures);
     // +4 template tools (list and get revisions, learn template editing, validate a template draft).
-    expect(catalog.advanced).toHaveLength(138);
+    expect(catalog.advanced).toHaveLength(139);
   });
 });
 
@@ -344,6 +358,8 @@ describe('school feature gates in the catalog', () => {
       'school.listDocumentArtifacts',
       // Every source they generate from is a student management document, so the gate is theirs.
       'school.generateDocument',
+      'school.getDocumentGenerationJob',
+      'school.listDocumentGenerationJobs',
       'school.previewDocument',
       'school.listNotificationDeliveries',
     ]) {

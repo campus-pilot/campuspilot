@@ -46,3 +46,26 @@ export const DOCUMENT_SANITIZER_OPTIONS: sanitizeHtml.IOptions = {
   exclusiveFilter: (frame) =>
     frame.tag === "img" && !EMBEDDABLE_IMAGE.test(frame.attribs.src ?? ""),
 };
+
+/**
+ * The `document` profile for HTML converted to PDF with generated image
+ * assets (`asset-<sha256>.<ext>`, see `document.images.ts`). The only change
+ * is which `<img src>` survives: a raster `data:` URI as always, or one of
+ * `assets`, the names generated for the batch being converted, matched
+ * exactly. Any other relative path, `http(s):` or `file:` URL is removed
+ * with its element, as before. Without assets this is
+ * {@link DOCUMENT_SANITIZER_OPTIONS} itself.
+ */
+export function documentSanitizerOptions(
+  assets?: ReadonlySet<string>,
+): sanitizeHtml.IOptions {
+  if (!assets || assets.size === 0) return DOCUMENT_SANITIZER_OPTIONS;
+  return {
+    ...DOCUMENT_SANITIZER_OPTIONS,
+    exclusiveFilter: (frame) => {
+      if (frame.tag !== "img") return false;
+      const src = frame.attribs.src ?? "";
+      return !(EMBEDDABLE_IMAGE.test(src) || assets.has(src));
+    },
+  };
+}

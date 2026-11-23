@@ -81,6 +81,11 @@ permission boundaries, immutable template lifecycle, all-classroom timetable
 invariant, safe Handlebars contract, and the checks required when extending a
 document type or marketplace design.
 
+PDF generation through `generateDocument` is a batched job in the worker: the
+API validates, pins and queues it and never waits; read "Generation jobs" and
+"Images as conversion assets" in the document system guide before changing
+generation, batching, image handling in documents or the CSP of converted HTML.
+
 Before implementing or redesigning a workflow, inspect existing screens with the
 same behavior (admission/staff tables, classroom/admission workspaces and student
 forms). Reuse shared controls and layouts instead of introducing local sizing or
@@ -188,6 +193,20 @@ routes and their proof-of-work, the `lead` table, the `LeadControl` /
 [Website leads](docs/leads.md). A submission must only depend on the lead
 insert; every side effect (the WhatsApp alert) is scheduled after commit and
 may fail without failing the request.
+
+## School Onboarding form
+
+Before changing the website's standalone `/onboarding` page, the public
+`/public/leads/school-onboarding` route, the `school_registration_request`
+table, its S3 files, its WhatsApp alert, the admin School onboarding page, or
+setting a school up from a submission (`school_setup`, the `SchoolSetup`
+workflow, `routers/system-admin/school-setup`, the setup wizard), read
+[School Onboarding form](docs/school-onboarding-form.md). The page is kept out
+of search on purpose (robots meta, `robots.txt`, `X-Robots-Tag`) and is linked
+from nowhere; uploads are bounded by type (sniffed from bytes) and size on the
+server, and the voice note's ten minutes by the recorder. Each setup step is
+one transaction that records its own completion; keep it that way when adding
+a step, so a retry never creates anything twice.
 
 ## School feature flags and subscription tiers
 

@@ -2,7 +2,7 @@
 import { useForm } from "@tanstack/react-form";
 import { useQuery } from "@tanstack/react-query";
 import { z } from "zod";
-import { ArrowRight, Eye, FileDown, CheckCircle2 } from "lucide-react";
+import { ArrowRight, Eye, FileDown } from "lucide-react";
 import {
   DocumentButton,
   DocumentCheckbox,
@@ -15,6 +15,8 @@ import {
 import {
   DOCUMENT_LABELS,
   DEFAULT_REPORT_SECTIONS,
+  MAX_DOCUMENT_SOURCE_ITEMS,
+  type DocumentGenerationJobDto,
   type DocumentSource,
   type AcademicDocumentType,
   type DocumentType,
@@ -31,11 +33,14 @@ import {
   type DocumentScope,
 } from "./document-common";
 import { StudentPicker } from "./student-recipient-picker";
+import { DocumentJobTracker } from "./document-job";
 import type { DocumentInitialSelection } from "./document-workspace";
 
 type Preview = {
   html: string;
   studentCount: number;
+  documentCount: number;
+  sampleCount: number;
   warnings: string[];
   fingerprint: string;
 };
@@ -117,9 +122,10 @@ function DocumentGeneratorData({
 }
 /** Holds preview/generation state in TanStack Form. A preview is valid only
  * for its explicit recipient/exam selection and immutable template revision.
- * Previewing is optional: `generate` creates the PDF from the current
- * selection, and `download` also starts its download (the server checks the
- * same selection again on each call; a preview is only for looking).
+ * Previewing is optional: `generate` starts the PDF job for the current
+ * selection (the server checks the same selection again; a preview is only
+ * for looking). The job runs in the background; `job` is what the server
+ * accepted, and its progress is read by `DocumentJobTracker`.
  */
 function useDocumentGeneration({
   scope,
@@ -146,7 +152,7 @@ function useDocumentGeneration({
           ? z.string()
           : z.string().min(1, "Choose an examination"),
       audience: z.enum(["all", "selected"]),
-      studentIds: z.array(z.string()).max(500),
+      studentIds: z.array(z.string()).max(MAX_DOCUMENT_SOURCE_ITEMS),
       reportSections: z.object({
         includeModeMarks: z.boolean(),
         includeAttendance: z.boolean(),
@@ -154,10 +160,10 @@ function useDocumentGeneration({
         includeGradingScale: z.boolean(),
       }),
       resultPolicy: z.enum(["require_all", "approved_only"]),
-      mode: z.enum(["preview", "generate", "download"]),
+      mode: z.enum(["preview", "generate"]),
       error: z.string(),
       preview: z.custom<Preview>().nullable(),
-      generatedId: z.string(),
+      job: z.custom<DocumentGenerationJobDto>().nullable(),
     })
     .superRefine((value, ctx) => {
       if (
@@ -233,7 +239,7 @@ function useDocumentGeneration({
       mode: "preview" as GenerationMode,
       error: "",
       preview: null as Preview | null,
-      generatedId: "",
+      job: null as DocumentGenerationJobDto | null,
     },
     validators: { onChange: schema },
     onSubmit: async ({ value }) => {
@@ -250,24 +256,14 @@ function useDocumentGeneration({
             ...preview,
             fingerprint: JSON.stringify(source),
           });
-          form.setFieldValue("generatedId", "");
+          form.setFieldValue("job", null);
         } else {
           const result = await client.school.generateDocument({
             schoolId: scope.schoolId,
             source,
             templateRevisionId: template.id,
           });
-          form.setFieldValue("generatedId", result.artifact.id);
-          await cache.artifacts(scope.schoolId);
-          if (value.mode === "download")
-            form.setFieldValue(
-              "error",
-              await downloadCreatedDocument({
-                schoolId: scope.schoolId,
-                artifactId: result.artifact.id,
-                documentType,
-              }),
-            );
+          form.setFieldValue("job", result.job);
         }
       } catch (error) {
         form.setFieldValue(
@@ -428,11 +424,7 @@ function GenerationForm({
             ))}
             <DocumentPreview
               html={values.preview?.html}
-              label={
-                values.preview
-                  ? `Print preview${values.preview.studentCount ? ` · ${values.preview.studentCount} student${values.preview.studentCount === 1 ? "" : "s"}` : ""}`
-                  : "Print preview"
-              }
+              label={values.preview ? previewLabel(values.preview) : "Print preview"}
             />
           </div>
         )}
@@ -440,10 +432,23 @@ function GenerationForm({
     </div>
   );
 }
+/**
+ * The preview caption: the whole selection's student count, and which of its
+ * documents the sample shows (a preview renders the first two printed sheets).
+ */
+function previewLabel(preview: Preview) {
+  const students = preview.studentCount
+    ? ` · ${preview.studentCount.toLocaleString("en-IN")} student${preview.studentCount === 1 ? "" : "s"}`
+    : "";
+  const sample =
+    preview.sampleCount < preview.documentCount
+      ? ` · showing the first ${preview.sampleCount} of ${preview.documentCount.toLocaleString("en-IN")}`
+      : "";
+  return `Print preview${students}${sample}`;
+}
 type GenerationFormApi = ReturnType<typeof useDocumentGeneration>["form"];
-/** `preview` renders without saving; `generate` creates the PDF; `download`
- * creates it and starts its download in the same click. */
-type GenerationMode = "preview" | "generate" | "download";
+/** `preview` renders a sample without saving; `generate` starts the PDF job. */
+type GenerationMode = "preview" | "generate";
 function ReportOptions({ form }: { form: GenerationFormApi }) {
   return (
     <fieldset className="flex flex-col gap-3">
@@ -480,7 +485,8 @@ function ReportOptions({ form }: { form: GenerationFormApi }) {
       </form.Field>
       <p className="text-xs text-muted-foreground">
         Attendance and activities appear when configured and approved. A chosen
-        student is never silently excluded. Maximum 500 students per PDF.
+        student is never silently excluded. Maximum{" "}
+        {MAX_DOCUMENT_SOURCE_ITEMS.toLocaleString("en-IN")} students per PDF.
       </p>
     </fieldset>
   );
@@ -512,14 +518,10 @@ function GenerationActions({
             <DocumentNotice error>{values.error}</DocumentNotice>
           )}
           <CreatePdfButton
-            permission={{
-              schoolId: scope.schoolId,
-              action: SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS,
-            }}
             disabled={submitting || !canSubmit}
-            running={submitting ? values.mode : null}
-            onCreate={(mode) => {
-              form.setFieldValue("mode", mode);
+            running={submitting && values.mode === "generate"}
+            onCreate={() => {
+              form.setFieldValue("mode", "generate");
               void form.handleSubmit();
             }}
           />
@@ -533,12 +535,19 @@ function GenerationActions({
               ? "Preparing preview…"
               : "Preview document"}
           </DocumentButton>
-          {values.generatedId && (
-            <GenerationSuccess
+          {values.job && (
+            <DocumentJobTracker
+              key={values.job.id}
               schoolId={scope.schoolId}
-              artifactId={values.generatedId}
-              documentType={documentType}
-              onHistory={onHistory}
+              job={values.job}
+              ready={(artifactId) => (
+                <GenerationReadyActions
+                  schoolId={scope.schoolId}
+                  artifactId={artifactId}
+                  documentType={documentType}
+                  onHistory={onHistory}
+                />
+              )}
             />
           )}
         </div>
@@ -691,7 +700,11 @@ function ExamSelector({
     />
   );
 }
-function GenerationSuccess({
+/**
+ * What a ready PDF offers: its download (for people who may download
+ * documents) and the way to history.
+ */
+function GenerationReadyActions({
   schoolId,
   artifactId,
   documentType,
@@ -703,101 +716,50 @@ function GenerationSuccess({
   onHistory: () => void;
 }) {
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
-      <p role="status" className="flex items-center gap-2 text-sm font-medium">
-        <CheckCircle2 className="size-4" />
-        Your PDF is ready
-      </p>
-      <DocumentPermission
+    <DocumentPermission
+      schoolId={schoolId}
+      action={SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS}
+      fallback={
+        <p className="text-xs text-muted-foreground">
+          Your account cannot download documents. Ask a school manager for
+          the PDF.
+        </p>
+      }
+    >
+      <DocumentDownload
         schoolId={schoolId}
-        action={SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS}
-      >
-        <DocumentDownload
-          schoolId={schoolId}
-          artifactId={artifactId}
-          documentType={documentType}
-          label="Download again"
-        />
-        <DocumentButton type="button" variant="ghost" onClick={onHistory}>
-          View document history
-          <ArrowRight />
-        </DocumentButton>
-      </DocumentPermission>
-    </div>
+        artifactId={artifactId}
+        documentType={documentType}
+      />
+      <DocumentButton type="button" variant="ghost" onClick={onHistory}>
+        View document history
+        <ArrowRight />
+      </DocumentButton>
+    </DocumentPermission>
   );
 }
-/** The main button of a generation dialog. With the permission to download
- * documents it reads "Download PDF" and creates the PDF and starts its download
- * in one click; without it, "Create PDF" only creates it (the download would be
- * refused). It never waits for a preview. */
+/**
+ * The main button of a generation dialog: starts the PDF job. The PDF is
+ * created in the background (up to 1,500 documents), so its download is
+ * offered once it is ready (`DocumentJobTracker`). It never waits for a
+ * preview.
+ */
 export function CreatePdfButton({
-  permission,
   disabled,
   running,
   onCreate,
 }: {
-  permission: {
-    schoolId: string;
-    action:
-      | typeof SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS
-      | typeof SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS;
-  };
   disabled: boolean;
-  /** The mode being submitted, or null when nothing is. */
-  running: GenerationMode | null;
-  onCreate: (mode: "generate" | "download") => void;
+  /** Whether the request that starts the job is being sent. */
+  running: boolean;
+  onCreate: () => void;
 }) {
-  const download = (
-    <DocumentButton
-      type="button"
-      disabled={disabled}
-      onClick={() => onCreate("download")}
-    >
+  return (
+    <DocumentButton type="button" disabled={disabled} onClick={onCreate}>
       <FileDown />
-      {running === "download" ? "Creating PDF…" : "Download PDF"}
+      {running ? "Starting PDF…" : "Create PDF"}
     </DocumentButton>
   );
-  return (
-    <DocumentPermission
-      schoolId={permission.schoolId}
-      action={permission.action}
-      fallback={
-        <DocumentButton
-          type="button"
-          disabled={disabled}
-          onClick={() => onCreate("generate")}
-        >
-          <FileDown />
-          {running === "generate" ? "Creating PDF…" : "Create PDF"}
-        </DocumentButton>
-      }
-      // Usually already answered (the history tab asks the same); until then
-      // the button holds its place without acting on an unknown permission.
-      pending={
-        <DocumentButton type="button" disabled>
-          <FileDown />
-          Download PDF
-        </DocumentButton>
-      }
-    >
-      {download}
-    </DocumentPermission>
-  );
-}
-/** Starts the download of a PDF the dialog just created, returning the error
- * to show ("" when it started). The PDF is already saved, so the error says
- * so: it stays in history and the "Download again" button retries. */
-export async function downloadCreatedDocument(artifact: {
-  schoolId: string;
-  artifactId: string;
-  documentType: DocumentType;
-}) {
-  try {
-    await downloadDocument(artifact);
-    return "";
-  } catch (error) {
-    return `The PDF was created, but its download did not start: ${error instanceof Error ? error.message : "download unavailable"}`;
-  }
 }
 /** Asks for a fresh short-lived URL and navigates to it. The URL is served as
  * an attachment, so the browser downloads it and the page stays. */

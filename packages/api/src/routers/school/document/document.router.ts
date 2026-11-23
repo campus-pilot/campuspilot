@@ -11,8 +11,8 @@ import { schoolTable } from "@campuspilot/db/schema/school";
 import { SCHOOL_ACTIONS } from "@campuspilot/opa/policies/school";
 import { o, protectedProcedure } from "../../../index";
 import { rpcError, toRpcError } from "../../../errors";
-import { assertPermission } from "../../../permissions/authorization";
-import { assertSchoolFeatureEnabled } from "../../../feature-flags/feature-flags.service";
+import { assertPermission, checkPermissions } from "../../../permissions/authorization";
+import { assertSchoolFeatureEnabled, isSchoolFeatureEnabled } from "../../../feature-flags/feature-flags.service";
 import {
   createNextPageCursor,
   createPaginatedResult,
@@ -25,7 +25,7 @@ import {
 } from "./document.catalog";
 import {
   combineDocuments,
-  convertDocumentPdf,
+  documentsPerSheet,
   renderDocuments,
 } from "./document.render";
 import {
@@ -34,8 +34,9 @@ import {
   persistDocumentObject,
 } from "./document.storage";
 import { requireSchoolFeature } from "../../../permissions/feature";
-import { buildDocumentContexts } from "./document.context";
-import { buildFinanceDocumentContexts } from "./finance-document.context";
+import { DocumentImageError, embedDocumentImages } from "./document.images";
+import { resolveDocumentSource } from "./document.source";
+import { getDocumentJob, listDocumentJobs, startDocumentGeneration } from "./document.jobs";
 import { getSelectedDocumentTemplate as getTemplate } from "./document.selected-template";
 import { getTemplateRevision, listTemplateRevisions } from "./document.template-revisions";
 import { withPreviewConversionSlot } from "./document.preview-slots";
@@ -86,6 +87,97 @@ function requireSourceTypePermission(
     },
   );
 }
+type GeneratorDocumentType = Exclude<dto.DocumentType, dto.TemplateOnlyDocumentType>;
+const GENERATOR_DOCUMENT_TYPES = dto.documentTypeSchema.options.filter(
+  (type): type is GeneratorDocumentType => !(dto.TEMPLATE_ONLY_DOCUMENT_TYPES as readonly string[]).includes(type),
+);
+/**
+ * The reads of a document type's source data (its template and the records
+ * it prints), checked besides its generate action. Decided by the type alone
+ * (no source field changes it), so starting, reading and listing jobs share
+ * one rule.
+ */
+function sourceReadActions(type: dto.DocumentType) {
+  if (isFinanceDocument(type))
+    return [
+      SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES,
+      SCHOOL_ACTIONS.READ_SESSION_FINANCE,
+      SCHOOL_ACTIONS.READ_ADMISSION_LEDGER,
+    ];
+  const sourceReads =
+    type === "timetable"
+      ? [SCHOOL_ACTIONS.READ_EXAM_TIMETABLE, SCHOOL_ACTIONS.READ_EXAMS]
+      : type === "report_card"
+        ? [SCHOOL_ACTIONS.READ_STUDENT, SCHOOL_ACTIONS.READ_EXAM_RESULTS, SCHOOL_ACTIONS.READ_EXAMS, SCHOOL_ACTIONS.READ_EXAM_PLANS]
+        : type === "admit_card"
+          ? [SCHOOL_ACTIONS.READ_STUDENT, SCHOOL_ACTIONS.READ_EXAM_TIMETABLE, SCHOOL_ACTIONS.READ_EXAMS]
+          : [SCHOOL_ACTIONS.READ_STUDENT];
+  return [
+    SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES,
+    SCHOOL_ACTIONS.READ_SESSION,
+    SCHOOL_ACTIONS.READ_CLASS,
+    ...sourceReads,
+  ];
+}
+/** Every action starting a document of `type` needs: its generate action and its source reads. */
+function startActions(type: dto.DocumentType) {
+  return [
+    isFinanceDocument(type) ? SCHOOL_ACTIONS.GENERATE_FINANCE_DOCUMENTS : SCHOOL_ACTIONS.GENERATE_DOCUMENTS,
+    ...sourceReadActions(type),
+  ];
+}
+/**
+ * Reading a job needs what starting one of its type needs (`startActions`)
+ * and its type's feature: a job says what was exported, so nobody reads one
+ * they could not have started.
+ */
+const requireJobPermission = o.middleware<Record<never, never>, z.infer<typeof dto.documentJobScopeSchema>>(
+  async ({ context, next, signal }, input) => {
+    for (const action of startActions(input.documentType))
+      await assertPermission(context, { action, resource: { kind: "school", schoolId: input.schoolId } }, signal);
+    await assertSchoolFeatureEnabled(context.db, input.schoolId, dto.DOCUMENT_TYPE_FEATURE[input.documentType]);
+    return next();
+  },
+);
+/** The generator types of a domain the caller could start (permissions and the type's feature). */
+async function startableDocumentTypes(
+  context: Parameters<typeof assertPermission>[0],
+  input: { schoolId: string; documentDomain: "academic" | "finance" | "all" },
+  signal?: AbortSignal,
+): Promise<GeneratorDocumentType[]> {
+  const candidates = GENERATOR_DOCUMENT_TYPES.filter((type) =>
+    input.documentDomain === "all" ? true : (input.documentDomain === "finance") === isFinanceDocument(type),
+  );
+  // One OPA round for every action of every candidate type.
+  const actions = [...new Set(candidates.flatMap(startActions))];
+  const results = await checkPermissions(
+    context,
+    actions.map((action) => ({ action, resource: { kind: "school" as const, schoolId: input.schoolId } })) as Parameters<typeof checkPermissions>[1],
+    signal,
+  );
+  const granted = new Set(actions.filter((_action, index) => results[index]));
+  const allowed = candidates.filter((type) => startActions(type).every((action) => granted.has(action)));
+  const features = new Map<string, boolean>();
+  const startable: GeneratorDocumentType[] = [];
+  for (const type of allowed) {
+    const feature = dto.DOCUMENT_TYPE_FEATURE[type];
+    // A database error surfaces; only a feature that is off leaves its types out.
+    if (!features.has(feature)) features.set(feature, await isSchoolFeatureEnabled(context.db, input.schoolId, feature));
+    if (features.get(feature)) startable.push(type);
+  }
+  return startable;
+}
+/** Listing jobs needs the history permission of every domain listed, as listing their PDFs does. */
+const requireJobListPermission = o.middleware<Record<never, never>, z.infer<typeof dto.listDocumentJobsSchema>>(
+  async ({ context, next, signal }, input) => {
+    const actions = input.documentDomain === "all"
+      ? [SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS]
+      : [input.documentDomain === "finance" ? SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS : SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS];
+    for (const action of actions)
+      await assertPermission(context, { action, resource: { kind: "school", schoolId: input.schoolId } }, signal);
+    return next();
+  },
+);
 const requireArtifactListPermission = o.middleware<Record<never, never>, z.infer<typeof dto.listArtifactsSchema>>(
   async ({ context, next, signal }, input) => {
     const domain = input.filters.documentDomain;
@@ -239,45 +331,20 @@ const requireSourcePermissions = o.middleware<
   Record<never, never>,
   z.infer<typeof dto.generateDocumentSchema>
 >(async ({ context, next, signal }, input) => {
-  if (isFinanceDocument(input.source.documentType)) {
-    for (const action of [
-      SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES,
-      SCHOOL_ACTIONS.READ_SESSION_FINANCE,
-      SCHOOL_ACTIONS.READ_ADMISSION_LEDGER,
-    ]) await assertPermission(context, { action, resource: { kind: "school", schoolId: input.schoolId } }, signal);
-    return next();
-  }
-  const actions =
-    input.source.documentType === "timetable"
-      ? [SCHOOL_ACTIONS.READ_EXAM_TIMETABLE, SCHOOL_ACTIONS.READ_EXAMS]
-      : input.source.documentType === "report_card"
-        ? [
-            SCHOOL_ACTIONS.READ_STUDENT,
-            SCHOOL_ACTIONS.READ_EXAM_RESULTS,
-            SCHOOL_ACTIONS.READ_EXAMS,
-            SCHOOL_ACTIONS.READ_EXAM_PLANS,
-          ]
-        : input.source.documentType === "admit_card"
-          ? [
-              SCHOOL_ACTIONS.READ_STUDENT,
-              SCHOOL_ACTIONS.READ_EXAM_TIMETABLE,
-              SCHOOL_ACTIONS.READ_EXAMS,
-            ]
-          : [SCHOOL_ACTIONS.READ_STUDENT];
-  for (const action of [
-    SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES,
-    SCHOOL_ACTIONS.READ_SESSION,
-    SCHOOL_ACTIONS.READ_CLASS,
-    ...actions,
-  ])
-    await assertPermission(
-      context,
-      { action, resource: { kind: "school", schoolId: input.schoolId } },
-      signal,
-    );
+  // The generate action itself is checked by `requireSourceTypePermission`.
+  for (const action of sourceReadActions(input.source.documentType))
+    await assertPermission(context, { action, resource: { kind: "school", schoolId: input.schoolId } }, signal);
   return next();
 });
-async function renderSelection(
+/**
+ * A preview renders a sample, not the whole selection: the first documents,
+ * enough to fill two physical sheets (four half-A4 documents, sixteen
+ * student IDs, two of anything else). Every context is still built (one
+ * repeatable-read transaction), so the counts, warnings and the statement
+ * review hash cover the whole selection, but only the sample's images are
+ * read and only the sample is rendered.
+ */
+async function previewSelection(
   db: Database,
   input: z.infer<typeof dto.generateDocumentSchema>,
 ) {
@@ -286,18 +353,24 @@ async function renderSelection(
     { schoolId: input.schoolId, documentType: input.source.documentType },
     input.templateRevisionId,
   );
-  if (isFinanceDocument(input.source.documentType)) {
-    const data = await db.transaction(
-      (tx) => buildFinanceDocumentContexts(tx, input.schoolId, input.source as Extract<dto.DocumentSource, { documentType: "bill" | "receipt" | "statement" }>),
-      { isolationLevel: "repeatable read", accessMode: "read only" },
-    );
-    return { ...data, studentIds: [] as string[], recipientCount: data.contexts.length, warnings: [] as string[], template, html: combineDocuments(renderDocuments(template.content, data.contexts), input.source.documentType, template.row.pageSize) };
+  const data = await resolveDocumentSource(db, input.schoolId, input.source, { images: "reference" });
+  const sampleSize = 2 * documentsPerSheet(input.source.documentType, template.row.pageSize);
+  let sample: object[];
+  try {
+    sample = await embedDocumentImages(data.contexts.slice(0, sampleSize));
+  } catch (error) {
+    if (error instanceof DocumentImageError)
+      throw rpcError.badRequest(`A photo or the school logo ${error.message}. Upload it again as a PNG, JPEG or WebP image of at most 5 MB.`);
+    throw error;
   }
-  const data = await db.transaction(
-    (tx) => buildDocumentContexts(tx, input.schoolId, input.source as Exclude<dto.DocumentSource, { documentType: "bill" | "receipt" | "statement" }>),
-    { isolationLevel: "repeatable read", accessMode: "read only" },
-  );
-  return { ...data, recipientCount: data.studentIds.length, financeSource: null, reviewHash: null, template, html: combineDocuments(renderDocuments(template.content, data.contexts), input.source.documentType, template.row.pageSize) };
+  return {
+    html: combineDocuments(renderDocuments(template.content, sample), input.source.documentType, template.row.pageSize),
+    studentCount: isFinanceDocument(input.source.documentType) ? data.contexts.length : data.studentIds.length,
+    documentCount: data.contexts.length,
+    sampleCount: sample.length,
+    warnings: data.warnings,
+    reviewHash: data.reviewHash,
+  };
 }
 export const schoolDocumentRouter = {
   listMarketplaceTemplates: protectedProcedure
@@ -726,7 +799,7 @@ export const schoolDocumentRouter = {
     .route(
       route(
         "Preview a document export",
-        "Build authorized live school contexts and preview the selected template revision before generating a PDF. Requires approved results for report cards.",
+        "Build authorized live school contexts and preview the selected template revision before generating a PDF. The HTML shows the first documents only (two printed sheets); the counts, warnings and the statement reviewHash cover the whole selection. Requires approved results for report cards.",
       ),
     )
     .meta({
@@ -747,13 +820,7 @@ export const schoolDocumentRouter = {
     .output(dto.previewOutputSchema)
     .handler(async ({ context, input }) => {
       try {
-        const data = await renderSelection(context.db, input);
-        return {
-          html: data.html,
-          studentCount: data.recipientCount,
-          warnings: data.warnings,
-          reviewHash: data.reviewHash,
-        };
+        return await previewSelection(context.db, input);
       } catch (error) {
         throw toRpcError(error);
       }
@@ -761,8 +828,8 @@ export const schoolDocumentRouter = {
   generateDocument: protectedProcedure
     .route(
       route(
-        "Generate a school PDF artifact",
-        "Render the selected template against independently validated school data, convert with Gotenberg, and persist the PDF in S3 with an immutable database reference and template provenance.",
+        "Generate a school PDF",
+        "Queue a PDF of the selected template revision; returns the job at once. Poll getDocumentGenerationJob until succeeded or failed.",
       ),
     )
     .meta({
@@ -780,59 +847,68 @@ export const schoolDocumentRouter = {
     // MCP catalog records it and the tool is not offered to a school without it.
     .use(requireSchoolFeature(dto.GENERATOR_DOCUMENT_FEATURE))
     .use(requireSourcePermissions)
-    .output(
-      z.object({
-        artifact: dto.artifactDtoSchema,
-        warnings: z.array(z.string()),
-      }),
+    .output(dto.generateDocumentOutputSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        const job = await startDocumentGeneration(context.db, {
+          schoolId: input.schoolId,
+          requestedBy: context.session.user.id,
+          source: input.source,
+          templateRevisionId: input.templateRevisionId,
+        });
+        return { jobId: job.id, job };
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+  getDocumentGenerationJob: protectedProcedure
+    .route(
+      route(
+        "PDF job status",
+        "Status of a generateDocument job: queued, running, succeeded (download artifactId with getDocumentDownload) or failed (errorMessage).",
+      ),
     )
+    .meta({
+      mcp: {
+        exposure: "core",
+        access: "read",
+        destructive: false,
+        module: "documents",
+      },
+    })
+    .input(dto.documentJobScopeSchema)
+    .use(requireJobPermission)
+    .use(requireSchoolFeature(dto.GENERATOR_DOCUMENT_FEATURE))
+    .output(dto.documentGenerationJobDtoSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        return await getDocumentJob(context.db, input);
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+  listDocumentGenerationJobs: protectedProcedure
+    .route(
+      route(
+        "List PDF generation jobs in progress",
+        "List a session's queued and running PDF jobs and those that failed in the last 7 days, newest first, of the document types the caller could start. Jobs that succeeded are listed by listDocumentArtifacts as their PDF.",
+      ),
+    )
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "read",
+        destructive: false,
+        module: "documents",
+      },
+    })
+    .input(dto.listDocumentJobsSchema)
+    .use(requireJobListPermission)
+    .use(requireSchoolFeature(dto.GENERATOR_DOCUMENT_FEATURE))
+    .output(dto.listDocumentJobsOutputSchema)
     .handler(async ({ context, input, signal }) => {
       try {
-        const data = await renderSelection(context.db, input);
-        if (input.source.documentType === "statement") {
-          if (!input.source.expectedReviewHash)
-            throw rpcError.badRequest("Preview the statement before generating it.");
-          if (input.source.expectedReviewHash !== data.reviewHash)
-            throw rpcError.conflict("The statement changed after preview. Preview it again before generating.");
-        }
-        const bytes = await convertDocumentPdf(
-          data.html,
-          input.source.documentType,
-          signal,
-        );
-        const id = generateId("artifact");
-        const artifact = await persistDocumentObject(
-          context.db,
-          {
-            id,
-            schoolId: input.schoolId,
-            kind: "pdf",
-            documentType: input.source.documentType,
-            name: data.name,
-            s3Key: `schools/${input.schoolId}/documents/${id}.pdf`,
-            contentType: "application/pdf",
-            pageSize: data.template.row.pageSize,
-            templateRevisionId: data.template.row.id,
-            sessionId: input.source.sessionId,
-            examSlug: "examSlug" in input.source ? input.source.examSlug : null,
-            classId:
-              "classId" in input.source ? (input.source.classId ?? null) : null,
-            studentIds: data.studentIds,
-            studentCount: data.studentIds.length,
-            financeSource: data.financeSource,
-            generationOptions:
-              input.source.documentType === "report_card"
-                ? {
-                    reportSections: input.source.reportSections,
-                    resultPolicy: input.source.resultPolicy,
-                  }
-                : {},
-            createdBy: context.session.user.id,
-          },
-          bytes,
-          async (_tx, row) => serialize(row, data.template.row.name),
-        );
-        return { artifact, warnings: data.warnings };
+        return await listDocumentJobs(context.db, input, await startableDocumentTypes(context, input, signal));
       } catch (error) {
         throw toRpcError(error);
       }

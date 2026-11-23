@@ -9,12 +9,17 @@ import {
   dataMigrationWorkflow,
 } from '@campuspilot/api/workflows/data-migration';
 import {
+  documentGenerationControlService,
+  documentGenerationObject,
+} from '@campuspilot/api/workflows/document-generation';
+import {
   questionPaperControlService,
   questionPaperGenerationWorkflow,
 } from '@campuspilot/api/workflows/question-paper';
 import { configureQuestionPaperFigureRoute, configureQuestionPaperModel } from '@campuspilot/api/workflows/question-paper/model';
 import { imageDerivativeControlService } from '@campuspilot/api/workflows/image-derivatives';
-import { leadAlertWorkflow, leadControlService } from '@campuspilot/api/workflows/lead-alert';
+import { leadAlertWorkflow, leadControlService, schoolOnboardingAlertWorkflow } from '@campuspilot/api/workflows/lead-alert';
+import { schoolSetupControlService, schoolSetupWorkflow } from '@campuspilot/api/workflows/school-setup';
 import {
   notificationControlService,
   notificationDispatchWorkflow,
@@ -61,9 +66,14 @@ export function startWorker() {
       notificationSenderObject,
       questionPaperControlService,
       questionPaperGenerationWorkflow,
+      documentGenerationControlService,
+      documentGenerationObject,
       imageDerivativeControlService,
       leadControlService,
       leadAlertWorkflow,
+      schoolOnboardingAlertWorkflow,
+      schoolSetupControlService,
+      schoolSetupWorkflow,
       ...createAssistantWorkerServices(),
     ],
   });

@@ -3,8 +3,8 @@ import { getRestateClient, rpc } from '@campuspilot/restate/client';
 import * as restate from '@restatedev/restate-sdk';
 
 import { signWorkerControlCall } from '../control-auth';
-import { LEAD_CONTROL_SERVICE_NAME, leadAlertIdempotencyKey, type LeadControlHandler } from './constants';
-import type { LeadAlertInput } from './input';
+import { LEAD_CONTROL_SERVICE_NAME, leadAlertIdempotencyKey, schoolOnboardingAlertIdempotencyKey, type LeadControlHandler } from './constants';
+import type { LeadAlertInput, SchoolOnboardingAlertInput } from './input';
 
 /**
  * Declares, for typing only, the handlers of the worker's `LeadControl`
@@ -17,6 +17,9 @@ const declareControlService = () =>
     name: LEAD_CONTROL_SERVICE_NAME,
     handlers: {
       scheduleAlert: async (_ctx: restate.Context, _input: LeadAlertInput): Promise<{ invocationId: string }> => {
+        throw new Error('Declared for typing only.');
+      },
+      scheduleOnboardingAlert: async (_ctx: restate.Context, _input: SchoolOnboardingAlertInput): Promise<{ invocationId: string }> => {
         throw new Error('Declared for typing only.');
       },
     },
@@ -42,5 +45,21 @@ export async function sendLeadAlertSchedule(leadId: string) {
   const sent = await getRestateClient()
     .serviceSendClient<LeadControlService>({ name: LEAD_CONTROL_SERVICE_NAME })
     .scheduleAlert(input, rpc.sendOpts<LeadAlertInput>({ idempotencyKey: leadAlertIdempotencyKey(leadId), headers, timeout: SEND_TIMEOUT_MS }));
+  return { invocationId: sent.invocationId };
+}
+
+/** As {@link sendLeadAlertSchedule}, for a School Onboarding submission's alert. */
+export async function sendOnboardingAlertSchedule(requestId: string) {
+  const secret = env.WORKER_CONTROL_SECRET;
+  if (!secret) throw new Error('WORKER_CONTROL_SECRET is not set, so worker control calls cannot be signed.');
+  const handler: LeadControlHandler = 'scheduleOnboardingAlert';
+  const input: SchoolOnboardingAlertInput = { requestId };
+  const headers = signWorkerControlCall(secret, { service: LEAD_CONTROL_SERVICE_NAME, handler }, input);
+  const sent = await getRestateClient()
+    .serviceSendClient<LeadControlService>({ name: LEAD_CONTROL_SERVICE_NAME })
+    .scheduleOnboardingAlert(
+      input,
+      rpc.sendOpts<SchoolOnboardingAlertInput>({ idempotencyKey: schoolOnboardingAlertIdempotencyKey(requestId), headers, timeout: SEND_TIMEOUT_MS }),
+    );
   return { invocationId: sent.invocationId };
 }

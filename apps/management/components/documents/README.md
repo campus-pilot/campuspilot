@@ -40,6 +40,7 @@ for the management implementation.
 | `document-export-link.tsx` | Contextual links from source-domain screens into Documents |
 | `student-recipient-picker.tsx` | Searchable, paginated explicit-recipient selection that retains choices across searches |
 | `document-common.tsx` | Shared app-specific permission, cache, loading, error, and dirty-navigation helpers |
+| `document-job.tsx` | `useDocumentJob` (polls a generation job with `refetchInterval` until it ends) and `DocumentJobTracker` (progress, then the caller's ready actions) |
 
 Route files should remain thin adapters that parse route/search parameters and
 pass an explicit school/session/document scope to these components.
@@ -66,6 +67,10 @@ document HTML is shown: an iframe with an **empty** `sandbox`. Its options:
   template, catalog, and history are server state managed by TanStack Query.
 - Use a component `key` when a selected type or immutable revision needs a clean
   form baseline. Do not synchronize a new baseline into an open dirty form.
+- "Create PDF" starts a generation job; the dialog keeps the returned job in its
+  form and `DocumentJobTracker` polls it (no effect). The shared
+  `DocumentJobProgress` (`packages/components/src/documents/document-job-progress.tsx`)
+  presents it. History polls its job list and PDF list while a job is active.
 - The template editor's preview is a PDF query keyed by a hash of the source: typing
   re-renders after a 900 ms pause (or *Refresh preview now*), an assistant draft,
   footprint or print size at once, and the previous pages stay while the next one
