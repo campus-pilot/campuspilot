@@ -21,6 +21,7 @@ export const SYSTEM_ACTIONS = {
   READ_PLATFORM_STATS: 'system.platform.stats.read',
   READ_SCHOOL: 'system.school.read',
   READ_SCHOOL_FEATURE_FLAGS: 'system.school.feature_flags.read',
+  READ_SCHOOL_REGISTRATION_REQUESTS: 'system.school_registration_request.read',
   READ_SCHOOL_STATS: 'system.school.stats.read',
   RUN_DATA_MIGRATION: 'system.data_migration.run',
   SET_USER_PASSWORD: 'system.user.password.set',

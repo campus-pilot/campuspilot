@@ -589,6 +589,13 @@
       "when": 1795373017532,
       "tag": "0083_school-quick-papers",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1795462576623,
+      "tag": "0084_school-registration-request",
+      "breakpoints": true
     }
   ]
 }

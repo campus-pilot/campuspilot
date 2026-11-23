@@ -3,6 +3,7 @@ import { assistantUsageRouter } from "./assistant-usage/assistant-usage.router";
 import { dataMigrationRouter } from "./data-migration/data-migration.router";
 import { featureFlagsRouter } from "./feature-flags/feature-flags.router";
 import { leadRouter } from "./lead/lead.router";
+import { schoolRegistrationRequestRouter } from "./school-registration-request/school-registration-request.router";
 import { demoSchoolRouter } from "./demo-school/demo-school.router";
 import { oauthClientRouter } from "./oauth-client/oauth-client.router";
 import { schoolRouter } from "./school/school.router";
@@ -24,4 +25,5 @@ export const systemAdminRouter = {
   ...assistantAccessRouter,
   ...userRouter,
   ...leadRouter,
+  ...schoolRegistrationRequestRouter,
 };

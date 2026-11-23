@@ -7,6 +7,7 @@ import {
   Building2,
   ChartNoAxesColumn,
   ClipboardList,
+  ClipboardPen,
   DatabaseZap,
   House,
   IndianRupee,
@@ -28,6 +29,7 @@ import { oauthClientsPage } from './oauth-clients/_route';
 import { organizationsPage } from './organizations/_route';
 import { platformUsagePage } from './platform-usage/_route';
 import { pricingPage } from './pricing/_route';
+import { schoolOnboardingPage } from './school-onboarding/_route';
 import { schoolRequestsPage } from './school-requests/_route';
 import { usersPage } from './users/_route';
 
@@ -44,6 +46,13 @@ const navigation: AppShellNavigationEntry[] = [
         label: 'Demo requests',
         href: '/demo-requests',
         icon: ClipboardList,
+      },
+      {
+        type: 'item',
+        id: 'school-onboarding',
+        label: 'School onboarding',
+        href: '/school-onboarding',
+        icon: ClipboardPen,
       },
       {
         type: 'item',
@@ -115,6 +124,7 @@ const navigation: AppShellNavigationEntry[] = [
 const pages = [
   homePage,
   demoRequestsPage,
+  schoolOnboardingPage,
   schoolRequestsPage,
   organizationsPage,
   usersPage,

@@ -23,3 +23,4 @@ export * from "./notice";
 export * from "./assistant";
 export * from "./exam-question-paper";
 export * from "./lead";
+export * from "./school-registration-request";

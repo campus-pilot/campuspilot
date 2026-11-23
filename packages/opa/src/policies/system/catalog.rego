@@ -119,6 +119,14 @@ actions contains {
   "resourceKind": "system",
 } if { true }
 
+# School Onboarding form submissions (the website's /onboarding page):
+# reading them shows a school's contact details, logo and voice note.
+actions contains {
+  "id": "system.school_registration_request.read",
+  "key": "READ_SCHOOL_REGISTRATION_REQUESTS",
+  "resourceKind": "system",
+} if { true }
+
 # Per-school platform feature flags (docs/feature-flags.md). Reading a
 # school's flags is separate from changing them, which switches product
 # areas such as the Cadet Portal on or off for the whole school.
