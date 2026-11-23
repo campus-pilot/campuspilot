@@ -629,8 +629,8 @@ export const schoolDocumentRouter = {
   generateDocument: protectedProcedure
     .route(
       route(
-        "Generate a school PDF artifact",
-        "Validate the selection against the selected template revision and queue a PDF job; returns at once with the job. The PDF is rendered in batches in the background (up to 1,500 documents). Poll getDocumentGenerationJob with the jobId until status is succeeded (then download artifactId with getDocumentDownload) or failed (errorMessage says why).",
+        "Generate a school PDF",
+        "Queue a PDF of the selected template revision; returns the job at once. Poll getDocumentGenerationJob until succeeded or failed.",
       ),
     )
     .meta({
@@ -665,8 +665,8 @@ export const schoolDocumentRouter = {
   getDocumentGenerationJob: protectedProcedure
     .route(
       route(
-        "Check a PDF generation job",
-        "Read the status and progress of a job started by generateDocument: queued, running (batchesDone of batchCount), succeeded (artifactId is the PDF; download it with getDocumentDownload) or failed (errorMessage says why). Send the job's documentType.",
+        "PDF job status",
+        "Status of a generateDocument job: queued, running, succeeded (download artifactId with getDocumentDownload) or failed (errorMessage).",
       ),
     )
     .meta({

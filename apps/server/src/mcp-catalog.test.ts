@@ -219,7 +219,9 @@ const HIDDEN_TOOLS = [
  * is paid in model tokens on every conversation, so growing it must be a
  * deliberate decision.
  */
-const CORE_LISTING_BUDGET_CHARS = 38_000;
+// 38,500 since getDocumentGenerationJob joined core (37 tools; packages/api/AGENTS.md):
+// tightening the generation descriptions could not bring the listing back under 38,000.
+const CORE_LISTING_BUDGET_CHARS = 38_500;
 
 let appRouter: AnyRouter;
 let catalog: McpCatalog;

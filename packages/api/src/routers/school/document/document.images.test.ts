@@ -112,7 +112,8 @@ describe('CSS may load only what an image may (review S4)', () => {
       {},
       [asset],
     );
-    expect(html).toContain('color: green');
+    // The serialiser may drop the space after the colon: assert the declaration, not its spacing.
+    expect(html).toMatch(/style="color:\s*green"/);
     expect(html).not.toContain('file:');
     expect(html).toContain(`url(${asset})`);
   });
@@ -140,8 +141,11 @@ describe('CSS escapes cannot change what is loaded (review round 2)', () => {
 
   it('drops an at-rule whose name is escaped (@i\\mport)', () => {
     const html = sheet('@i\\mport "x.css";.a{color:red}');
-    expect(html).not.toContain('mport');
-    expect(html).toContain('color:red');
+    // The template's own <style> (the layout's comes after and holds "!important").
+    const templateCss = /<style>([\s\S]*?)<\/style>/.exec(html)![1]!;
+    expect(templateCss).not.toContain('@');
+    expect(templateCss).not.toContain('x.css');
+    expect(templateCss).toContain('color:red');
   });
 });
 

@@ -152,21 +152,27 @@ describe('document generation jobs (batched, in the worker)', () => {
     expect(await pageCount(merged)).toBe(await pageCount(single));
     expect(await pageCount(merged)).toBe(3);
 
-    const halfDeps = { ...defaultDocumentGenerationDeps(), batchLimits: { ...DOCUMENT_BATCH_LIMITS, maxDocuments: 3 } };
-    const admit = await manager.school.generateDocument({
-      schoolId,
-      templateRevisionId: admitRevision,
-      source: { documentType: 'admit_card', sessionId, classId, examSlug: 'midterm', studentIds: studentIds.slice(0, 5) },
-    });
-    expect(await runDocumentJob(admit.jobId, halfDeps)).toMatchObject({ status: 'succeeded' });
-    const admitJob = await readDocumentJob(admit.jobId);
-    // Three documents per batch would split a sheet: batches hold two (one sheet), the last one.
-    expect(admitJob.batchCount).toBe(3);
-    const [admitArtifact] = await db.select().from(artifactTable).where(eq(artifactTable.id, admitJob.artifactId));
-    expect(admitArtifact!.pageSize).toBe('half');
-    const halfContexts = (await buildDocumentContexts(db, schoolId, { documentType: 'admit_card', sessionId, classId, examSlug: 'midterm', studentIds: studentIds.slice(0, 5) })).contexts;
-    const halfSingle = await convertDocumentPdf(combineDocuments(renderDocuments('<div><p>{{student.name}}</p></div>', halfContexts), 'admit_card', 'half'), 'admit_card');
-    expect(await pageCount(await objectBytes(admitArtifact!.s3Key))).toBe(await pageCount(halfSingle));
+    // Five half-A4 documents are three sheets (2, 2, 1). With at most three
+    // documents per batch, a batch closes before a second full sheet (which
+    // would make four) and the last, partial sheet fits the second batch:
+    // batches of 2 and 3, never a split sheet. With at most two, every sheet
+    // is its own batch and the last batch is the partial sheet alone.
+    const admitSource = { documentType: 'admit_card' as const, sessionId, classId, examSlug: 'midterm', studentIds: studentIds.slice(0, 5) };
+    const halfContexts = (await buildDocumentContexts(db, schoolId, admitSource)).contexts;
+    const halfSingle = await pageCount(
+      await convertDocumentPdf(combineDocuments(renderDocuments('<div><p>{{student.name}}</p></div>', halfContexts), 'admit_card', 'half'), 'admit_card'),
+    );
+    expect(halfSingle).toBe(3);
+    for (const [maxDocuments, batches] of [[3, 2], [2, 3]] as const) {
+      const halfDeps = { ...defaultDocumentGenerationDeps(), batchLimits: { ...DOCUMENT_BATCH_LIMITS, maxDocuments } };
+      const admit = await manager.school.generateDocument({ schoolId, templateRevisionId: admitRevision, source: admitSource });
+      expect(await runDocumentJob(admit.jobId, halfDeps)).toMatchObject({ status: 'succeeded' });
+      const admitJob = await readDocumentJob(admit.jobId);
+      expect(admitJob.batchCount, `at most ${maxDocuments} per batch`).toBe(batches);
+      const [admitArtifact] = await db.select().from(artifactTable).where(eq(artifactTable.id, admitJob.artifactId));
+      expect(admitArtifact!.pageSize).toBe('half');
+      expect(await pageCount(await objectBytes(admitArtifact!.s3Key))).toBe(halfSingle);
+    }
   });
 
   it('sends the logo once per batch as an asset that the PDF draws', async () => {
