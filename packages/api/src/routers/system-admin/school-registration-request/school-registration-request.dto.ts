@@ -1,4 +1,5 @@
 import { entityIdSchema } from '@campuspilot/db/id';
+import { schoolSetupStatusEnum } from '@campuspilot/db/schema/school-setup';
 import { z } from 'zod';
 
 import { createListInputSchema, createPaginatedOutputSchema } from '../../../paginations';
@@ -26,6 +27,8 @@ export const schoolRegistrationRequestDtoSchema = z.object({
   sourcePath: z.string().nullable(),
   userAgent: z.string().nullable(),
   createdAt: z.date(),
+  /** The school setup started from this request: its status and, once created, the school. Null before a draft is saved. */
+  setup: z.object({ status: z.enum(schoolSetupStatusEnum.enumValues), schoolId: z.string().nullable() }).nullable(),
 });
 export type SchoolRegistrationRequestDto = z.infer<typeof schoolRegistrationRequestDtoSchema>;
 

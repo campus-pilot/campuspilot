@@ -436,3 +436,22 @@ test_only_admins_can_read_school_registration_requests if {
     "resource": {"kind": "system"},
   }
 }
+
+test_only_admins_can_manage_school_setups if {
+  authorization.allow with input as {
+    "action": "system.school_setup.manage",
+    "subject": {
+      "userId": "admin-1",
+      "roleAssignments": [{"role": "platform.admin", "scope": {"kind": "platform"}}],
+    },
+    "resource": {"kind": "system"},
+  }
+  not authorization.allow with input as {
+    "action": "system.school_setup.manage",
+    "subject": {
+      "userId": "user-2",
+      "roleAssignments": [{"role": "school.principal", "scope": {"kind": "school", "schoolId": "school-1"}}],
+    },
+    "resource": {"kind": "system"},
+  }
+}

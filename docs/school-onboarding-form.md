@@ -57,7 +57,8 @@ proof-of-work, the declared size, the multipart body, the answers
 (`schoolOnboardingSubmissionSchema`), returns the saved request for a known
 `submissionId` (browser retries reuse it), spends the solution, writes the
 files to S3 and inserts the row. A concurrent retry that loses the insert
-deletes its objects. Nothing is scheduled after the save (no WhatsApp alert).
+deletes its objects. The response depends on that insert only; the team's
+WhatsApp alert (below) is scheduled after it.
 
 ### Limits
 
@@ -82,6 +83,86 @@ the recorder's; the byte cap bounds what a caller who skips the page can send.
 bytes) and size. Files are private objects at
 `school-registration-requests/{id}/logo.{ext}` and `…/voice-note.{ext}`.
 Requests are not school data: the demo purge does not touch them.
+
+## WhatsApp alert
+
+Each submission alerts the team on WhatsApp, the same way demo requests do
+([Website leads](leads.md)): the request row is the alert's outbox
+(`alert_*` columns, committed `pending`), the API hands it to Restate after
+commit with a signed send to `LeadControl.scheduleOnboardingAlert`
+(`leads/school-onboarding.alert-outbox.ts`, re-sent by the API's 30 s sweep),
+and the worker's `schoolOnboardingAlert` workflow (one run per request, ever)
+sends the `school_onboarding_alert` template to `LEAD_ALERT_WHATSAPP_TO`,
+retrying for a day and recording `sent` or `failed` on the row. The template
+(Utility, English, named parameters `school`, `phone`, `email`, `classes`,
+`reference`; text in `workflows/lead-alert/constants.ts`) carries no logo or
+voice note: the admin page has those. Its text and parameters must match Meta.
+
+## Setting up the school
+
+From a submission's dialog in the admin app, **Start onboarding** opens
+`/school-onboarding/{requestId}/setup`, a wizard that turns the submission
+into a real school (`is_demo` false). Its steps (`SCHOOL_SETUP_WIZARD_STEPS`
+in `packages/api/src/school-setup/school-setup.contract.ts`): School (name,
+slug, address, registration number, whether to use the sent logo), Plan and
+trial (standing tier, a trial of N 28-day periods, Pro for one period by
+default), Features (per feature: follow the plan, on or off; the assistant's
+monthly limit), Session (April to March year and examinations, the guided
+setup's four terms by default), Classes (each with its sections and
+subjects, from the submission) and, last, People (the admin as manager; the
+form's contact as principal and owner).
+
+### Drafts
+
+`school_setup` holds one row per submission. The wizard saves the draft
+(`systemAdmin.saveSchoolSetupDraft`, `draft` JSONB and the step on screen)
+whenever the step changes and with **Save draft**, so the admin can leave and
+continue later; the dialog's button then reads **Continue onboarding**. A
+draft is editable while it is `draft` or `failed`.
+
+### Running it
+
+**Review and create** checks the draft with `schoolSetupReadySchema` (the
+same rules the API and the worker apply; problems show beside their fields
+and mark their steps), then a dialog lists everything that will be created.
+**Create school** calls `systemAdmin.startSchoolSetup`, which checks again
+(and that the slug is free), records the start (`queued`, `requested_by`,
+`start_requested_at`) and returns at once. Like a demo school
+([Demo schools](demo-school.md)) the start is an outbox entry handed over with
+a signed, idempotent send to the ingress-public `SchoolSetupControl.start`,
+which validates the row and starts the ingress-private `SchoolSetup`
+workflow (key `{setupId}.{attempt}`). The API's 30 s sweep
+(`school-setup.outbox.ts`) re-sends unaccepted starts, fails one Restate has
+not accepted within 10 minutes, and fails a run Restate paused or that ended
+without finishing.
+
+The workflow's steps (`SCHOOL_SETUP_RUN_STEPS`): `school` (the school row
+with its standing tier, the sent logo copied to `schools/{id}/logo/`),
+`plan` (`startTrialPeriod`, `setSchoolFeature` per adjustment), `session`
+(`createSchoolSessionRecord` with the examinations), `classes`
+(`createClassRecord`, each subject with one Written mode like the guided
+setup), `exam-plans` (every examination's plan for every class) and `people`
+(the admin as manager, then the principal: an existing account with the phone
+number, else the email, else a new account; principal role and
+`school.owner_user_id`). Each step is one transaction that locks the setup
+row, checks it is still this attempt's running setup, does its writes and
+records itself in `completed_steps` in the same transaction: a replay or a
+retry continues where it stopped and never creates anything twice. Before
+every step the worker re-checks, as the admin who started it (a `system-job`
+principal), that OPA still grants `system.school_setup.manage`.
+
+A new principal account gets **no password** in the worker (passwords never
+reach Restate's journal). The result screen offers **Issue the principal's
+password** (`school.issueMemberPassword`, shown once) when the principal has
+none; an existing account keeps its own. A failed setup shows its step and
+message with **Retry** (a new attempt from the saved draft) and **Edit the
+setup**; once the school exists, edits only affect the steps still to run.
+The page polls `getSchoolSetup` every 1.5 s while the setup is queued or
+running.
+
+Permissions: reading uses `system.school_registration_request.read`; saving
+and starting use `system.school_setup.manage` (platform admins). All three
+procedures are hidden from MCP.
 
 ## Admin
 

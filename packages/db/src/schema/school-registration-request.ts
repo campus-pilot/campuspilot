@@ -1,6 +1,8 @@
+import { sql } from "drizzle-orm";
 import { index, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 import { generateId } from "../id";
+import { leadAlertStatusEnum } from "./lead";
 
 /**
  * One submission of the website's School Onboarding form (`/onboarding`): a
@@ -15,8 +17,12 @@ import { generateId } from "../id";
  * media type and size are their own columns: a request has a logo exactly
  * when `logo_s3_key` is set, whatever the answers say.
  *
- * A request is not school data: it names no school row, and the demo purge
- * never touches it.
+ * The row is also the outbox of its WhatsApp alert to the CampusPilot team,
+ * as a lead is (`alert_*`, docs/leads.md): committed `pending`, handed to
+ * Restate after commit, and never waited for by the submission.
+ *
+ * A request is not school data: it names no school row (the school set up
+ * from it is on `school_setup`), and the demo purge never touches it.
  */
 export const schoolRegistrationRequestTable = pgTable(
   "school_registration_request",
@@ -47,10 +53,26 @@ export const schoolRegistrationRequestTable = pgTable(
     /** The submitting browser's user agent, truncated; for spotting abuse. */
     userAgent: text("user_agent"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    alertStatus: leadAlertStatusEnum("alert_status").notNull().default("pending"),
+    /** When Restate durably accepted the alert. Its own fact: accepted does not mean sent. */
+    alertHandedOverAt: timestamp("alert_handed_over_at", { withTimezone: true }),
+    /** Hand-over attempts of the alert, successful or not. */
+    alertHandoverAttempts: integer("alert_handover_attempts").notNull().default(0),
+    /** Safe summary of the last failed hand-over, shown while it is retried. */
+    alertLastHandoverError: text("alert_last_handover_error"),
+    /** When WhatsApp accepted the alert message. */
+    alertSentAt: timestamp("alert_sent_at", { withTimezone: true }),
+    /** The WhatsApp message id (`wamid`) of the sent alert. */
+    alertMessageId: text("alert_message_id"),
+    /** Safe reason the alert failed for good (no secrets). */
+    alertError: text("alert_error"),
   },
   (table) => [
     uniqueIndex("school_registration_request_submission_id_unique").on(table.submissionId),
     index("school_registration_request_created_at_idx").on(table.createdAt),
+    index("school_registration_request_alert_unsent_idx")
+      .on(table.createdAt)
+      .where(sql`${table.alertStatus} = 'pending' and ${table.alertHandedOverAt} is null`),
   ],
 );
 

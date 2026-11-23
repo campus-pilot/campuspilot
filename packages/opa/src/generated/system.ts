@@ -12,6 +12,7 @@ export const SYSTEM_ACTIONS = {
   LIST_SCHOOL_CREATION_REQUESTS: 'system.school_creation_request.list',
   LIST_SCHOOLS: 'system.school.list',
   LIST_USERS: 'system.user.list',
+  MANAGE_SCHOOL_SETUP: 'system.school_setup.manage',
   PURGE_DEMO_SCHOOL: 'system.school.demo.purge',
   READ_DATA_MIGRATIONS: 'system.data_migration.read',
   READ_DEMO_SCHOOL: 'system.school.demo.read',

@@ -127,6 +127,15 @@ actions contains {
   "resourceKind": "system",
 } if { true }
 
+# Setting up a real school from a School Onboarding submission: saving the
+# setup draft and running the SchoolSetup workflow, which creates the school,
+# its trial, feature adjustments, session, classes and staff accounts.
+actions contains {
+  "id": "system.school_setup.manage",
+  "key": "MANAGE_SCHOOL_SETUP",
+  "resourceKind": "system",
+} if { true }
+
 # Per-school platform feature flags (docs/feature-flags.md). Reading a
 # school's flags is separate from changing them, which switches product
 # areas such as the Cadet Portal on or off for the whole school.

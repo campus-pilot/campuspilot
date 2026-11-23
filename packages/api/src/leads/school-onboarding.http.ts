@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { PROOF_OF_WORK_HEADER } from './demo-request';
 import { claimAltchaSolution, verifyAltchaSolution } from './proof-of-work';
 import { SCHOOL_ONBOARDING_FORM_VERSION, schoolOnboardingSubmissionSchema } from './school-onboarding';
+import { handOffOnboardingAlert } from './school-onboarding.alert-outbox';
 import {
   MAX_SCHOOL_ONBOARDING_BODY_BYTES,
   OnboardingUploadError,
@@ -23,8 +24,9 @@ import {
  * The public School Onboarding route (no session), gated like the demo
  * request form: the browser solves the lead proof-of-work challenge and
  * sends the solution in the `x-altcha` header, and the route is rate limited
- * per IP (`apps/server/src/http.ts`). Nothing is scheduled after the save;
- * platform admins read requests in the admin app.
+ * per IP (`apps/server/src/http.ts`). The submission depends only on the
+ * insert; the team's WhatsApp alert is scheduled after it and may fail
+ * without failing the request. Platform admins read requests in the admin app.
  */
 
 /** Never log names, phone numbers or answers, only request ids and outcomes. */
@@ -73,7 +75,9 @@ function discardObjects(keys: string[]) {
  * 6. the solution is spent (Redis), else 400 `PROOF_OF_WORK_SPENT`;
  * 7. the files are written to S3 under a fresh request id, then the row is
  *    inserted. If a concurrent retry inserted first, this try's objects
- *    are discarded and the saved request returned.
+ *    are discarded and the saved request returned;
+ * 8. only then is the WhatsApp alert to the team scheduled, in the
+ *    background (`school-onboarding.alert-outbox.ts`).
  */
 export async function handleSchoolOnboardingSubmit(request: Request, deps: SchoolOnboardingHttpDeps): Promise<Response> {
   const verdict = verifyAltchaSolution(request.headers.get(PROOF_OF_WORK_HEADER));
@@ -150,5 +154,6 @@ export async function handleSchoolOnboardingSubmit(request: Request, deps: Schoo
     return Response.json({ requestId: winner.id }, { status: 201 });
   }
   log.info({ requestId, logo: logoKey !== null, voiceNote: voiceNoteKey !== null }, 'school-onboarding.created');
+  handOffOnboardingAlert(requestId, deps.db);
   return Response.json({ requestId }, { status: 201 });
 }

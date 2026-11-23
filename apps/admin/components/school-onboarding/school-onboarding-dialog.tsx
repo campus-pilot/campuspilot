@@ -2,7 +2,9 @@
 
 import { useQuery } from '@tanstack/react-query';
 import type { SchoolRegistrationRequestDto } from '@campuspilot/api/routers/system-admin/school-registration-request/school-registration-request.dto';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@campuspilot/ui/components/dialog';
+import { Button } from '@campuspilot/ui/components/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@campuspilot/ui/components/dialog';
+import Link from 'next/link';
 import { Skeleton } from '@campuspilot/ui/components/skeleton';
 import { orpc } from '@/lib/orpc';
 import { classAnswers, formatBytes, formatDuration, textAnswer, voiceNoteSeconds } from './onboarding-answers';
@@ -91,6 +93,29 @@ function Details({ request }: { request: SchoolRegistrationRequestDto }) {
   );
 }
 
+/**
+ * Where setting this school up stands, as the dialog's main action: start it,
+ * continue a saved draft or a failed run, follow a running one, or open the
+ * school it created.
+ */
+function SetupAction({ request }: { request: SchoolRegistrationRequestDto }) {
+  const href = `/school-onboarding/${request.id}/setup`;
+  const setup = request.setup;
+  if (setup?.status === 'succeeded' && setup.schoolId) {
+    return (
+      <Button asChild variant="outline">
+        <Link href={`/school/${setup.schoolId}`}>Open the school</Link>
+      </Button>
+    );
+  }
+  const label = !setup ? 'Start onboarding' : setup.status === 'draft' ? 'Continue onboarding' : setup.status === 'failed' ? 'Review the failed setup' : 'View setup progress';
+  return (
+    <Button asChild>
+      <Link href={href}>{label}</Link>
+    </Button>
+  );
+}
+
 /** One School Onboarding submission: its files, answers and classes. */
 export function SchoolOnboardingDialog({ request, onClose }: { request: SchoolRegistrationRequestDto | null; onClose: () => void }) {
   return (
@@ -101,6 +126,11 @@ export function SchoolOnboardingDialog({ request, onClose }: { request: SchoolRe
           <DialogDescription>{request ? `Received ${dateTimeFormatter.format(request.createdAt)}` : null}</DialogDescription>
         </DialogHeader>
         {request ? <Details request={request} /> : null}
+        {request ? (
+          <DialogFooter>
+            <SetupAction request={request} />
+          </DialogFooter>
+        ) : null}
       </DialogContent>
     </Dialog>
   );

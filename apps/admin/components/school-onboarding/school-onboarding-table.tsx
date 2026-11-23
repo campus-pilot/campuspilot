@@ -31,6 +31,14 @@ function Files({ request }: { request: SchoolRegistrationRequestDto }) {
   );
 }
 
+const SETUP_LABELS = { draft: 'Draft', queued: 'Queued', running: 'Running', succeeded: 'Set up', failed: 'Failed' } as const;
+
+function SetupStatus({ request }: { request: SchoolRegistrationRequestDto }) {
+  if (!request.setup) return <span className="text-muted-foreground">Not started</span>;
+  const { status } = request.setup;
+  return <Badge variant={status === 'failed' ? 'destructive' : status === 'succeeded' ? 'secondary' : 'outline'}>{SETUP_LABELS[status]}</Badge>;
+}
+
 const columns: DataTableColumnDef<SchoolRegistrationRequestDto>[] = [
   {
     accessorKey: 'createdAt',
@@ -52,6 +60,7 @@ const columns: DataTableColumnDef<SchoolRegistrationRequestDto>[] = [
   { id: 'phone', header: 'Phone', enableSorting: false, cell: ({ row }) => textAnswer(row.original, 'phone') ?? '—' },
   { id: 'classes', header: 'Classes', enableSorting: false, cell: ({ row }) => classAnswers(row.original).length },
   { id: 'files', header: 'Files', enableSorting: false, cell: ({ row }) => <Files request={row.original} /> },
+  { id: 'setup', header: 'Setup', enableSorting: false, cell: ({ row }) => <SetupStatus request={row.original} /> },
 ];
 
 function RequestRows({ controller, onSelect }: { controller: Controller; onSelect: (request: SchoolRegistrationRequestDto) => void }) {

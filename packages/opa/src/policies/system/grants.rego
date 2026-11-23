@@ -69,6 +69,11 @@ grants contains {
 
 grants contains {
   "role": "platform.admin",
+  "action": "system.school_setup.manage",
+} if { true }
+
+grants contains {
+  "role": "platform.admin",
   "action": "system.oauth_client.list",
 } if { true }
 

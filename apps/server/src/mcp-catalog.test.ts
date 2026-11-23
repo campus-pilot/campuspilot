@@ -113,6 +113,10 @@ const HIDDEN_TOOLS = [
   // School Onboarding submissions carry a school's contact details and recordings.
   'systemAdmin.listSchoolRegistrationRequests',
   'systemAdmin.getSchoolRegistrationRequestMedia',
+  // Setting up a school from a submission creates schools and accounts: a human decision.
+  'systemAdmin.getSchoolSetup',
+  'systemAdmin.saveSchoolSetupDraft',
+  'systemAdmin.startSchoolSetup',
   // Demo provisioning, credentials and purge stay human admin actions.
   'systemAdmin.listDemoClassCatalogue',
   'systemAdmin.createDemoSchool',

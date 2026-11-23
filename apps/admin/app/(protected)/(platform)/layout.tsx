@@ -30,6 +30,7 @@ import { organizationsPage } from './organizations/_route';
 import { platformUsagePage } from './platform-usage/_route';
 import { pricingPage } from './pricing/_route';
 import { schoolOnboardingPage } from './school-onboarding/_route';
+import { schoolSetupPage } from './school-onboarding/[requestId]/setup/_route';
 import { schoolRequestsPage } from './school-requests/_route';
 import { usersPage } from './users/_route';
 
@@ -125,6 +126,7 @@ const pages = [
   homePage,
   demoRequestsPage,
   schoolOnboardingPage,
+  schoolSetupPage,
   schoolRequestsPage,
   organizationsPage,
   usersPage,

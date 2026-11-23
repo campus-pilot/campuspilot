@@ -1,6 +1,7 @@
 import { GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { schoolRegistrationRequestTable } from '@campuspilot/db/schema/school-registration-request';
+import { schoolSetupTable } from '@campuspilot/db/schema/school-setup';
 import { env } from '@campuspilot/env/server';
 import { SYSTEM_ACTIONS } from '@campuspilot/opa/policies/system';
 import { getS3Client } from '@campuspilot/s3/client';
@@ -58,10 +59,17 @@ export const schoolRegistrationRequestRouter = {
         const pattern = likePattern(input.searchQuery);
         const where = input.searchQuery ? or(...SEARCHED_ANSWERS.map((key) => ilike(sql<string>`${table.response} ->> ${key}`, pattern))) : undefined;
         const [rows, totalRows] = await Promise.all([
-          context.db.select().from(table).where(where).orderBy(desc(table.createdAt), desc(table.id)).limit(pageSize).offset(offset),
+          context.db
+            .select({ request: table, setupStatus: schoolSetupTable.status, setupSchoolId: schoolSetupTable.schoolId })
+            .from(table)
+            .leftJoin(schoolSetupTable, eq(schoolSetupTable.requestId, table.id))
+            .where(where)
+            .orderBy(desc(table.createdAt), desc(table.id))
+            .limit(pageSize)
+            .offset(offset),
           context.db.select({ totalItems: count() }).from(table).where(where),
         ]);
-        const items = rows.map((row) => ({
+        const items = rows.map(({ request: row, setupStatus, setupSchoolId }) => ({
           id: row.id,
           formVersion: row.formVersion,
           response: row.response,
@@ -70,6 +78,7 @@ export const schoolRegistrationRequestRouter = {
           sourcePath: row.sourcePath,
           userAgent: row.userAgent,
           createdAt: row.createdAt,
+          setup: setupStatus ? { status: setupStatus, schoolId: setupSchoolId } : null,
         }));
         const totalItems = totalRows[0]?.totalItems ?? 0;
         const totalPages = Math.ceil(totalItems / pageSize);
