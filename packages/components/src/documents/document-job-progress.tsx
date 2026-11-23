@@ -9,7 +9,10 @@ import { Progress } from "@campuspilot/ui/components/progress";
  */
 export type DocumentJobView = {
   status: "queued" | "running" | "succeeded" | "failed";
+  /** Documents when the job was requested. */
   documentCount: number;
+  /** Documents the PDF prints, once the worker prepared the job (null before); shown when known. */
+  printedDocumentCount: number | null;
   /** Null until the documents are split into parts. */
   batchCount: number | null;
   batchesDone: number;
@@ -31,11 +34,12 @@ const documents = (count: number) => `${count.toLocaleString("en-IN")} document$
 
 /** The line under the title: what is happening now. */
 function progressDetail(job: DocumentJobView) {
+  const count = job.printedDocumentCount ?? job.documentCount;
   if (job.status === "queued")
     return "Waiting to start. This school's PDFs are created one at a time.";
-  if (job.batchCount === null) return `Preparing ${documents(job.documentCount)}…`;
+  if (job.batchCount === null) return `Preparing ${documents(count)}…`;
   if (job.batchesDone < job.batchCount)
-    return `Creating part ${job.batchesDone + 1} of ${job.batchCount} (${documents(job.documentCount)})…`;
+    return `Creating part ${job.batchesDone + 1} of ${job.batchCount} (${documents(count)})…`;
   return job.batchCount > 1 ? "Joining the parts into one PDF…" : "Saving the PDF…";
 }
 

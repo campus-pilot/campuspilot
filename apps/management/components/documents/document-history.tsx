@@ -26,7 +26,7 @@ import {
   type DocumentScope,
 } from './document-common';
 import { DocumentDownload } from './document-generator';
-import { refreshAfterDocumentJob } from './document-job';
+import { refreshDocumentArtifacts } from './document-job';
 /** History is intentionally session-wide across document types. Type and
  * immutable template provenance are attributes of each row, not a prerequisite
  * filter the user must choose before seeing their documents.
@@ -136,7 +136,8 @@ function HistoryRows({
     queryFn: async (context) => {
       const previous = queryClient.getQueryData(jobOptions.queryKey);
       const next = await jobOptions.queryFn!(context);
-      if (endedSince(previous?.items, next.items)) refreshAfterDocumentJob(queryClient, scope.schoolId);
+      // Only the PDF list: invalidating this query's own key would cancel and repeat it.
+      if (endedSince(previous?.items, next.items)) refreshDocumentArtifacts(queryClient, scope.schoolId);
       return next;
     },
     refetchInterval: (query) => (hasActiveJob(query.state.data?.items) ? JOB_POLL_MS : false),

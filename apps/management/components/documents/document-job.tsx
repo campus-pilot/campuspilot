@@ -17,12 +17,22 @@ const isActive = (job: Pick<DocumentGenerationJobDto, "status"> | undefined) =>
   job?.status === "queued" || job?.status === "running";
 
 /**
- * Refreshes the lists a finished job changes: its PDF joins history and it
- * leaves the in-progress list. Called from a query function when a job is
- * seen ending, so no effect is needed.
+ * Refreshes the PDF list a finished job adds to. Called from a query function
+ * that sees a job end, so no effect is needed. It must never invalidate the
+ * key of the query that calls it (that would cancel and repeat the running
+ * fetch forever): History's job list calls only this.
  */
-export function refreshAfterDocumentJob(queryClient: QueryClient, schoolId: string) {
+export function refreshDocumentArtifacts(queryClient: QueryClient, schoolId: string) {
   void queryClient.invalidateQueries({ queryKey: orpc.school.listDocumentArtifacts.key({ input: { schoolId } }) });
+}
+
+/**
+ * Refreshes both lists a finished job changes (its PDF joins history, it
+ * leaves the in-progress list), for a single job's own query
+ * (`getDocumentGenerationJob`), whose key neither list shares.
+ */
+function refreshAfterDocumentJob(queryClient: QueryClient, schoolId: string) {
+  refreshDocumentArtifacts(queryClient, schoolId);
   void queryClient.invalidateQueries({ queryKey: orpc.school.listDocumentGenerationJobs.key({ input: { schoolId } }) });
 }
 
