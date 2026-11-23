@@ -787,7 +787,9 @@ receipt reversal check and the statement review hash refuse here, as before),
 refuses more than `MAX_DOCUMENT_SOURCE_ITEMS` (1,500) documents, refuses with
 `TOO_MANY_REQUESTS` when the school already has 3 queued or running jobs or the
 person 2 (counted under a per-school advisory lock, so two concurrent starts
-cannot both pass; `generateDocument` is also an MCP tool), inserts a
+cannot both pass; the person's lock is taken before the school's, so their jobs
+in another school are counted too and two starts never deadlock;
+`generateDocument` is also an MCP tool), inserts a
 `document_generation_job` row and returns. The row pins what the worker must
 reproduce: the template revision, `generated_at` (every document's
 `generatedAt`), the statement `review_hash`, and for finance documents
@@ -805,10 +807,13 @@ partial unique index on running jobs guarantees it) and the school's other jobs
 wait in order while other schools run. Each worker process runs at most two batch
 steps or merges at once and one prepare step (`conversion-slots.ts`). A slot
 covers the whole step (reading the batch's images, rendering, converting,
-storing), so worker memory is bounded by the slots, and it is taken outside
-the journaled step: a long wait never runs a step twice, and a wait longer
-than 10 minutes gives up so Restate retries the invocation from its journal
-(the job does not fail). The API sweep
+storing), so worker memory is bounded by the slots. A slot is taken inside
+the step's closure, which always settles (its slot is returned even when the
+step fails and Restate retries it) and never runs on a replay of a journaled
+step; a Restate attempt that ends mid-wait stops the wait. Slots are handed
+first come, first served. A wait longer than 10 minutes is journaled and
+waited again as a new step (`name:wait-N`), so it never uses the step's
+retries; after six waits the job fails as `worker_busy`. The API sweep
 (every 30 s) re-sends unaccepted jobs, fails a job Restate never accepted
 (10 minutes, `dispatch_failed`), never started (60 minutes, `not_started`) or
 that runs longer than 60 minutes (`not_finished`), and removes temporary objects
@@ -829,15 +834,18 @@ suspended or left without a plan after the request fails the job
   document's rendered HTML under **one budget for the whole job** (a batch's
   25 million units times the most batches a 1,500-document job has, 8; one
   document at most one batch's budget), yielding to the event loop between
-  documents so the worker's other services keep running, records the document
-  count it really prints, splits the documents into batches and writes them as
+  documents so the worker's other services keep running, records the number
+  of documents it really prints (`printed_document_count`, next to the start's
+  `document_count`; screens show it once known), splits the documents into batches and writes them as
   JSON under the job's private prefix `schools/{schoolId}/document-jobs/{jobId}/`
   with a manifest (name, student ids, finance source, warnings).
 - `batch:N` reads its JSON, reads its images once, renders with the pinned
   revision, converts, and stores `batch-NNNN.pdf` under a deterministic key (a
   repeated step overwrites; a single batch is stored straight at the final key).
 - `merge` first adds up the batches' recorded sizes and fails the job
-  (`pdf_too_large`) when they pass the merged-PDF limit (1 GB); otherwise it
+  (`pdf_too_large`) when they pass the merged-PDF limit (1 GB); a merge that
+  Gotenberg refuses (4xx) or whose result passes the limit fails the job like
+  a refused conversion; otherwise it
   streams the batch PDFs in order to Gotenberg `/forms/pdfengines/merge`
   (it merges in file-name order) and streams the result into a multipart upload
   at `schools/{schoolId}/documents/{artifactId}.pdf`; no PDF is held in memory
@@ -907,7 +915,10 @@ Gotenberg's request directory. The policy cannot name files, so **the code is
 the boundary for CSS too** (`document.css.ts`, every document render, previews
 included): in `<style>` text and `style=""` attributes a declaration survives
 only when every `url(...)` / `image-set(...)` target is a raster `data:` image or
-one of the batch's exact asset names (none in a preview); `@import`, `image()`,
+one of the batch's exact asset names (none in a preview); a loading function
+written with any backslash (an escaped quote or parenthesis could make the
+checker read another target than Chromium) and an at-rule with a backslash in
+its name or prelude (`@i\mport`) are removed; `@import`, `image()`,
 `cross-fade()`, `element()`, `paint()` and `src()` are removed, CSS escapes are
 decoded before checking, and CSS that does not parse is dropped. An SVG `data:`
 URI in CSS is therefore removed, as it is in `<img src>`. Previews never get this policy, question
