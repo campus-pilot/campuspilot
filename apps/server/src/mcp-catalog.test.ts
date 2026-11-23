@@ -857,6 +857,7 @@ describe('assistant service view', () => {
     // One Gotenberg conversion per call: a person's preview only.
     expect(byName.has('school.previewDocumentTemplatePdf')).toBe(false);
     expect(byName.has('school.previewMarketplaceTemplatePdf')).toBe(false);
+    expect(byName.has('school.previewDocumentTemplateRevisionPdf')).toBe(false);
   });
 
   /** The question paper tools by name: what each is for, and how the in-app assistant and external clients reach it. */

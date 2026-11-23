@@ -299,6 +299,15 @@ export const templateRevisionOutputSchema = z.object({
   content: z.string(),
 });
 /**
+ * A saved revision previewed as its PDF, named by its id: the server reads
+ * its source, so someone who may only read the school's templates previews
+ * what was saved, never source of their own (that preview,
+ * `previewDocumentTemplatePdf`, is for those who may change templates).
+ */
+export const previewTemplateRevisionPdfSchema = templateRevisionInputSchema
+  .extend({ printSize: noticePrintSizeSchema })
+  .superRefine(validateNoticePrintSize);
+/**
  * A template the assistant proposes in the template editor's chat. Only the
  * source: the name and the paper footprint stay the editor's own fields, and
  * the check does not depend on them (a save checks the source against the
@@ -328,8 +337,9 @@ export const templateEditingGuideOutputSchema = z.object({
   contextHelp: z.string(),
 });
 /**
- * A preview as its PDF, base64-encoded: a template preview is at most a few
- * synthetic pages, so the bytes travel in the procedure's JSON result.
+ * A preview as its PDF, base64-encoded: a template preview is a few synthetic
+ * pages under a page cap (`TEMPLATE_PREVIEW_LIMITS`), so the bytes travel in
+ * the procedure's JSON result.
  */
 export const previewTemplatePdfOutputSchema = z.object({ pdfBase64: z.string() });
 export const marketplaceTemplateInputSchema = templateScopeSchema

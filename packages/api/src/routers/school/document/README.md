@@ -83,8 +83,17 @@ preview data, while `document.catalog.marketplace.ts` owns the catalog.
 The management marketplace previews a design as its PDF by slug
 (`previewMarketplaceTemplatePdf`, hidden from MCP): the catalog and sample data are
 fixed, so `previewMarketplaceTemplatePdf` in `document.template-source.ts` converts
-each design (and each Notice print size) once per process and shares a conversion
-in flight.
+and base64-encodes each design (and each Notice print size) once per process and
+shares a conversion in flight.
+
+Every template PDF preview runs within `TEMPLATE_PREVIEW_LIMITS`
+(`document.template-source.ts`): a 2,000,000 render budget, a 20 second conversion
+timeout (refused as BAD_REQUEST, not a 500) and a page cap per document type that
+the converter enforces (`ConversionPageLimit` in `document.render.ts`). Previews of
+source (`previewDocumentTemplatePdf`, manage permission) and of saved revisions by
+id (`previewDocumentTemplateRevisionPdf`, read permission) also take one of the
+person's Redis-backed conversion slots (`document.preview-slots.ts`). See
+docs/document-system.md, "Preview limits".
 
 Admit-card and finance template revisions may use a `half` footprint. The batch
 renderer pairs those documents vertically on portrait A4 and starts a new sheet
@@ -95,7 +104,7 @@ Template editing uses TanStack Form, field-level Zod errors, explicit preview/sa
 
 The portable brief has no integrated AI provider, provider configuration, SDK, AI permission, or AI endpoint. Building/copying the brief stays in the browser and sends no request to a model provider.
 
-For users who may use the in-app assistant, the template editor instead embeds the assistant (docs/document-system.md, "Edit with the assistant"). The server side of that is in `document.template-source.ts`: `assertValidTemplateSource` (the one source check shared by `saveTemplate` and `validateDocumentTemplateDraft`), `checkTemplateDraft`, `templateEditingGuide` (`learn_document_template_editing`, built from the shared `templateRenderingContract`), and `previewTemplatePdf` (`previewDocumentTemplatePdf`, the editor's PDF preview). The assistant never saves: the person saves through `saveDocumentTemplate`.
+For users who may use the in-app assistant, the template editor instead embeds the assistant (docs/document-system.md, "Edit with the assistant"). The server side of that is in `document.template-source.ts`: `assertValidTemplateSource` (the one source check shared by `saveTemplate` and `validateDocumentTemplateDraft`), `checkTemplateDraft`, `templateEditingGuide` (`learn_document_template_editing`, built from the shared `templateRenderingContract`), and `previewTemplatePdf` (`previewDocumentTemplatePdf`, the editor's PDF preview). The assistant never saves: the person saves through `saveDocumentTemplate`, and in a conversation started from the template editor the assistant's runtime refuses the template writes (`TEMPLATE_EDITOR_REFUSED_TOOLS` in `@campuspilot/assistant-contract/template-editing`).
 
 Revision history (`listDocumentTemplateRevisions`, `getDocumentTemplateRevision`, `document.template-revisions.ts`) reads the immutable template artifacts behind the template read gate; restoring one is saving its source again as a new revision.
 

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { ORPCError } from "@orpc/server";
+import { QUESTION_PAPER_LIMITS } from "@campuspilot/question-paper/limits";
 import {
   TEMPLATE_DOCUMENT_TYPES,
   templateRenderingContract,
@@ -20,8 +21,9 @@ import {
   sampleDocumentContext,
   SAMPLE_NOTICE_CONTEXT,
 } from "./document.catalog";
+import { rpcError } from "../../../errors";
 import type { DocumentTemplatePageSize, DocumentType } from "./document.dto";
-import { combineDocuments, convertDocumentPdf, renderDocument } from "./document.render";
+import { combineDocuments, convertDocumentPdf, isConversionTimeout, renderDocument } from "./document.render";
 
 /**
  * The document types the shared template-editing contract names are exactly
@@ -90,10 +92,68 @@ export function checkTemplateDraft(documentType: DocumentType, content: string):
 }
 
 /**
- * A template rendered with synthetic data for a preview. A Notice design is
- * laid out at the requested notice print size (`printSize`, full when
- * omitted) and told that size as `print.size`, exactly as a plain notice of
- * that size is printed; every other type uses its revision's footprint.
+ * The bounds of one template preview (docs/document-system.md, "Preview
+ * limits"). A preview renders source the person typed (or a saved revision)
+ * against one synthetic sample, so it needs far less than a generated batch,
+ * and each one is a Chromium conversion: these keep a single preview small
+ * and short whatever the source does.
+ *
+ * - `renderChars`: the render budget (`maxOutputChars`), the Notice and
+ *   Question paper template budget (2,000,000) instead of a batch's
+ *   25,000,000. A catalog design renders its sample in a few kilobytes
+ *   (the sample logo is 1 KB), so only a template that repeats itself
+ *   massively reaches it. The Question paper preview keeps its own renderer,
+ *   which already holds the template to this budget.
+ * - `timeoutMs`: how long the converter may work on one preview (a generated
+ *   document gets 120 seconds, a question paper 60). Running out is refused
+ *   as the template's fault ({@link PREVIEW_TIMEOUT_MESSAGE}).
+ * - `pages`: how many pages one preview may print, by type, from what the
+ *   sample prints. The converter is asked for one page more and a preview
+ *   over the cap is refused, never cut (`ConversionPageLimit`):
+ *   - report cards, ID cards, admit cards, bills, receipts and statements:
+ *     the sample is one document, which the print wrapper puts on exactly one
+ *     sheet (a fixed sheet with `overflow:hidden`; eight ID cards or two half
+ *     documents to a sheet). 4 leaves room for a design whose own CSS lets
+ *     content spill past the sheet, which then shows instead of being refused.
+ *   - timetable: one landscape sheet holding the grid of every classroom of
+ *     the exam (the all-classroom invariant: a timetable is never split per
+ *     class), so a design may paginate a long grid over several sheets; 8.
+ *   - notice: notices flow; the sample notice prints on one full page or one
+ *     to two half pages (counted before two half pages are put on a sheet);
+ *     6 leaves room for a tall letterhead and footer.
+ *   - question paper: the example paper flows like a real one, so the cap is
+ *     the paper cap itself (`QUESTION_PAPER_LIMITS.pdfPages`), which the
+ *     converter applies to every question paper anyway.
+ */
+export const TEMPLATE_PREVIEW_LIMITS = {
+  renderChars: 2_000_000,
+  timeoutMs: 20_000,
+  pages: {
+    report_card: 4,
+    id_card: 4,
+    admit_card: 4,
+    bill: 4,
+    receipt: 4,
+    statement: 4,
+    timetable: 8,
+    notice: 6,
+    question_paper: QUESTION_PAPER_LIMITS.pdfPages,
+  } satisfies Record<DocumentType, number>,
+} as const;
+
+/** What a preview that ran out of time says: most likely the template, possibly a busy converter. */
+export const PREVIEW_TIMEOUT_MESSAGE = `The preview took longer than ${TEMPLATE_PREVIEW_LIMITS.timeoutMs / 1000} seconds to print, which is the limit. Simplify the template (fewer repeated blocks, smaller images), or try again in a moment.`;
+
+/** What a preview over its type's page cap says. */
+const previewPageLimitMessage = (pages: number) =>
+  `This template prints the sample on more than ${pages} pages, which is the preview limit. Check for content that overflows the page or repeats.`;
+
+/**
+ * A template rendered with synthetic data for a preview, within the preview
+ * render budget ({@link TEMPLATE_PREVIEW_LIMITS}). A Notice design is laid
+ * out at the requested notice print size (`printSize`, full when omitted)
+ * and told that size as `print.size`, exactly as a plain notice of that size
+ * is printed; every other type uses its revision's footprint.
  */
 export function previewTemplateHtml(
   content: string,
@@ -101,21 +161,25 @@ export function previewTemplateHtml(
   pageSize: DocumentTemplatePageSize,
   printSize: DocumentTemplatePageSize | undefined,
 ) {
+  const budget = { maxOutputChars: TEMPLATE_PREVIEW_LIMITS.renderChars };
   if (documentType === "notice") {
     const size = printSize ?? "full";
-    return combineDocuments([renderDocument(content, { ...SAMPLE_NOTICE_CONTEXT, print: { size } })], "notice", size);
+    return combineDocuments([renderDocument(content, { ...SAMPLE_NOTICE_CONTEXT, print: { size } }, budget)], "notice", size);
   }
   // Rendered like a real paper (template budget, one body slot, logo limit),
   // with the English example paper as the body so an author sees a real page.
   if (documentType === "question_paper") return renderSampleQuestionPaperDocument(content);
-  return combineDocuments([renderDocument(content, sampleDocumentContext(documentType))], documentType, pageSize);
+  return combineDocuments([renderDocument(content, sampleDocumentContext(documentType), budget)], documentType, pageSize);
 }
 
 /**
  * The preview as the PDF it prints as: the same HTML as
  * {@link previewTemplateHtml}, converted by the same Gotenberg call as a
- * generated document of the type, and for a half-A4 notice imposed two copies
- * per A4 sheet exactly as a published half notice is. Nothing is stored.
+ * generated document of the type, within the preview's page cap and timeout
+ * ({@link TEMPLATE_PREVIEW_LIMITS}; running out of time is a BAD_REQUEST with
+ * {@link PREVIEW_TIMEOUT_MESSAGE}, not a server error), and for a half-A4
+ * notice imposed two copies per A4 sheet exactly as a published half notice
+ * is. Nothing is stored.
  */
 export async function previewTemplatePdf(
   content: string,
@@ -125,37 +189,58 @@ export async function previewTemplatePdf(
   signal?: AbortSignal,
 ): Promise<Uint8Array> {
   const html = previewTemplateHtml(content, documentType, pageSize, printSize);
-  const converted = new Uint8Array(await convertDocumentPdf(html, documentType, signal));
+  const pages = TEMPLATE_PREVIEW_LIMITS.pages[documentType];
+  let converted: Uint8Array;
+  try {
+    converted = new Uint8Array(
+      await convertDocumentPdf(html, documentType, signal, {
+        // A question paper keeps the converter's own cap and message.
+        ...(documentType === "question_paper" ? {} : { pageLimit: { pages, message: previewPageLimitMessage(pages) } }),
+        timeoutMs: TEMPLATE_PREVIEW_LIMITS.timeoutMs,
+      }),
+    );
+  } catch (error) {
+    if (isConversionTimeout(error)) throw rpcError.badRequest(PREVIEW_TIMEOUT_MESSAGE, error);
+    throw error;
+  }
   return documentType === "notice" && printSize === "half" ? imposeHalfPageNoticeCopies(converted) : converted;
 }
 
 /**
- * Marketplace designs already converted, by type, slug and notice print size.
- * See {@link previewMarketplaceTemplatePdf}.
+ * Marketplace designs already converted, as the base64 the procedure returns,
+ * by type, slug and notice print size. See {@link previewMarketplaceTemplatePdf}.
  */
-const marketplacePdfs = new Map<string, Promise<Uint8Array>>();
+const marketplacePdfs = new Map<string, Promise<string>>();
+
+/** Forgets every converted marketplace design (tests only: the map lives for the process). */
+export function clearMarketplacePreviewCache() {
+  marketplacePdfs.clear();
+}
 
 /**
- * A marketplace design as the PDF it prints as, with the same synthetic data
- * and conversion as {@link previewTemplatePdf}. The catalog ships with the
- * code and the sample data is fixed, so a design converts to the same PDF for
- * the life of the process: each design (and each print size of a Notice
- * design) is converted once, however many people preview it, and the map is
- * bounded by the catalog. A conversion in flight is shared and a failed one
- * is forgotten, so the next preview tries again. The caller's abort signal is
- * therefore not passed on: someone else may be waiting for the same
- * conversion, and a finished one is kept for the next.
+ * A marketplace design as the PDF it prints as, base64-encoded, with the
+ * same synthetic data, conversion and limits as {@link previewTemplatePdf}.
+ * The catalog ships with the code and the sample data is fixed, so a design
+ * converts to the same PDF for the life of the process: each design (and
+ * each print size of a Notice design) is converted and encoded once, however
+ * many people preview it, and the map is bounded by the catalog. A
+ * conversion in flight is shared and a failed one is forgotten, so the next
+ * preview tries again. The caller's abort signal is therefore not passed on:
+ * someone else may be waiting for the same conversion, and a finished one is
+ * kept for the next.
  */
 export function previewMarketplaceTemplatePdf(
   design: { slug: string; documentType: DocumentType; pageSize: DocumentTemplatePageSize; content: string },
   printSize: DocumentTemplatePageSize | undefined,
-): Promise<Uint8Array> {
+): Promise<string> {
   // Only a Notice design is previewed at a print size (full when not asked).
   const size = design.documentType === "notice" ? (printSize ?? "full") : undefined;
   const key = `${design.documentType}:${design.slug}:${size ?? design.pageSize}`;
   const held = marketplacePdfs.get(key);
   if (held) return held;
-  const converting = previewTemplatePdf(design.content, design.documentType, design.pageSize, size);
+  const converting = previewTemplatePdf(design.content, design.documentType, design.pageSize, size).then((bytes) =>
+    Buffer.from(bytes).toString("base64"),
+  );
   marketplacePdfs.set(key, converting);
   converting.catch(() => marketplacePdfs.delete(key));
   return converting;
@@ -165,7 +250,12 @@ export function previewMarketplaceTemplatePdf(
  * What the in-app assistant (and any MCP client) is taught before it edits a
  * template of `documentType`: the shared rendering contract
  * (`templateRenderingContract`, the same rules the portable "Edit with AI"
- * brief carries), how a draft reaches the editor, and the variable reference.
+ * brief carries), how a draft is proposed, and the variable reference. The
+ * workflow names both callers, because the guide cannot tell them apart: in
+ * the template editor's own conversation a valid draft is shown in the editor
+ * (and saving tools are refused there, see the assistant's
+ * `TEMPLATE_EDITOR_REFUSED_TOOLS`); an MCP client or another chat has no
+ * editor, so a valid draft is only a template that would save.
  */
 export function templateEditingGuide(documentType: DocumentType) {
   return {
@@ -179,8 +269,8 @@ export function templateEditingGuide(documentType: DocumentType) {
       "Edit the newest source: the latest <template_editor_source> block in the conversation (the editor's unsaved source), your own latest valid draft, else the saved template from getActiveDocumentTemplate. Change only what the user asked.",
       "Call validateDocumentTemplateDraft with the documentType and the complete template. It checks the template exactly as saving it would and changes nothing.",
       "When it is not valid, fix the problems it lists and validate again before you answer.",
-      "When it is valid, the template editor loads it into the editor and its PDF preview at once. Tell the user in one or two sentences what changed; they look at the preview and save it themselves with the editor's Save button.",
-      "Never save the template yourself with saveDocumentTemplate or selectMarketplaceTemplate from the template editor's chat.",
+      "In CampusPilot's own template editor (a conversation started there, which carries <document_template_context>), a valid draft is loaded into the editor and its PDF preview at once. Tell the user in one or two sentences what changed; they look at the preview and save it themselves with the editor's Save button. Saving tools (saveDocumentTemplate, selectMarketplaceTemplate) are refused in such a conversation.",
+      "Anywhere else (another chat or an MCP client), nothing shows a draft for you: a valid check only means the template would save. Save it with saveDocumentTemplate, sending the selected revision's revisionId from getActiveDocumentTemplate as expectedRevisionId, only when the user asked for the change to be saved.",
     ],
     contextHelp: DOCUMENT_CONTEXT_HELP,
   };

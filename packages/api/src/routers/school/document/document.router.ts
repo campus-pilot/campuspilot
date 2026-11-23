@@ -38,6 +38,7 @@ import { buildDocumentContexts } from "./document.context";
 import { buildFinanceDocumentContexts } from "./finance-document.context";
 import { getSelectedDocumentTemplate as getTemplate } from "./document.selected-template";
 import { getTemplateRevision, listTemplateRevisions } from "./document.template-revisions";
+import { withPreviewConversionSlot } from "./document.preview-slots";
 import {
   assertValidTemplateSource,
   checkTemplateDraft,
@@ -397,8 +398,7 @@ export const schoolDocumentRouter = {
       );
       if (!item) throw rpcError.notFound("Marketplace template");
       try {
-        const bytes = await previewMarketplaceTemplatePdf(item, input.printSize);
-        return { pdfBase64: Buffer.from(bytes).toString("base64") };
+        return { pdfBase64: await previewMarketplaceTemplatePdf(item, input.printSize) };
       } catch (error) {
         throw toRpcError(error);
       }
@@ -596,10 +596,14 @@ export const schoolDocumentRouter = {
   /**
    * The template editor's preview as the PDF it prints as (the same pdf.js
    * viewer as a question paper's versions). Each call is one Gotenberg
-   * conversion, so it is a person's action only (`hidden`: never offered to
-   * MCP clients or the assistant, which have the HTML preview and the draft
-   * check). The editor asks for it for a debounced draft and caches it by
-   * source; read permission, like the HTML preview.
+   * conversion of source the caller wrote, so it is a person's action only
+   * (`hidden`: never offered to MCP clients or the assistant, which have the
+   * HTML preview and the draft check), it needs the template **manage**
+   * permission (whoever may only read templates previews saved revisions,
+   * `previewDocumentTemplateRevisionPdf`), and it runs within the preview
+   * limits (`TEMPLATE_PREVIEW_LIMITS`) in one of the person's conversion
+   * slots (`withPreviewConversionSlot`). The editor asks for it for a
+   * debounced draft and caches it by source.
    */
   previewDocumentTemplatePdf: protectedProcedure
     .route(
@@ -617,11 +621,49 @@ export const schoolDocumentRouter = {
       },
     })
     .input(dto.previewTemplateSchema)
+    .use(requireDocumentTypePermission(SCHOOL_ACTIONS.MANAGE_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.MANAGE_FINANCE_DOCUMENT_TEMPLATES))
+    .output(dto.previewTemplatePdfOutputSchema)
+    .handler(async ({ context, input, signal }) => {
+      try {
+        const bytes = await withPreviewConversionSlot(context.session.user.id, () =>
+          previewTemplatePdf(input.content, input.documentType, input.pageSize, input.printSize, signal),
+        );
+        return { pdfBase64: Buffer.from(bytes).toString("base64") };
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+  /**
+   * A saved revision of the school's template as the PDF it prints as, named
+   * by its id (`getDocumentTemplateRevision`'s input): the read-only template
+   * page and the builder's revision view. The server reads the source, so it
+   * has the template **read** gate; the render, limits and conversion slot
+   * are those of `previewDocumentTemplatePdf`, and like it it is `hidden`.
+   */
+  previewDocumentTemplateRevisionPdf: protectedProcedure
+    .route(
+      route(
+        "Preview a saved template revision as a PDF",
+        "Render one saved revision of the school's template with synthetic data and convert it to the PDF it prints as. Stores nothing.",
+      ),
+    )
+    .meta({
+      mcp: {
+        exposure: "hidden",
+        access: "read",
+        destructive: false,
+        module: "documents",
+      },
+    })
+    .input(dto.previewTemplateRevisionPdfSchema)
     .use(requireDocumentTypePermission(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES))
     .output(dto.previewTemplatePdfOutputSchema)
-    .handler(async ({ input, signal }) => {
+    .handler(async ({ context, input, signal }) => {
       try {
-        const bytes = await previewTemplatePdf(input.content, input.documentType, input.pageSize, input.printSize, signal);
+        const { revision, content } = await getTemplateRevision(context.db, input);
+        const bytes = await withPreviewConversionSlot(context.session.user.id, () =>
+          previewTemplatePdf(content, input.documentType, revision.pageSize, input.printSize, signal),
+        );
         return { pdfBase64: Buffer.from(bytes).toString("base64") };
       } catch (error) {
         throw toRpcError(error);

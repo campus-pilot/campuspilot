@@ -31,7 +31,10 @@ import {
   createTestStudent,
   includeTestExamClasses,
 } from '../../../../test/fixtures';
+import { expectFeatureDisabled, expectPermissionDenied } from '../../../../test/feature-flags';
+import { isSchoolSuspendedError } from '../../../school-access/school-access.contract';
 import { DOCUMENT_MARKETPLACE } from './document.catalog';
+import { TEMPLATE_PREVIEW_LIMITS } from './document.template-source';
 import { combineDocuments, renderDocument } from './document.render';
 import { documentGrade } from './document.context';
 
@@ -927,15 +930,71 @@ describe('document templates, generation, and artifact lifecycle', () => {
     expect(guide.rules).toContain('validateDocumentTemplateDraft');
     expect(guide.contextHelp).toContain('student.');
 
-    const preview = await teacher.school.previewDocumentTemplatePdf({ schoolId, documentType: 'id_card', content: '<p>{{student.name}}</p>' });
+    const preview = await manager.school.previewDocumentTemplatePdf({ schoolId, documentType: 'id_card', content: '<p>{{student.name}}</p>' });
     const pdf = await PDFDocument.load(Buffer.from(preview.pdfBase64, 'base64'));
     expect(pdf.getPageCount()).toBe(1);
     await expect(
-      teacher.school.previewDocumentTemplatePdf({ schoolId, documentType: 'id_card', content: '{{#each broken}}' }),
+      manager.school.previewDocumentTemplatePdf({ schoolId, documentType: 'id_card', content: '{{#each broken}}' }),
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    // Converting source of one's own is for those who may change templates; readers preview saved revisions by id.
+    await expectPermissionDenied(teacher.school.previewDocumentTemplatePdf({ schoolId, documentType: 'id_card', content: '<p>x</p>' }));
     await expect(
       outsider.school.previewDocumentTemplatePdf({ schoolId, documentType: 'id_card', content: '<p>x</p>' }),
     ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+  it('refuses a template preview that prints the sample on more pages than its type allows, before Chromium prints the rest', async () => {
+    // The sheet wrapper is overridden and every block forced onto a page of its own.
+    const content = `<style>.print-sheet,.sheet-item{height:auto!important;overflow:visible!important;break-inside:auto!important}p{break-after:page}</style>${'<p>{{school.name}}</p>'.repeat(TEMPLATE_PREVIEW_LIMITS.pages.receipt + 2)}`;
+    await expect(manager.school.previewDocumentTemplatePdf({ schoolId, documentType: 'receipt', content })).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      message: expect.stringContaining(`more than ${TEMPLATE_PREVIEW_LIMITS.pages.receipt} pages`),
+    });
+  });
+  it('previews a saved revision by its id for someone who may only read templates', async () => {
+    const scope = { schoolId, documentType: 'admit_card' as const };
+    const current = await manager.school.getActiveDocumentTemplate(scope);
+    const saved = await manager.school.saveDocumentTemplate({ ...scope, name: 'Readable', content: '<p>{{school.name}}</p>', pageSize: 'half', expectedRevisionId: current?.revisionId ?? null });
+    const preview = await teacher.school.previewDocumentTemplateRevisionPdf({ ...scope, revisionId: saved.revisionId });
+    expect((await PDFDocument.load(Buffer.from(preview.pdfBase64, 'base64'))).getPageCount()).toBe(1);
+    // A revision is found by its school and type together, a print size is a Notice design's choice, and the gate is the read gate.
+    await expect(teacher.school.previewDocumentTemplateRevisionPdf({ schoolId, documentType: 'id_card', revisionId: saved.revisionId })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(teacher.school.previewDocumentTemplateRevisionPdf({ ...scope, revisionId: saved.revisionId, printSize: 'half' })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(outsider.school.previewDocumentTemplateRevisionPdf({ ...scope, revisionId: saved.revisionId })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+  it('refuses every template editing procedure for a type whose feature the school does not have', async () => {
+    // The baseline school has student management but neither notices nor the assistant (question paper templates).
+    const cases = [
+      { documentType: 'notice' as const, feature: 'notices' as const },
+      { documentType: 'question_paper' as const, feature: 'assistant' as const },
+    ];
+    for (const { documentType, feature } of cases) {
+      const scope = { schoolId, documentType };
+      await expectFeatureDisabled(manager.school.learn_document_template_editing(scope), feature);
+      await expectFeatureDisabled(manager.school.validateDocumentTemplateDraft({ ...scope, content: '<p>x</p>' }), feature);
+      await expectFeatureDisabled(manager.school.previewDocumentTemplatePdf({ ...scope, content: '<p>x</p>' }), feature);
+      await expectFeatureDisabled(manager.school.listDocumentTemplateRevisions({ ...scope, limit: 20 }), feature);
+      await expectFeatureDisabled(manager.school.getDocumentTemplateRevision({ ...scope, revisionId: 'art_missing' }), feature);
+      await expectFeatureDisabled(manager.school.previewDocumentTemplateRevisionPdf({ ...scope, revisionId: 'art_missing' }), feature);
+      const slug = DOCUMENT_MARKETPLACE.find((design) => design.documentType === documentType)!.slug;
+      await expectFeatureDisabled(manager.school.previewMarketplaceTemplatePdf({ ...scope, slug }), feature);
+    }
+  });
+  it('lets a suspended school read, check and preview templates, and refuses saving one', async () => {
+    const school = await createTestSchool();
+    const principal = createTestClient((await createSchoolStaffSession(school.id, [{ role: 'principal', meta: null }])).session);
+    const scope = { schoolId: school.id, documentType: 'receipt' as const };
+    const selected = await principal.school.selectMarketplaceTemplate({ ...scope, slug: DOCUMENT_MARKETPLACE.find((design) => design.documentType === 'receipt')!.slug, expectedRevisionId: null });
+    await admin.systemAdmin.suspendSchool({ id: school.id, reason: 'Unpaid invoices' });
+
+    await expect(principal.school.learn_document_template_editing(scope)).resolves.toMatchObject({ documentType: 'receipt' });
+    await expect(principal.school.validateDocumentTemplateDraft({ ...scope, content: '<p>{{school.name}}</p>' })).resolves.toMatchObject({ valid: true });
+    await expect(principal.school.previewDocumentTemplatePdf({ ...scope, content: '<p>{{school.name}}</p>' })).resolves.toMatchObject({ pdfBase64: expect.any(String) });
+    await expect(principal.school.previewDocumentTemplateRevisionPdf({ ...scope, revisionId: selected.revisionId })).resolves.toMatchObject({ pdfBase64: expect.any(String) });
+    await expect(principal.school.listDocumentTemplateRevisions({ ...scope, limit: 20 })).resolves.toMatchObject({ items: [expect.objectContaining({ revisionId: selected.revisionId })] });
+    const refused = await principal.school
+      .saveDocumentTemplate({ ...scope, name: 'While suspended', content: '<p>x</p>', pageSize: 'full', expectedRevisionId: selected.revisionId })
+      .catch((error: unknown) => error);
+    expect(isSchoolSuspendedError(refused)).toBe(true);
   });
   it('previews a marketplace design as its PDF by slug, behind the template read gate', async () => {
     const design = { schoolId, documentType: 'id_card' as const, slug: 'id_card-modern' };
@@ -972,5 +1031,54 @@ describe('document templates, generation, and artifact lifecycle', () => {
     await expect(teacher.school.getDocumentTemplateRevision({ schoolId, documentType: 'id_card', revisionId: first.revisionId })).rejects.toMatchObject({ code: 'NOT_FOUND' });
     await expect(outsider.school.listDocumentTemplateRevisions({ ...scope, limit: 20 })).rejects.toMatchObject({ code: 'FORBIDDEN' });
     await expect(outsider.school.getDocumentTemplateRevision({ ...scope, revisionId: first.revisionId })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+});
+
+describe('assistant template drafts for the Notice and Question paper types', () => {
+  let manager: ReturnType<typeof createTestClient>;
+  let schoolId: string;
+  beforeAll(async () => {
+    schoolId = (await createTestSchool({ features: ['notices', { feature: 'assistant', config: { monthlyLimitUsd: 20 } }] })).id;
+    manager = createTestClient((await createSchoolStaffSession(schoolId, [{ role: 'manager' }])).session);
+  });
+
+  /** What a save says about `content`: null when it saved, else its refusal. */
+  async function saveRefusal(documentType: 'notice' | 'question_paper', content: string) {
+    const current = await manager.school.getActiveDocumentTemplate({ schoolId, documentType });
+    return manager.school
+      .saveDocumentTemplate({ schoolId, documentType, name: 'Draft', content, pageSize: 'full', expectedRevisionId: current?.revisionId ?? null })
+      .then(() => null, (error: { code: string; message: string }) => error);
+  }
+
+  it.each([
+    ['notice', '<p>{{school.name}}</p>', `<p>${'<img src="{{school.logoUrl}}">'.repeat(4)}</p>`],
+    ['question_paper', '<header>{{school.name}}</header><main>{{{questionPaper.bodyHtml}}}</main>', '<header>{{school.name}}</header>'],
+  ] as const)('checks a %s draft exactly as saving it would', async (documentType, valid, invalid) => {
+    const refused = await manager.school.validateDocumentTemplateDraft({ schoolId, documentType, content: invalid });
+    const saveError = await saveRefusal(documentType, invalid);
+    expect(saveError).toMatchObject({ code: 'BAD_REQUEST' });
+    expect(refused).toMatchObject({ valid: false, draftId: null });
+    expect(refused.problems[0]).toBe(saveError!.message);
+
+    expect(await manager.school.validateDocumentTemplateDraft({ schoolId, documentType, content: valid })).toMatchObject({ valid: true });
+    expect(await saveRefusal(documentType, valid)).toBeNull();
+  });
+
+  it('previews a Notice design at either print size, a half notice as A4 sheets of two copies, within the notice page cap', async () => {
+    const design = DOCUMENT_MARKETPLACE.find((item) => item.slug === 'notice-default')!;
+    const counts: Record<string, number> = {};
+    for (const printSize of ['full', 'half'] as const) {
+      const { pdfBase64 } = await manager.school.previewDocumentTemplatePdf({ schoolId, documentType: 'notice', content: design.content, printSize });
+      const pdf = await PDFDocument.load(Buffer.from(pdfBase64, 'base64'));
+      counts[printSize] = pdf.getPageCount();
+      expect(pdf.getPageCount()).toBeGreaterThan(0);
+      expect(pdf.getPageCount()).toBeLessThanOrEqual(TEMPLATE_PREVIEW_LIMITS.pages.notice);
+      for (const page of pdf.getPages()) {
+        const { width, height } = page.getSize();
+        expect([Math.round(width), Math.round(height)]).toEqual([595, 842]);
+      }
+    }
+    // A half page holds less than a full one, so a half notice never prints on fewer sheets.
+    expect(counts.half).toBeGreaterThanOrEqual(counts.full!);
   });
 });
