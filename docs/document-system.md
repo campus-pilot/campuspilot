@@ -51,8 +51,8 @@ Do not infer one surface's state from another fact. In particular:
 | `/school/:schoolId/settings/templates/statement` | Admission account-statement template editor |
 | `/school/:schoolId/settings/templates/notice` | Notice template editor (schools with the `notices` feature only) |
 | `/school/:schoolId/sessions/:sessionId/billing/documents` | Compatibility redirect to session-wide document history |
-| `/school/:schoolId/marketplace/templates?type=:documentType` | Marketplace filtered to one document type |
-| `/school/:schoolId/marketplace/templates/:documentType/:slug` | Dedicated marketplace preview and import action |
+| `/school/:schoolId/marketplace/templates?type=:documentType&template=:slug&preview=1` | Marketplace on one document type tab and one design (each parameter optional); `preview=1` opens that design's full-screen preview |
+| `/school/:schoolId/marketplace/templates/:documentType/:slug` | Former dedicated preview page: redirects to the marketplace with that type, design and the preview open |
 
 The marketplace is intentionally school-scoped rather than session-scoped. The
 settings slugs are existing human-facing configuration names and are not required
@@ -132,15 +132,38 @@ the generator.
 
 ### Browse and import a marketplace template
 
-1. The marketplace opens with one document type selected.
-2. Cards show every server-owned design for that type.
-3. Preview navigates to a dedicated page and renders synthetic data in a
-   sanitized iframe (`DocumentPreview`). The editor's preview is the PDF
-   (`PdfPreview`), which is built to be reused here.
-4. Use template sends the catalog slug and `expectedRevisionId`.
-5. The server copies the catalog source to a new immutable, school-owned S3 object,
+1. The marketplace shows the school's document types as a row of line tabs that
+   scrolls sideways when they do not fit (`ScrollableTabsList`, as in the
+   examination workspace). Only types the school has are offered (the `notices`
+   and `assistant` features add Notices and Question papers; the rest belong to
+   student management); the tabs wait for those flags rather than switching once
+   they arrive. A requested type the school does not have opens the first one.
+2. Under the type, its designs are a second, pill-style scrollable tab row; the
+   design the school uses now carries a check (and "(in use)" for assistive
+   technology). Under that the selected design shows its name, paper, description
+   and actions, then **its PDF with sample data** (`PdfPreview`, the builder's
+   viewer) in a frame most of the screen tall. The design shown is the requested
+   one, else the one the school uses when it was imported from the catalog and is
+   still listed (`artifact.marketplaceSlug`), else the first. A requested design
+   the catalog no longer lists says so and shows that fallback.
+3. Only the open type's catalog is read and only the selected design is converted
+   (Radix mounts only the active tab's content), never a page of thumbnails. See
+   "Marketplace PDF previews" below for the cost guard.
+4. *Preview* opens the design full screen (the whole screen on a phone, all but a
+   small margin on a larger one; `PreviewDialogContent` size `full`, the dialog
+   shell the question paper chat uses for drafts). It shows the page's cached
+   conversion, scrolls page by page, and offers the same actions (*Use template*,
+   *Open current template*, and *Preview as* for a Notice design) beside its title.
+5. Type, design and the open preview live in the address (`marketplace-model.ts`:
+   `?type=&template=&preview=1`) and change with `router.replace`, so a reload or a
+   shared link restores the view; closing the dialog drops `preview`. A design and
+   the preview are only honoured with the type they were asked with, and the
+   dialog opens only for the design asked for, never for a fallback. The former
+   `/:documentType/:slug` page redirects to this address with the preview open.
+6. Use template sends the catalog slug and `expectedRevisionId`.
+7. The server copies the catalog source to a new immutable, school-owned S3 object,
    creates an artifact row, and atomically selects that revision.
-6. A stale `expectedRevisionId` returns `CONFLICT`; the client must reload instead
+8. A stale `expectedRevisionId` returns `CONFLICT`; the client must reload instead
    of overwriting a change it has not seen. The value to send is the `revisionId`
    that `getActiveDocumentTemplate` (and every save or selection) returns, or
    `null` only when no revision is selected. It is not the artifact's `sha256` and
@@ -190,7 +213,7 @@ like the question paper studio (`TemplateEditor` in `template-workspace.tsx`):
   reusable `PdfPreview` (`packages/components/src/documents/pdf-preview.tsx`). For a
   Notice design the strip offers *Preview as* (a full-A4 or half-A4 notice; a Notice
   design has no footprint, each notice chooses its size, and the choice is never
-  saved; the marketplace detail page of a Notice design offers the same choice).
+  saved; the marketplace offers the same choice for its Notice designs).
 
 Draft name and source remain local until Save. Typing re-renders the preview after a
 900 ms pause (each preview is one Gotenberg conversion), and the strip offers *Refresh
@@ -221,7 +244,25 @@ sheet like a published half notice. It stores nothing and returns the bytes base
 its JSON result (a template preview is a few synthetic pages). It has the template
 read gate of `previewDocumentTemplate` and is `hidden` from MCP: each call costs a
 conversion, so it is a person's preview only (the assistant has the HTML preview and
-the draft check). The HTML `previewDocumentTemplate` stays for the marketplace and MCP.
+the draft check). The HTML `previewDocumentTemplate` stays for MCP.
+
+### Marketplace PDF previews (`previewMarketplaceTemplatePdf`)
+
+The marketplace previews a design by its slug (`previewMarketplaceTemplatePdf`, the
+input of `getMarketplaceTemplate`), so the browser never downloads a design's source
+and HTML just to look at it. The render and conversion are those of
+`previewDocumentTemplatePdf`; the gate is the same template read gate as
+`getMarketplaceTemplate`; it is `hidden` from MCP and the assistant; it stores
+nothing. A design converts to the same PDF for the life of a server process (the
+catalog ships with the code, and the sample data is fixed), so
+`previewMarketplaceTemplatePdf` in `document.template-source.ts` converts each design,
+and each print size of a Notice design, once per process and shares a conversion in
+flight; a failed one is forgotten so the next preview tries again. The map is
+bounded by the catalog. In the browser `useMarketplaceTemplatePdf` never refetches a
+design it holds (`staleTime: Infinity`; the cache releases the pdf.js document when it
+drops the query) and, unlike the editor, keeps no previous data, so another design's
+pages never stand in for the one selected: a design not yet converted shows the
+page-shaped skeleton. The page and the full-screen dialog share one query.
 
 `PdfPreview` is presentational and API-free so the marketplace can reuse it: it takes
 a `LoadedPdf` (from `loadPdf(bytes)`), a `label`, the skeleton's `orientation`, an
@@ -341,9 +382,11 @@ callbacks and must not call APIs.
 | `PdfPreview` (components) | API-free pdf.js preview with skeleton, updating and error states; reused by the marketplace |
 | `TemplateDraftCard`, `template-draft-model.ts` (components) | The chat's template draft card and the pure reading of drafts and the working copy |
 | `TemplateRevisionList`, `TemplateRevisionNotice` (components) | API-free revision rows and the read-only revision notice |
-| `DocumentTemplateMarketplace` | Document-type selection and catalog cards |
-| `DocumentTemplateMarketplaceDetail` | Contextual catalog preview and import action |
-| `DocumentKindCards` | API-free accessible visual radiogroup shared by Documents and Marketplace |
+| `DocumentTemplateMarketplace` (`document-template-marketplace.tsx`) | Type tabs, design tabs, the selected design's PDF, the full-screen preview and Use template; its address in `marketplace-model.ts` |
+| `TemplatePdfPreview`, `MarketplaceTemplatePdfPreview` (`template-pdf-preview.tsx`) | A source, or a marketplace design by slug, as its PDF; shared query defaults |
+| `PreviewDialogContent` (components) | API-free preview dialog shell: `tall` (the chat's draft and version previews) or `full` (the marketplace) |
+| `ScrollableTabsList` (components) | A tab row that scrolls sideways instead of squeezing (marketplace, examination workspace) |
+| `DocumentKindCards` | API-free accessible visual card group for the Documents workspace |
 | `DocumentPreview` | Restrictive empty-sandbox iframe for already sanitized HTML |
 
 All user input and submission state uses TanStack Form with Zod validators. Do not
@@ -364,7 +407,8 @@ same boundary through server middleware.
 | `getActiveDocumentTemplate` | Current immutable school revision or `null` | `READ_DOCUMENT_TEMPLATES` |
 | `selectMarketplaceTemplate` | Import and select a catalog design | `MANAGE_DOCUMENT_TEMPLATES` |
 | `saveDocumentTemplate` | Save and select a custom revision | `MANAGE_DOCUMENT_TEMPLATES` |
-| `previewDocumentTemplate` | Render source with synthetic data as HTML (marketplace, MCP) | `READ_DOCUMENT_TEMPLATES` |
+| `previewMarketplaceTemplatePdf` | A catalog design by slug as its PDF with synthetic data; converted once per process; hidden from MCP | `READ_DOCUMENT_TEMPLATES` |
+| `previewDocumentTemplate` | Render source with synthetic data as HTML (MCP) | `READ_DOCUMENT_TEMPLATES` |
 | `previewDocumentTemplatePdf` | The same render as a PDF for the editor and the read-only preview; hidden from MCP | `READ_DOCUMENT_TEMPLATES` |
 | `listDocumentTemplateRevisions` | Paged revision history, newest first | `READ_DOCUMENT_TEMPLATES` |
 | `getDocumentTemplateRevision` | One revision with its source | `READ_DOCUMENT_TEMPLATES` |
@@ -641,7 +685,8 @@ Important shapes and semantics:
    design-specific invariant.
 7. For a half design, verify two recipients produce one PDF page and three
    recipients produce two pages.
-8. Check marketplace list and detail pages at desktop, 390 px, and 320 px.
+8. Check the marketplace's type and design tabs, the design's PDF and its
+   full-screen preview at desktop, 390 px, and 320 px.
 
 ### Add or change a template variable
 
@@ -929,7 +974,10 @@ Browser verification must cover:
   error), save, reload, the AI dialog (no assistant) and the assistant's drafts
   (assistant), revision select, history dialog, read-only revision and Restore (with
   and without unsaved changes);
-- marketplace list, dedicated preview, active state, import conflict/error state;
+- marketplace type and design tabs (scrolling at 390 px), the selected design's PDF,
+  the full-screen preview (deep link, close, Use template from it), the old
+  `/:documentType/:slug` redirect, a design no longer listed, active state, import
+  conflict/error state;
 - desktop, 390 px, and the application minimum of 320 px;
 - page-level overflow, keyboard access, focus labels, permission-gated actions,
   iframe output, and console errors.

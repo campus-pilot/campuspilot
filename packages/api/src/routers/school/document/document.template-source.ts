@@ -130,6 +130,38 @@ export async function previewTemplatePdf(
 }
 
 /**
+ * Marketplace designs already converted, by type, slug and notice print size.
+ * See {@link previewMarketplaceTemplatePdf}.
+ */
+const marketplacePdfs = new Map<string, Promise<Uint8Array>>();
+
+/**
+ * A marketplace design as the PDF it prints as, with the same synthetic data
+ * and conversion as {@link previewTemplatePdf}. The catalog ships with the
+ * code and the sample data is fixed, so a design converts to the same PDF for
+ * the life of the process: each design (and each print size of a Notice
+ * design) is converted once, however many people preview it, and the map is
+ * bounded by the catalog. A conversion in flight is shared and a failed one
+ * is forgotten, so the next preview tries again. The caller's abort signal is
+ * therefore not passed on: someone else may be waiting for the same
+ * conversion, and a finished one is kept for the next.
+ */
+export function previewMarketplaceTemplatePdf(
+  design: { slug: string; documentType: DocumentType; pageSize: DocumentTemplatePageSize; content: string },
+  printSize: DocumentTemplatePageSize | undefined,
+): Promise<Uint8Array> {
+  // Only a Notice design is previewed at a print size (full when not asked).
+  const size = design.documentType === "notice" ? (printSize ?? "full") : undefined;
+  const key = `${design.documentType}:${design.slug}:${size ?? design.pageSize}`;
+  const held = marketplacePdfs.get(key);
+  if (held) return held;
+  const converting = previewTemplatePdf(design.content, design.documentType, design.pageSize, size);
+  marketplacePdfs.set(key, converting);
+  converting.catch(() => marketplacePdfs.delete(key));
+  return converting;
+}
+
+/**
  * What the in-app assistant (and any MCP client) is taught before it edits a
  * template of `documentType`: the shared rendering contract
  * (`templateRenderingContract`, the same rules the portable "Edit with AI"

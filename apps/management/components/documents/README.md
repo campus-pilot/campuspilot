@@ -30,11 +30,12 @@ for the management implementation.
 | `document-templates.tsx` | Settings empty state, read-only PDF preview, and the editor's entry (keyed by revision) |
 | `template-workspace.tsx` | The template builder: header row, resizable AI/Code pane, PDF preview, working copy, assistant drafts, revision restore |
 | `template-assistant.tsx` | The builder's chat (`?chat=`), its seed, suggestions and drafts |
-| `template-pdf-preview.tsx` | A template source as its PDF (`previewDocumentTemplatePdf`), cached per source |
+| `template-pdf-preview.tsx` | A template source as its PDF (`previewDocumentTemplatePdf`), cached per source; a marketplace design as its PDF by slug (`previewMarketplaceTemplatePdf`) |
 | `template-revisions.tsx` | Revision select (`?revision=`), All revisions dialog, read-only revision with Restore |
 | `template-code-editor.tsx` | Dynamically loaded Monaco source editor and format action |
 | `document-template-settings.tsx` | Settings permission boundary and scope adapter |
-| `document-template-marketplace.tsx` | Catalog list, dedicated detail preview, import mutation |
+| `document-template-marketplace.tsx` | Type tabs, design tabs, the selected design's PDF, full-screen preview dialog, import mutation |
+| `marketplace-model.ts` | The marketplace's address (`?type=&template=&preview=1`) and which type and design it shows |
 | `template-prompt-editor.tsx` | Provider-neutral portable-prompt dialog |
 | `document-export-link.tsx` | Contextual links from source-domain screens into Documents |
 | `student-recipient-picker.tsx` | Searchable, paginated explicit-recipient selection that retains choices across searches |
@@ -89,9 +90,14 @@ document HTML is shown: an iframe with an **empty** `sandbox`. Its options:
 - The removed Billing Documents page is not a second home for bulk statements.
   Statement generation intentionally remains per admission in the admission
   ledger; do not add a global Statements card without a new product decision.
-- `DocumentKindCards` is the type chooser in both Documents and the marketplace.
-  It is a button group when cards launch workflows and a radiogroup when a selected
-  `value` is supplied.
+- `DocumentKindCards` is the type chooser in Documents. It is a button group when
+  cards launch workflows and a radiogroup when a selected `value` is supplied.
+- The marketplace is tabs, not cards: a scrollable line-tab row of document types
+  (`ScrollableTabsList`), a scrollable pill-tab row of the type's designs, then the
+  selected design's PDF in a frame most of the screen tall. Only the selected
+  design is converted. *Preview* opens it full screen (`PreviewDialogContent` size
+  `full`) with Use template beside the title. The type, design and open preview are
+  in the address, not local state.
 - The builder follows the question paper studio: it fills the window from md up
   (`APP_SHELL_FILL_HEIGHT_MD_CLASS`), the editing pane (AI | Code tabs) and the
   preview share a resizable divider, and *Hide editor* / *Show editor* fold the pane.
@@ -142,7 +148,7 @@ a `classId` that does not take part either way.
 ## Manual verification
 
 Check configured and missing-template states, all six document cards, unified
-history, Settings editor/read-only/empty states, AI dialog, marketplace list/detail,
+history, Settings editor/read-only/empty states, AI dialog, marketplace tabs/full-screen preview,
 and permission-denied fallbacks. Inspect desktop, 390 px, and 320 px layouts. A
 type-check is not a substitute for opening the real authenticated UI and inspecting
 the rendered iframe.

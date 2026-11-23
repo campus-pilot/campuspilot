@@ -937,6 +937,23 @@ describe('document templates, generation, and artifact lifecycle', () => {
       outsider.school.previewDocumentTemplatePdf({ schoolId, documentType: 'id_card', content: '<p>x</p>' }),
     ).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
+  it('previews a marketplace design as its PDF by slug, behind the template read gate', async () => {
+    const design = { schoolId, documentType: 'id_card' as const, slug: 'id_card-modern' };
+    const first = await teacher.school.previewMarketplaceTemplatePdf(design);
+    expect((await PDFDocument.load(Buffer.from(first.pdfBase64, 'base64'))).getPageCount()).toBeGreaterThan(0);
+    // The catalog and the sample data are fixed, so a design converts once and the same bytes come back.
+    expect((await manager.school.previewMarketplaceTemplatePdf(design)).pdfBase64).toBe(first.pdfBase64);
+    // A design is found by its type and slug together.
+    await expect(
+      teacher.school.previewMarketplaceTemplatePdf({ ...design, slug: 'report_card-default' }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    // A print size is a Notice design's choice; it is refused for every other type.
+    await expect(
+      teacher.school.previewMarketplaceTemplatePdf({ ...design, printSize: 'half' }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(outsider.school.previewMarketplaceTemplatePdf(design)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(createTestClient(null).school.previewMarketplaceTemplatePdf(design)).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+  });
   it('lists every revision of a template newest first and reads one, behind the template read gate', async () => {
     const scope = { schoolId, documentType: 'admit_card' as const };
     const current = await manager.school.getActiveDocumentTemplate(scope);

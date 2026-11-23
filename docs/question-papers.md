@@ -101,7 +101,7 @@ without access must learn nothing about the school's features):
    `completed` (read from `exam_lifecycle`, never inferred from the plan). Once an
    exam is completed, papers are read-only; preview and download still work.
 
-The management app mirrors this: the Question paper tab, its marketplace card and
+The management app mirrors this: the Question paper tab, its marketplace tab and
 its settings page exist only when the `assistant` feature is on and (for the tab)
 the user's role may use it. While the answer is loading the tab is absent and
 Results stays the default (`useAssistantGate`). The sidebar's **Question papers** entry

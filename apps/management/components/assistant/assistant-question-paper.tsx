@@ -6,6 +6,7 @@ import type { AssistantQuestionPaperView, AssistantStandaloneQuestionPaperView }
 import type { AssistantTimelineRow } from '@campuspilot/components/assistant/timeline-model';
 import { AssistantViewFrame } from '@campuspilot/components/assistant';
 import { DocumentPreview } from '@campuspilot/components/documents/document-controls';
+import { PreviewDialogContent } from '@campuspilot/components/documents/preview-dialog';
 import {
   draftCallsNeedingRecheck,
   draftFactsOf,
@@ -19,7 +20,7 @@ import {
 import { PlaceholderNote, RemovedList } from '@campuspilot/components/question-paper/paper-notices';
 import { QuestionPaperDraftCard, QuestionPaperVersionCard } from '@campuspilot/components/question-paper/chat-cards';
 import { Button } from '@campuspilot/ui/components/button';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@campuspilot/ui/components/dialog';
+import { Dialog, DialogTrigger } from '@campuspilot/ui/components/dialog';
 import { Skeleton } from '@campuspilot/ui/components/skeleton';
 import { toast } from '@campuspilot/ui/lib/toast';
 import { useQueries, useQuery } from '@tanstack/react-query';
@@ -45,14 +46,9 @@ function PreviewDialog({ title, description, children }: { title: string; descri
           <Eye data-icon="inline-start" aria-hidden /> Preview
         </Button>
       </DialogTrigger>
-      {/* As tall as the screen allows, never taller: a centered dialog has no scroll, so a taller one hid its title, close button and the paper's end on a phone. */}
-      <DialogContent className="flex h-[88dvh] flex-col sm:max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
-        </DialogHeader>
-        <div className="flex min-h-0 flex-1 flex-col">{children}</div>
-      </DialogContent>
+      <PreviewDialogContent title={title} description={description}>
+        {children}
+      </PreviewDialogContent>
     </Dialog>
   );
 }

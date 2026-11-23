@@ -10,6 +10,7 @@ import { Store } from 'lucide-react';
 import { DocumentButton, DocumentPanel } from '@campuspilot/components/documents/document-controls';
 import { OptionSelect } from '@campuspilot/components/option-select';
 import { orpc } from '@/lib/orpc';
+import { marketplaceHref as marketplaceHrefOf } from './marketplace-model';
 import { noticePreviewPrintSizeSchema, noticePrintSizeOptions, type NoticePreviewPrintSize } from './notice-print-size-preview';
 import {
   DocumentLoading,
@@ -34,8 +35,9 @@ const TEMPLATE_TITLES: Record<DocumentTemplateScope['documentType'], string> = {
   question_paper: 'Question Paper Template',
 };
 
+/** The marketplace on this type; it opens on the design the school uses when that came from the marketplace. */
 function marketplaceHref(scope: DocumentTemplateScope) {
-  return `/school/${encodeURIComponent(scope.schoolId)}/marketplace/templates?type=${scope.documentType}`;
+  return marketplaceHrefOf(scope.schoolId, { type: scope.documentType });
 }
 
 /** The centred column of the states that are pages (no template, read-only, loading); the editor fills the window instead. */

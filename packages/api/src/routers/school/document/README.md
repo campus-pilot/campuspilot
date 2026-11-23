@@ -80,6 +80,11 @@ ID-card, admit-card, timetable, bill, and receipt designs, plus matching account
 statement designs. Source and sample previews are available through normal oRPC
 procedures. `document.catalog.ts` defines the variable reference and synthetic
 preview data, while `document.catalog.marketplace.ts` owns the catalog.
+The management marketplace previews a design as its PDF by slug
+(`previewMarketplaceTemplatePdf`, hidden from MCP): the catalog and sample data are
+fixed, so `previewMarketplaceTemplatePdf` in `document.template-source.ts` converts
+each design (and each Notice print size) once per process and shares a conversion
+in flight.
 
 Admit-card and finance template revisions may use a `half` footprint. The batch
 renderer pairs those documents vertically on portrait A4 and starts a new sheet

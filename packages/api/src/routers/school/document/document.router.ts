@@ -41,6 +41,7 @@ import { getTemplateRevision, listTemplateRevisions } from "./document.template-
 import {
   assertValidTemplateSource,
   checkTemplateDraft,
+  previewMarketplaceTemplatePdf,
   previewTemplateHtml,
   previewTemplatePdf,
   templateEditingGuide,
@@ -363,6 +364,44 @@ export const schoolDocumentRouter = {
         html: previewTemplateHtml(item.content, item.documentType, item.pageSize, input.printSize),
         contextHelp: DOCUMENT_CONTEXT_HELP,
       };
+    }),
+  /**
+   * A marketplace design as the PDF it prints as, named by its slug, so the
+   * marketplace previews a design without first downloading its source and
+   * HTML. It has `getMarketplaceTemplate`'s read gate and, like the editor's
+   * `previewDocumentTemplatePdf`, is a person's preview only (`hidden` from
+   * MCP and the assistant). The conversion is shared: each design converts
+   * once per server process (`previewMarketplaceTemplatePdf`).
+   */
+  previewMarketplaceTemplatePdf: protectedProcedure
+    .route(
+      route(
+        "Preview a marketplace template as a PDF",
+        "Render a marketplace design with synthetic data and convert it to the PDF it prints as. Stores nothing.",
+      ),
+    )
+    .meta({
+      mcp: {
+        exposure: "hidden",
+        access: "read",
+        destructive: false,
+        module: "documents",
+      },
+    })
+    .input(dto.marketplaceTemplateInputSchema)
+    .use(requireDocumentTypePermission(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES))
+    .output(dto.previewTemplatePdfOutputSchema)
+    .handler(async ({ input }) => {
+      const item = DOCUMENT_MARKETPLACE.find(
+        (t) => t.slug === input.slug && t.documentType === input.documentType,
+      );
+      if (!item) throw rpcError.notFound("Marketplace template");
+      try {
+        const bytes = await previewMarketplaceTemplatePdf(item, input.printSize);
+        return { pdfBase64: Buffer.from(bytes).toString("base64") };
+      } catch (error) {
+        throw toRpcError(error);
+      }
     }),
   getActiveDocumentTemplate: protectedProcedure
     .route(
