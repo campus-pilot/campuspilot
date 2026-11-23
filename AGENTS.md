@@ -189,6 +189,20 @@ routes and their proof-of-work, the `lead` table, the `LeadControl` /
 insert; every side effect (the WhatsApp alert) is scheduled after commit and
 may fail without failing the request.
 
+## School Onboarding form
+
+Before changing the website's standalone `/onboarding` page, the public
+`/public/leads/school-onboarding` route, the `school_registration_request`
+table, its S3 files, its WhatsApp alert, the admin School onboarding page, or
+setting a school up from a submission (`school_setup`, the `SchoolSetup`
+workflow, `routers/system-admin/school-setup`, the setup wizard), read
+[School Onboarding form](docs/school-onboarding-form.md). The page is kept out
+of search on purpose (robots meta, `robots.txt`, `X-Robots-Tag`) and is linked
+from nowhere; uploads are bounded by type (sniffed from bytes) and size on the
+server, and the voice note's ten minutes by the recorder. Each setup step is
+one transaction that records its own completion; keep it that way when adding
+a step, so a retry never creates anything twice.
+
 ## School feature flags and subscription tiers
 
 Before adding a per-school feature or a tier, gating a procedure, page or

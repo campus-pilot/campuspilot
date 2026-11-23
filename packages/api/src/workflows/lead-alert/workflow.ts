@@ -20,7 +20,7 @@ const DATABASE_STEP_OPTIONS = { maxRetryAttempts: 5, initialRetryInterval: 1_000
  * that looks permanent, such as the template still awaiting Meta's approval
  * or a paused number, usually resolves within that day.
  */
-const SEND_STEP_OPTIONS = {
+export const SEND_STEP_OPTIONS = {
   initialRetryInterval: 30_000,
   retryIntervalFactor: 2,
   maxRetryInterval: 30 * 60_000,
@@ -30,7 +30,7 @@ const SEND_STEP_OPTIONS = {
 export type LeadAlertOutcome = { status: 'sent' | 'failed' | 'not_pending' };
 
 /** The Cloud API client settings, or null while WhatsApp sending is not set up. */
-function whatsAppConfig(): WhatsAppClientConfig | null {
+export function whatsAppConfig(): WhatsAppClientConfig | null {
   if (!env.WHATSAPP_ENABLED || !env.WHATSAPP_ACCESS_TOKEN || !env.WHATSAPP_PHONE_NUMBER_ID || !env.WHATSAPP_GRAPH_API_VERSION) return null;
   return {
     accessToken: env.WHATSAPP_ACCESS_TOKEN,
@@ -41,7 +41,7 @@ function whatsAppConfig(): WhatsAppClientConfig | null {
 }
 
 /** Safe one-line reason of a failed send (Meta's code, never the request). */
-function describeSendFailure(error: WhatsAppApiError | WhatsAppTransportError) {
+export function describeSendFailure(error: WhatsAppApiError | WhatsAppTransportError) {
   if (error === 'connect_failed') return 'WhatsApp could not be reached.';
   if (error === 'outcome_unknown') return 'WhatsApp did not confirm the message.';
   return `WhatsApp refused the message (${error.code !== null ? `wa_${error.code}` : `http_${error.status}`}).`;
