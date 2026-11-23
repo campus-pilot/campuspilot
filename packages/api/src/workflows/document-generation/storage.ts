@@ -13,6 +13,8 @@ import {
 import { env } from '@campuspilot/env/server';
 import { getS3Client } from '@campuspilot/s3/client';
 
+import { DocumentConversionRefused } from '../../routers/school/document/document.render';
+
 /**
  * Object storage of a generation job. Everything a job writes before its PDF
  * is ready lives under its own private prefix, `schools/{schoolId}/document-jobs/{jobId}/`:
@@ -116,7 +118,7 @@ const PART_BYTES = 8 * 1024 * 1024;
 export async function uploadStream(
   key: string,
   stream: AsyncIterable<Uint8Array>,
-  options: { contentType: string; maxBytes: number },
+  options: { contentType: string; maxBytes: number; tooLarge?: () => Error },
 ): Promise<{ byteSize: number; sha256: string }> {
   const hash = createHash('sha256');
   let byteSize = 0;
@@ -141,7 +143,7 @@ export async function uploadStream(
   try {
     for await (const chunk of stream) {
       byteSize += chunk.length;
-      if (byteSize > options.maxBytes) throw new Error('The document is larger than the stored PDF limit.');
+      if (byteSize > options.maxBytes) throw options.tooLarge?.() ?? new Error('The document is larger than the stored PDF limit.');
       hash.update(chunk);
       pending.push(chunk);
       pendingBytes += chunk.length;
@@ -227,9 +229,21 @@ export async function mergeBatchPdfs(
     duplex: 'half',
     signal: AbortSignal.timeout(MERGE_TIMEOUT_MS),
   } as RequestInit & { duplex: 'half' });
+  // As for a conversion: a refusal (4xx but 408/429) or an oversized result would fail the same way again.
+  if (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new DocumentConversionRefused('refused', `PDF merge was refused (${response.status}).`);
+  }
   if (!response.ok || !response.body) throw new Error(`PDF merge failed (${response.status}).`);
+  const tooLarge = () => new DocumentConversionRefused('too_large', 'The merged PDF is larger than the stored PDF limit.');
+  const declared = Number(response.headers.get('content-length') ?? 'NaN');
+  if (Number.isFinite(declared) && declared > MERGED_PDF_MAX_BYTES) {
+    await response.body.cancel().catch(() => undefined);
+    throw tooLarge();
+  }
   return uploadStream(outputKey, pdfBytes(response.body as unknown as AsyncIterable<Uint8Array>), {
     contentType: 'application/pdf',
     maxBytes: MERGED_PDF_MAX_BYTES,
+    tooLarge,
   });
 }

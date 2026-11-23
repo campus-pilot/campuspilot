@@ -38,7 +38,7 @@ import { readDocumentTemplate } from '../../routers/school/document/document.sto
 import { resolveDocumentSource, sourceProvenance } from '../../routers/school/document/document.source';
 import { DOCUMENT_BATCH_LIMITS, DocumentBatchPlanError, planDocumentBatches, type DocumentBatchLimits } from './batches';
 import { DOCUMENT_GENERATION_JOB_FAILURES, type DocumentGenerationJobErrorCode } from './constants';
-import { SlotWaitTimeout, withConversionSlot, withPrepareSlot } from './conversion-slots';
+import { SlotWaitTimeout, withConversionSlot, withPrepareSlot, type SlotLimiter } from './conversion-slots';
 import type { DocumentGenerationJobInput } from './input';
 import { SCHOOL_SUSPENDED_REASON, schoolWriteRefusalMessageOf } from '../../school-access/school-access.contract';
 import { readSchoolWriteFacts, resolveSchoolWriteRefusal } from '../../school-access/school-access.service';
@@ -103,15 +103,27 @@ export class DocumentJobFailure extends Error {
 /** The job is no longer running (failed by the sweep, or deleted with its school): stop quietly. */
 class JobStopped extends Error {}
 
-/** A journaled step's result: a value, a failure to report, or a stop. */
+/** A journaled step's result: a value, a failure to report, a stop, or a slot wait that ran out. */
 type StepResult<T> =
   | { ok: true; value: T }
   | { ok: false; failure: { code: DocumentGenerationJobErrorCode; message: string; detail: string | null } }
-  | { ok: false; stopped: true };
+  | { ok: false; stopped: true }
+  | { ok: false; slotWaitTimedOut: true };
 
 export type StepOptions = { maxRetryAttempts?: number };
-/** Runs one named, idempotent unit of work; Restate journals it, tests call it directly. */
-export type StepRunner = <T>(name: string, action: () => Promise<T>, options?: StepOptions) => Promise<T>;
+/**
+ * Runs one named, idempotent unit of work; Restate journals it, tests call it
+ * directly. `signal` aborts when the Restate attempt running the step ends,
+ * so a step still waiting for a slot stops waiting.
+ */
+export type StepRunner = <T>(name: string, action: (signal?: AbortSignal) => Promise<T>, options?: StepOptions) => Promise<T>;
+
+/**
+ * How many times a step waits `SLOT_WAIT_LIMIT_MS` for a slot before the job
+ * fails as `worker_busy` (an hour in all, the running deadline). Each wait
+ * is its own journaled step, so waiting never uses a step's retries.
+ */
+const MAX_SLOT_WAITS = 6;
 
 export type DocumentGenerationOutcome =
   | { status: 'succeeded'; artifactId: string }
@@ -125,10 +137,20 @@ export type DocumentGenerationDeps = {
   merge: typeof mergeBatchPdfs;
   /** Tests lower these to make a few documents span several batches. */
   batchLimits: DocumentBatchLimits;
+  /** The process's slots (tests pass their own to observe them). */
+  conversionSlots: SlotLimiter;
+  prepareSlots: SlotLimiter;
 };
 
 export function defaultDocumentGenerationDeps(): DocumentGenerationDeps {
-  return { db: defaultDb, convert: convertDocumentPdf, merge: mergeBatchPdfs, batchLimits: DOCUMENT_BATCH_LIMITS };
+  return {
+    db: defaultDb,
+    convert: convertDocumentPdf,
+    merge: mergeBatchPdfs,
+    batchLimits: DOCUMENT_BATCH_LIMITS,
+    conversionSlots: withConversionSlot,
+    prepareSlots: withPrepareSlot,
+  };
 }
 
 /**
@@ -198,24 +220,37 @@ export async function runDocumentGeneration(
 ): Promise<DocumentGenerationOutcome> {
   const deps = options.deps ?? defaultDocumentGenerationDeps();
 
-  /** A step whose business failures are values, so Restate never retries them. */
-  const run = async <T>(name: string, action: () => Promise<T>, stepOptions?: StepOptions): Promise<T> => {
-    const result = await step<StepResult<T>>(
-      name,
-      async () => {
-        try {
-          return { ok: true, value: await action() };
-        } catch (error) {
-          if (error instanceof JobStopped) return { ok: false, stopped: true };
-          if (error instanceof DocumentJobFailure) return { ok: false, failure: { code: error.code, message: error.message, detail: error.detail } };
-          throw error;
-        }
-      },
-      stepOptions,
-    );
-    if (result.ok) return result.value;
-    if ('stopped' in result) throw new JobStopped();
-    throw new DocumentJobFailure(result.failure.code, result.failure.message, result.failure.detail);
+  /**
+   * A step whose business failures are values, so Restate never retries
+   * them. With `slot`, the closure takes the slot first and returns it when
+   * it settles; a wait that runs out is journaled and waited again under the
+   * next name (`name:wait-N`).
+   */
+  const run = async <T>(name: string, action: () => Promise<T>, stepOptions?: StepOptions & { slot?: SlotLimiter }): Promise<T> => {
+    const { slot, ...runOptions } = stepOptions ?? {};
+    for (let wait = 0; ; wait += 1) {
+      const result = await step<StepResult<T>>(
+        wait === 0 ? name : `${name}:wait-${wait}`,
+        async (signal) => {
+          try {
+            return { ok: true, value: slot ? await slot(action, signal) : await action() };
+          } catch (error) {
+            if (error instanceof SlotWaitTimeout) return { ok: false, slotWaitTimedOut: true };
+            if (error instanceof JobStopped) return { ok: false, stopped: true };
+            if (error instanceof DocumentJobFailure) return { ok: false, failure: { code: error.code, message: error.message, detail: error.detail } };
+            throw error;
+          }
+        },
+        runOptions,
+      );
+      if (result.ok) return result.value;
+      if ('slotWaitTimedOut' in result) {
+        if (wait + 1 >= MAX_SLOT_WAITS) throw new DocumentJobFailure('worker_busy');
+        continue;
+      }
+      if ('stopped' in result) throw new JobStopped();
+      throw new DocumentJobFailure(result.failure.code, result.failure.message, result.failure.detail);
+    }
   };
 
   let job: ClaimedJob | null;
@@ -231,12 +266,11 @@ export async function runDocumentGeneration(
   if (!job) return { status: 'skipped' };
   let phase: 'prepare' | 'convert' = 'prepare';
   try {
-    // Slots are taken outside the journaled steps: a long wait never runs a
-    // step twice, and one that outlasts the limit retries the invocation.
-    const prepared = await withPrepareSlot(() =>
-      run('prepare', () =>
-        withTimingScope(log, 'document-generation.prepare.timing', { jobId: job.jobId }, () => prepareJob(deps, job)),
-      ),
+    // Slots are taken inside the steps (see `conversion-slots.ts`).
+    const prepared = await run(
+      'prepare',
+      () => withTimingScope(log, 'document-generation.prepare.timing', { jobId: job.jobId }, () => prepareJob(deps, job)),
+      { slot: deps.prepareSlots },
     );
     phase = 'convert';
     const single = prepared.batches.length === 1;
@@ -244,12 +278,13 @@ export async function runDocumentGeneration(
     let pdf: { byteSize: number; sha256: string } | null = null;
     let batchBytes = 0;
     for (const [index, batch] of prepared.batches.entries()) {
-      const stored = await withConversionSlot(() =>
-        run(`batch:${index + 1}`, () =>
+      const stored = await run(
+        `batch:${index + 1}`,
+        () =>
           withTimingScope(log, 'document-generation.batch.timing', { jobId: job.jobId, batch: index + 1, documents: batch.documents }, () =>
             convertBatch(deps, job, prepared, index, single ? finalKey : batchPdfKey(documentJobPrefix(job.schoolId, job.jobId), index)),
           ),
-        ),
+        { slot: deps.conversionSlots },
       );
       batchBytes += stored.byteSize;
       if (single) pdf = stored;
@@ -258,12 +293,13 @@ export async function runDocumentGeneration(
       // Decided from the journaled batch sizes, before anything is sent to Gotenberg.
       if (batchBytes > MERGED_PDF_MAX_BYTES)
         throw new DocumentJobFailure('pdf_too_large', undefined, `The batches hold ${batchBytes} bytes.`);
-      pdf = await withConversionSlot(() =>
-        run('merge', () =>
+      pdf = await run(
+        'merge',
+        () =>
           withTimingScope(log, 'document-generation.merge.timing', { jobId: job.jobId, batches: prepared.batches.length }, () =>
             mergeJob(deps, job, prepared.batches.length, finalKey),
           ),
-        ),
+        { slot: deps.conversionSlots },
       );
     }
     const finished = pdf;
@@ -272,8 +308,6 @@ export async function runDocumentGeneration(
     log.info({ jobId: job.jobId, documents: prepared.documentCount, batches: prepared.batches.length, pdfBytes: finished.byteSize }, 'document-generation.job.succeeded');
     return { status: 'succeeded', artifactId: job.artifactId };
   } catch (error) {
-    // Not a failure of the job: Restate retries the invocation from its journal.
-    if (error instanceof SlotWaitTimeout) throw error;
     if (error instanceof JobStopped) {
       await step('cleanup', () => cleanupJob(deps.db, job));
       return { status: 'skipped' };
@@ -501,8 +535,8 @@ async function prepareJob(deps: DocumentGenerationDeps, job: ClaimedJob): Promis
   annotateTiming({ documents: data.contexts.length, batches: plan.length, images: heads.size });
   const updated = await deps.db
     .update(documentGenerationJobTable)
-    // The documents the job really prints: the start's count may differ if data changed since.
-    .set({ batchCount: plan.length, batchesDone: 0, documentCount: data.contexts.length })
+    // What the PDF prints, its own fact next to the start's count (data may have changed since).
+    .set({ batchCount: plan.length, batchesDone: 0, printedDocumentCount: data.contexts.length })
     .where(and(eq(documentGenerationJobTable.id, job.jobId), eq(documentGenerationJobTable.status, 'running')))
     .returning({ id: documentGenerationJobTable.id });
   if (updated.length === 0) throw new JobStopped();
@@ -593,7 +627,15 @@ async function mergeJob(deps: DocumentGenerationDeps, job: ClaimedJob, batchCoun
   await assertRunning(deps.db, job.jobId);
   const prefix = documentJobPrefix(job.schoolId, job.jobId);
   const files = Array.from({ length: batchCount }, (_, index) => ({ key: batchPdfKey(prefix, index), name: batchPdfName(index) }));
-  const merged = await measure('doc.pdf.merge', () => deps.merge(files, finalKey));
+  let merged: { byteSize: number; sha256: string };
+  try {
+    merged = await measure('doc.pdf.merge', () => deps.merge(files, finalKey));
+  } catch (error) {
+    // As for a batch: a refused merge or an oversized result fails the same way again.
+    if (error instanceof DocumentConversionRefused)
+      throw new DocumentJobFailure(error.reason === 'too_large' ? 'pdf_too_large' : 'conversion_refused', undefined, error.message);
+    throw error;
+  }
   annotateTiming({ pdfBytes: merged.byteSize });
   return merged;
 }

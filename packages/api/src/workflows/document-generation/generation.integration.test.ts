@@ -28,6 +28,7 @@ import { buildDocumentContexts } from '../../routers/school/document/document.co
 import { combineDocuments, convertDocumentPdf, renderDocuments } from '../../routers/school/document/document.render';
 import { DOCUMENT_BATCH_LIMITS } from './batches';
 import { defaultDocumentGenerationDeps, runDocumentGeneration, type StepRunner } from './generation';
+import { createSlots } from './conversion-slots';
 import { documentJobPrefix } from './storage';
 
 /** A 1 x 1 PNG, the school logo of these tests. */
@@ -215,6 +216,32 @@ describe('document generation jobs (batched, in the worker)', () => {
     expect(job.temporaryObjectsDeletedAt).toEqual(expect.any(Date));
     expect(await runDocumentJob(jobId)).toEqual({ status: 'skipped' });
     expect((await artifactRows()).length).toBe(before + 1);
+  });
+
+  it('returns its slot when a batch step fails and Restate retries it', async () => {
+    const deps = { ...defaultDocumentGenerationDeps(), conversionSlots: createSlots(1, 'test.wait'), prepareSlots: createSlots(1, 'test.wait') };
+    let failures = 1;
+    const flaky = {
+      ...deps,
+      convert: (...args: Parameters<typeof deps.convert>) => {
+        if (failures-- > 0) return Promise.reject(new Error('PDF conversion failed (503).'));
+        return deps.convert(...args);
+      },
+    };
+    // Like Restate: a step whose closure throws is run again (a new attempt).
+    const retrying: StepRunner = async (_name, action) => {
+      for (let attempt = 1; ; attempt += 1) {
+        try {
+          return await action();
+        } catch (error) {
+          if (attempt >= 3) throw error;
+        }
+      }
+    };
+    const { jobId } = await manager.school.generateDocument(idCards(studentIds.slice(0, 1)));
+    expect(await runDocumentGeneration({ jobId }, retrying, { deps: flaky })).toMatchObject({ status: 'succeeded' });
+    expect(deps.conversionSlots.usage()).toEqual({ active: 0, waiting: 0 });
+    expect(deps.prepareSlots.usage()).toEqual({ active: 0, waiting: 0 });
   });
 
   it('renders with the revision pinned at start, even after the school selects another', async () => {

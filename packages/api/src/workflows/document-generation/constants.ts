@@ -65,6 +65,7 @@ export const DOCUMENT_GENERATION_JOB_FAILURES = {
   no_plan: 'This school has no active plan, so nothing can be created. Contact CampusPilot to continue.',
   conversion_failed: 'The PDF could not be created. Try again.',
   internal_error: 'The PDF could not be created because of an unexpected error. Try again.',
+  worker_busy: 'The PDF service was busy for too long. Try again later.',
   not_started: 'The PDF was not started in time. Try again.',
   not_finished: 'The PDF took too long to create. Try again with fewer documents.',
   dispatch_failed: 'The PDF could not be started. Try again.',

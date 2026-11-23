@@ -33,7 +33,8 @@ function journaled(ctx: restate.ObjectContext): StepRunner {
       name,
       async () => {
         try {
-          return await action();
+          // Ends when this attempt ends (retry, abort, lost connection), so a slot wait stops with it.
+          return await action(ctx.request().attemptCompletedSignal);
         } catch (error) {
           log.error(
             {
