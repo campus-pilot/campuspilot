@@ -101,3 +101,21 @@ export const assistantEditorSourceSchema = z.object({
   content: z.string().min(1).max(TEMPLATE_SOURCE_MAX_CHARS),
 });
 export type AssistantEditorSource = z.infer<typeof assistantEditorSourceSchema>;
+
+/**
+ * The tools that change a school's template, by MCP name. In a conversation
+ * started from the template editor (its first message carries the
+ * `document_template` seed) the assistant's runtime refuses them before they
+ * reach an approval card: there the person saves with the editor's own Save,
+ * and the model proposes through `validateDocumentTemplateDraft` only. This
+ * does not rely on the model following its instructions. Any new procedure
+ * that writes a school template belongs here.
+ */
+export const TEMPLATE_EDITOR_REFUSED_TOOLS: ReadonlySet<string> = new Set([
+  'school.saveDocumentTemplate',
+  'school.selectMarketplaceTemplate',
+]);
+
+/** What a refused template write tells the model (see {@link TEMPLATE_EDITOR_REFUSED_TOOLS}). */
+export const TEMPLATE_EDITOR_REFUSED_MESSAGE =
+  'This conversation was started from the template editor, where only the person saves, with the editor\'s Save button. Propose the complete template with validateDocumentTemplateDraft instead; a valid draft is shown in the editor.';

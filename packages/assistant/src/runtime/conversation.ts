@@ -1,5 +1,10 @@
 import { ASSISTANT_DOCUMENT_REJECTED_MESSAGE } from '@campuspilot/assistant-contract/attachments';
 import { ASSISTANT_TERMINAL_RUN_STATUSES } from '@campuspilot/assistant-contract/dto';
+import {
+  TEMPLATE_EDITOR_REFUSED_MESSAGE,
+  TEMPLATE_EDITOR_REFUSED_TOOLS,
+  type TemplateDocumentType,
+} from '@campuspilot/assistant-contract/template-editing';
 import type { Logger } from '@campuspilot/logger';
 import * as restate from '@restatedev/restate-sdk';
 
@@ -197,6 +202,14 @@ type RunFacts = {
    * for a run journaled before standalone papers existed.
    */
   standalonePaperId?: string | null;
+  /**
+   * The document type of the template editor the conversation was started
+   * from (`store.templateEditorTypeOf`), or null for any other conversation.
+   * In such a conversation the template writes are refused
+   * (`TEMPLATE_EDITOR_REFUSED_TOOLS`). Absent from a run journaled before it
+   * existed, which refuses nothing.
+   */
+  templateEditorType?: TemplateDocumentType | null;
   facts: AssistantConversationFacts;
 };
 
@@ -390,6 +403,7 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
       model: provider.model,
       paper: store.sharedPaperOf(conversation),
       standalonePaperId: store.sharedStandalonePaperOf(conversation),
+      templateEditorType: await store.templateEditorTypeOf(db, run.conversationId),
       facts: {
         schoolId: run.schoolId,
         schoolName: await lookUpSchoolName(run.id, run.schoolId),
@@ -685,6 +699,21 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
     }
 
     if (tool.source === 'local') return showView(run, toolUse);
+
+    // The template editor's own conversation never saves a template: the person
+    // does, with the editor's Save. Refused here, before any approval card, so it
+    // does not depend on the model following its instructions.
+    if (run.templateEditorType && TEMPLATE_EDITOR_REFUSED_TOOLS.has(tool.mcpName)) {
+      return {
+        action: 'result',
+        result: {
+          toolUseId: toolUse.id,
+          toolName: toolUse.name,
+          content: JSON.stringify({ code: 'FORBIDDEN', message: TEMPLATE_EDITOR_REFUSED_MESSAGE }),
+          isError: true,
+        },
+      };
+    }
 
     const needsApproval = requiresApproval(tool);
     const body: AssistantToolCallBody = {

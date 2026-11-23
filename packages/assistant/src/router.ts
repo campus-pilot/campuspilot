@@ -69,6 +69,29 @@ async function assertSeedNamesAPaper(session: AssistantSession, schoolId: string
   }
 }
 
+/**
+ * Refuses the template editor's source (`editorSource`) in any conversation
+ * but one started from that template's editor: a new conversation must start
+ * with the `document_template` seed of the same document type, and a
+ * continued one must have been started with it (`store.templateEditorTypeOf`,
+ * the seed of its first message). So a template's source never lands in an
+ * unrelated chat, and the model only ever reads it where the editor's rules
+ * (drafts shown in the editor, template writes refused) hold.
+ */
+async function assertEditorSourceBelongs(input: { conversationId?: string | null; seed?: AssistantMessageSeed | null; editorSource?: { documentType: string } | null }) {
+  if (!input.editorSource) return;
+  const started = input.conversationId
+    ? await store.templateEditorTypeOf(db, input.conversationId)
+    : input.seed?.kind === 'document_template'
+      ? input.seed.documentType
+      : null;
+  if (started !== input.editorSource.documentType) {
+    throw new ORPCError('BAD_REQUEST', {
+      message: "This chat was not started from this template's editor, so the editor's template cannot be sent in it. Start a new chat in the template editor.",
+    });
+  }
+}
+
 /** The paper a question paper seed names, as the parts a shared conversation stores. */
 const paperKeyOfSeed = (seed: Extract<NonNullable<AssistantMessageSeed>, { kind: 'question_paper' }>): PaperKeyParts => ({
   sessionId: seed.sessionId,
@@ -394,6 +417,9 @@ export const assistantRouter = os.router({
         message: 'This conversation runs on a model provider that is not configured now. Start a new conversation.',
       });
     }
+
+    // Checked once the conversation is known to be the user's to continue, so it reveals nothing about another one.
+    await assertEditorSourceBelongs(input);
 
     const conversationId = input.conversationId ?? generateId('conversation');
     const runId = generateId('run');

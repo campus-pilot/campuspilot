@@ -780,6 +780,25 @@ describe('images attached to a message', () => {
     expect(fast.item.body.tier).toBeUndefined();
   });
 
+  it('takes the template editor’s source only in a conversation started from that template’s editor', async () => {
+    const owner = await newOwner();
+    const editorSource = { documentType: 'bill', content: '<p>{{school.name}}</p>' };
+    const seed = { kind: 'document_template', documentType: 'bill' };
+    // A new conversation: only with the seed of the same document type.
+    await expect(startConversation(owner, { text: 'Tidy this', editorSource })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(startConversation(owner, { text: 'Tidy this', editorSource, seed: { ...seed, documentType: 'receipt' } })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    const started = await startConversation(owner, { text: 'Tidy this', editorSource, seed });
+    expect(started.item.body.editorSource).toEqual(editorSource);
+    // A continued one: decided by the seed of its first message, which a later message does not carry.
+    const next = await startConversation(owner, { text: 'Smaller', editorSource, conversationId: started.conversation.id });
+    expect(next.item.body.editorSource).toEqual(editorSource);
+    await expect(
+      startConversation(owner, { text: 'Smaller', editorSource: { ...editorSource, documentType: 'receipt' }, conversationId: started.conversation.id }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    const plain = await startConversation(owner, { text: 'Hello' });
+    await expect(startConversation(owner, { text: 'Tidy this', editorSource, conversationId: plain.conversation.id })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
   it('refuses a seed that names no paper of the school, before anything is saved', async () => {
     const owner = await newOwner();
     const before = await list(owner);
