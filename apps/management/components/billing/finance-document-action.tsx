@@ -171,15 +171,26 @@ function FinanceJobState({
   const current = job.data ?? initial;
   if (current.status === 'succeeded' && current.artifactId)
     return <ReadyDownloadButton schoolId={schoolId} artifactId={current.artifactId} documentType={current.documentType} label={label} iconOnly={iconOnly} />;
-  if (current.status === 'failed' || job.isError)
+  if (current.status === 'failed')
     return (
       <div className="flex flex-col items-start gap-1">
-        <p className="text-xs text-destructive">
-          {current.errorMessage ?? (job.error instanceof Error ? job.error.message : 'The PDF could not be created.')}
-        </p>
+        <p className="text-xs text-destructive">{current.errorMessage ?? 'The PDF could not be created.'}</p>
         <Button type="button" size="sm" variant="ghost" onClick={onRetry}>
           <RefreshCw aria-hidden />
           Try again
+        </Button>
+      </div>
+    );
+  // Reading the job failed (a network blip): read the same job again, never start another.
+  if (job.isError)
+    return (
+      <div className="flex flex-col items-start gap-1">
+        <p className="text-xs text-destructive">
+          {job.error instanceof Error ? job.error.message : 'The PDF status could not be read.'}
+        </p>
+        <Button type="button" size="sm" variant="ghost" disabled={job.isFetching} onClick={() => void job.refetch()}>
+          <RefreshCw className={job.isFetching ? 'animate-spin' : undefined} aria-hidden />
+          Check again
         </Button>
       </div>
     );

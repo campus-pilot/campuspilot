@@ -1,6 +1,6 @@
 "use client";
 import type { ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { DocumentJobProgress } from "@campuspilot/components/documents/document-job-progress";
 import { DocumentNotice } from "@campuspilot/components/documents/document-controls";
 import type {
@@ -17,9 +17,20 @@ const isActive = (job: Pick<DocumentGenerationJobDto, "status"> | undefined) =>
   job?.status === "queued" || job?.status === "running";
 
 /**
+ * Refreshes the lists a finished job changes: its PDF joins history and it
+ * leaves the in-progress list. Called from a query function when a job is
+ * seen ending, so no effect is needed.
+ */
+export function refreshAfterDocumentJob(queryClient: QueryClient, schoolId: string) {
+  void queryClient.invalidateQueries({ queryKey: orpc.school.listDocumentArtifacts.key({ input: { schoolId } }) });
+  void queryClient.invalidateQueries({ queryKey: orpc.school.listDocumentGenerationJobs.key({ input: { schoolId } }) });
+}
+
+/**
  * Reads a PDF generation job and keeps reading it every two seconds until it
  * has ended (TanStack Query's `refetchInterval`; no effect). The job started
- * by this dialog seeds the cache, so its progress shows at once.
+ * by this dialog seeds the cache, so its progress shows at once. The read
+ * that first sees the job ended refreshes history.
  */
 export function useDocumentJob(input: {
   schoolId: string;
@@ -27,10 +38,19 @@ export function useDocumentJob(input: {
   documentType: DocumentType;
   initial?: DocumentGenerationJobDto;
 }) {
+  const queryClient = useQueryClient();
+  const options = orpc.school.getDocumentGenerationJob.queryOptions({
+    input: { schoolId: input.schoolId, jobId: input.jobId, documentType: input.documentType },
+  });
   return useQuery({
-    ...orpc.school.getDocumentGenerationJob.queryOptions({
-      input: { schoolId: input.schoolId, jobId: input.jobId, documentType: input.documentType },
-    }),
+    ...options,
+    queryFn: async (context) => {
+      const previous = queryClient.getQueryData(options.queryKey);
+      const next = await options.queryFn!(context);
+      if (isActive(previous ?? input.initial) && !isActive(next))
+        refreshAfterDocumentJob(queryClient, input.schoolId);
+      return next;
+    },
     ...(input.initial ? { initialData: input.initial } : {}),
     refetchInterval: (query) => (isActive(query.state.data) ? JOB_POLL_MS : false),
   });

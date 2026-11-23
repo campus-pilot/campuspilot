@@ -1,6 +1,6 @@
 'use client';
 import { useForm } from '@tanstack/react-form';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { ConfirmationDialog } from '@campuspilot/components/confirmation-dialog';
 import { FilePlus, FileText, Trash2, RefreshCw } from 'lucide-react';
@@ -26,6 +26,7 @@ import {
   type DocumentScope,
 } from './document-common';
 import { DocumentDownload } from './document-generator';
+import { refreshAfterDocumentJob } from './document-job';
 /** History is intentionally session-wide across document types. Type and
  * immutable template provenance are attributes of each row, not a prerequisite
  * filter the user must choose before seeing their documents.
@@ -124,10 +125,20 @@ function HistoryRows({
   // PDFs still being created, and recent failures with their reason. While
   // any is in progress both lists are read again every few seconds, so a
   // finished job moves from here into the PDF list (no effect involved).
+  const queryClient = useQueryClient();
+  const jobOptions = orpc.school.listDocumentGenerationJobs.queryOptions({
+    input: { schoolId: scope.schoolId, sessionId: scope.sessionId, documentDomain },
+  });
   const jobs = useQuery({
-    ...orpc.school.listDocumentGenerationJobs.queryOptions({
-      input: { schoolId: scope.schoolId, sessionId: scope.sessionId, documentDomain },
-    }),
+    ...jobOptions,
+    // A job that was in progress and is not any more has made (or failed to
+    // make) its PDF: the PDF list is read again at that moment, not later.
+    queryFn: async (context) => {
+      const previous = queryClient.getQueryData(jobOptions.queryKey);
+      const next = await jobOptions.queryFn!(context);
+      if (endedSince(previous?.items, next.items)) refreshAfterDocumentJob(queryClient, scope.schoolId);
+      return next;
+    },
     refetchInterval: (query) => (hasActiveJob(query.state.data?.items) ? JOB_POLL_MS : false),
   });
   const history = useQuery({
@@ -189,6 +200,11 @@ function HistoryRows({
 const JOB_POLL_MS = 3_000;
 const hasActiveJob = (items: DocumentGenerationJobDto[] | undefined) =>
   Boolean(items?.some((job) => job.status === 'queued' || job.status === 'running'));
+/** Whether a job active in `previous` is no longer active (or no longer listed) in `next`. */
+function endedSince(previous: DocumentGenerationJobDto[] | undefined, next: DocumentGenerationJobDto[]) {
+  const stillActive = new Set(next.filter((job) => job.status === 'queued' || job.status === 'running').map((job) => job.id));
+  return Boolean(previous?.some((job) => (job.status === 'queued' || job.status === 'running') && !stillActive.has(job.id)));
+}
 /** A PDF being created (with its progress) or one that failed (with the reason). */
 function JobRow({ job }: { job: DocumentGenerationJobDto }) {
   return (
