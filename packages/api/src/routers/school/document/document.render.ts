@@ -1,6 +1,11 @@
 import Handlebars from "handlebars";
 import sanitizeHtml from "sanitize-html";
-import { DOCUMENT_SANITIZER_OPTIONS, EMBEDDABLE_IMAGE } from "./document.sanitize";
+import { DOCUMENT_SANITIZER_OPTIONS, EMBEDDABLE_IMAGE, documentSanitizerOptions } from "./document.sanitize";
+import { DOCUMENT_ASSET_NAME } from "./document.images";
+import { cleanDocumentStyleAttribute, cleanStyleElements } from "./document.css";
+
+/** No conversion asset: previews, and conversions without images. */
+const NO_ASSETS: ReadonlySet<string> = new Set();
 import { env } from "@campuspilot/env/server";
 import { annotateTiming, measure } from "@campuspilot/logger/perf";
 import { rpcError } from "../../../errors";
@@ -779,6 +784,14 @@ function renderMetered(
 const policy =
   "default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'";
 /**
+ * Images of HTML converted with generated assets: `data:` as always, plus
+ * `'self'`, which for a document Gotenberg loads from its own request
+ * directory (`file:///tmp/<request>/index.html`) is what lets Chromium load
+ * the asset files sent next to it. See "Conversion assets" below.
+ */
+const assetPolicy =
+  "default-src 'none'; img-src data: 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'";
+/**
  * The Content-Security-Policy of a document of `type`. Every type gets the
  * same policy except `question_paper`, which adds `font-src data:` so the
  * KaTeX fonts, inlined as data URIs in the question paper body, can load.
@@ -786,28 +799,74 @@ const policy =
  * from data URIs only. See the SECURITY note on `QUESTION_PAPER_SLOT`
  * (design.md K1): this is a deliberate, narrow, single-type exception and
  * must not become a general way to relax the policy for a template design.
+ *
+ * **Conversion assets** (`withAssets`, the second deliberate exception,
+ * docs/document-system.md "Images as conversion assets"): HTML that a
+ * generation job converts to PDF references the school logo and student
+ * photos by generated file names (`asset-<sha256>.<ext>`, sent to Gotenberg
+ * as form files) instead of embedding them in every document. Its policy
+ * adds `'self'` to `img-src` only; nothing else changes (no network, no
+ * script, no fonts, no frames). It is never used for HTML shown in a browser
+ * (previews embed `data:` URIs), and the question paper type never gets it.
+ * What a template can name is held by the sanitiser, not the policy: an
+ * `<img src>` survives only as a raster `data:` URI or as one of the exact
+ * names generated for the batch (`documentSanitizerOptions`). The policy
+ * cannot express "these file names", so a template's CSS `url()` could name
+ * another file Chromium may read: Gotenberg's Chromium deny list keeps that
+ * to its own `/tmp` (request directories have random names), and only an
+ * image could ever be drawn from it.
  */
-export function documentContentSecurityPolicy(type?: DocumentType) {
-  return type === "question_paper" ? `${policy}; font-src data:` : policy;
+export function documentContentSecurityPolicy(
+  type?: DocumentType,
+  options: { withAssets?: boolean } = {},
+) {
+  if (type === "question_paper") return `${policy}; font-src data:`;
+  return options.withAssets ? assetPolicy : policy;
 }
 /** The CSP is inserted before all user markup. Sanitization removes active
  * elements and attributes; data-only images keep previews and Chromium offline.
  * Handlebars' own-property lookup protections remain enabled.
  */
-function safeHtml(raw: string, type?: DocumentType) {
+function safeHtml(raw: string, type?: DocumentType, assets?: ReadonlySet<string>) {
   if (Buffer.byteLength(raw, "utf8") > 25_000_000)
     throw rpcError.badRequest(
       "This document exceeds the 25 MB rendering limit. Select fewer students or use smaller photos.",
     );
+  const withAssets = type !== "question_paper" && Boolean(assets?.size);
+  const options = documentSanitizerOptions(withAssets ? assets : undefined);
+  const allowedNames = withAssets && assets ? assets : NO_ASSETS;
   const clean = measure("doc.sanitize", () =>
-    sanitizeHtml(raw, {
-      ...DOCUMENT_SANITIZER_OPTIONS,
-      allowedTags: (DOCUMENT_SANITIZER_OPTIONS.allowedTags as string[]).filter(
-        (tag) => !["html", "head", "body"].includes(tag),
-      ),
-    }),
+    // CSS may load only what an <img src> may (`document.css.ts`): style
+    // attributes are cleaned as each element is written, <style> text after.
+    cleanStyleElements(
+      sanitizeHtml(raw, {
+        ...options,
+        allowedTags: (DOCUMENT_SANITIZER_OPTIONS.allowedTags as string[]).filter(
+          (tag) => !["html", "head", "body"].includes(tag),
+        ),
+        transformTags: {
+          "*": (tagName, attribs) => {
+            if (attribs.style === undefined) return { tagName, attribs };
+            return { tagName, attribs: { ...attribs, style: cleanDocumentStyleAttribute(attribs.style, allowedNames) } };
+          },
+        },
+      }),
+      allowedNames,
+    ),
   );
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${documentContentSecurityPolicy(type)}"></head><body>${clean}</body></html>`;
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${documentContentSecurityPolicy(type, { withAssets })}"></head><body>${clean}</body></html>`;
+}
+
+/**
+ * Checks that every conversion asset name is one `documentAssetName`
+ * generates, so the sanitiser's exception can only ever admit those.
+ */
+function assetNames(assets: ReadonlySet<string> | undefined) {
+  if (!assets) return undefined;
+  for (const name of assets)
+    if (!DOCUMENT_ASSET_NAME.test(name))
+      throw new Error("A conversion asset has a name the renderer did not generate.");
+  return assets;
 }
 /** Whether a value is an image the sanitizer keeps: a base64 PNG, JPEG or WebP data URI. */
 export function isEmbeddableDocumentImage(value: string) {
@@ -838,16 +897,87 @@ export function renderDocument(
 export function renderDocuments(
   content: string,
   contexts: object[],
-  options: { maxOutputChars?: number } = {},
+  options: {
+    maxOutputChars?: number;
+    /** Conversion asset names the documents may reference (generation jobs only; see `safeHtml`). */
+    assets?: ReadonlySet<string>;
+  } = {},
 ): string[] {
+  const assets = assetNames(options.assets);
   const { raws } = renderMetered(
     content,
     contexts,
     options.maxOutputChars ?? DOCUMENT_RENDER_MAX_CHARS,
   );
-  return raws.map((raw) => safeHtml(raw));
+  return raws.map((raw) => safeHtml(raw, undefined, assets));
 }
 
+/** What one document of a job costs, measured before it is batched. */
+export type DocumentRenderSize = {
+  /** UTF-8 bytes of the rendered, unsanitised document (sanitising only removes). */
+  htmlBytes: number;
+  /** What the render spent of the budget (characters plus steps, see {@link RenderMeter}). */
+  budget: number;
+};
+
+const JOB_BUDGET_MESSAGE =
+  "This export needs more rendering than one PDF can take. Select fewer students or use a simpler template.";
+
+/**
+ * Renders each context once and returns only its size, so a job can split
+ * its documents into batches that fit the conversion limits before
+ * converting anything. The template is compiled once and no rendered string
+ * is kept. Image references must already be replaced by names of the longest
+ * generated length (`LONGEST_DOCUMENT_ASSET_NAME`), so a batch is never
+ * larger than measured.
+ *
+ * The whole job shares ONE budget, `jobBudget` (a batch's budget times the
+ * most batches a job may have), so the CPU a job can cost is bounded however
+ * many documents it has; one document may spend at most `documentBudget` (a
+ * batch's budget, the most its batch could give it). Rendering is
+ * synchronous, so the measuring yields to the event loop between documents
+ * (`setImmediate`): one document blocks the loop for at most its own budget,
+ * never for the whole job. Over either budget is a BAD_REQUEST.
+ */
+export async function measureDocumentSizes(
+  content: string,
+  contexts: object[],
+  limits: { documentBudget: number; jobBudget: number },
+): Promise<DocumentRenderSize[]> {
+  let template: CompiledTemplate;
+  try {
+    template = measure("doc.template.compile", () => prepareTemplate(content));
+  } catch (cause) {
+    if (cause instanceof ORPCError) throw cause;
+    throw rpcError.badRequest(SYNTAX_MESSAGE, cause);
+  }
+  const sizes: DocumentRenderSize[] = [];
+  let spent = 0;
+  for (const context of contexts) {
+    if (activeMeter)
+      throw new Error("A document render started inside another render.");
+    const remaining = limits.jobBudget - spent;
+    const current: RenderMeter = { chars: 0, steps: 0, limit: Math.min(limits.documentBudget, remaining) };
+    activeMeter = current;
+    try {
+      const raw = measure("doc.template.measure", () => runMetered(template, context));
+      sizes.push({ htmlBytes: Buffer.byteLength(raw, "utf8"), budget: current.chars + current.steps });
+      spent += current.chars + current.steps;
+    } catch (cause) {
+      // The limit of this render was the job's remainder, not the document's
+      // share, and that limit is what refused it (the output helper refuses a
+      // value before counting it, so the meter alone cannot tell): say so.
+      if (cause instanceof ORPCError && remaining < limits.documentBudget && cause.message === OVERSIZE_MESSAGE)
+        throw rpcError.badRequest(JOB_BUDGET_MESSAGE);
+      if (cause instanceof ORPCError) throw cause;
+      throw rpcError.badRequest(SYNTAX_MESSAGE, cause);
+    } finally {
+      activeMeter = null;
+    }
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  return sizes;
+}
 /**
  * The unsanitized output of one render with what the meter counted for it:
  * for tests of the accounting (`chars` must equal `raw.length`).
@@ -973,7 +1103,12 @@ export function combineDocuments(
   documents: string[],
   type: DocumentType,
   pageSize: DocumentTemplatePageSize = "full",
+  options: {
+    /** Conversion asset names the batch may reference (generation jobs only; see `safeHtml`). */
+    assets?: ReadonlySet<string>;
+  } = {},
 ) {
+  const assets = assetNames(options.assets);
   if (
     documents.reduce((size, doc) => size + Buffer.byteLength(doc, "utf8"), 0) >
     25_000_000
@@ -985,7 +1120,7 @@ export function combineDocuments(
   if (type === "question_paper")
     return safeHtml(flowingQuestionPaperLayout(documents), type);
   const landscape = type === "timetable";
-  const perSheet = type === "id_card" ? 8 : pageSize === "half" ? 2 : 1;
+  const perSheet = documentsPerSheet(type, pageSize);
   const sheets = chunks(documents, perSheet)
     .map(
       (sheet) =>
@@ -1003,7 +1138,22 @@ export function combineDocuments(
   const width = landscape ? "297mm" : "210mm";
   const height = landscape ? "210mm" : "297mm";
   const html = `<div class="batch">${sheets}</div><style>@page{size:${landscape ? "A4 landscape" : "A4"};margin:0}html,body{margin:0!important;padding:0!important}.print-sheet{box-sizing:border-box;width:${width};height:${height};overflow:hidden;break-after:page}.print-sheet:last-child{break-after:auto}.sheet-item{width:100%;height:100%;min-width:0;min-height:0;overflow:hidden;break-inside:avoid}${layout}</style>`;
-  return safeHtml(html);
+  return safeHtml(html, undefined, assets);
+}
+
+/**
+ * How many documents share one physical sheet: eight student IDs, two
+ * half-A4 documents, one of everything else. A batch of a generation job
+ * always holds whole sheets (a multiple of this), so its PDF pages are
+ * exactly the pages a single conversion of every document would print.
+ * Notices and question papers flow and are never batched.
+ */
+export function documentsPerSheet(
+  type: DocumentType,
+  pageSize: DocumentTemplatePageSize,
+) {
+  if (type === "id_card") return 8;
+  return pageSize === "half" ? 2 : 1;
 }
 /** How long the converter may work on one question paper (the other documents get 120 seconds). */
 const QUESTION_PAPER_CONVERSION_TIMEOUT_MS = 60_000;
@@ -1024,14 +1174,68 @@ async function assertQuestionPaperPageCount(bytes: Buffer) {
   }
 }
 
+/** An image sent to Gotenberg as a form file next to `index.html` (see `document.images.ts`). */
+export type DocumentConversionAsset = {
+  name: string;
+  contentType: string;
+  bytes: Uint8Array;
+};
+
+/** The largest PDF one conversion may return, unless the caller sets its own cap. */
+export const DOCUMENT_PDF_MAX_BYTES = 30_000_000;
+
+/**
+ * A conversion that will fail the same way if it is repeated: Gotenberg
+ * refused the document (a 4xx answer other than 408 or 429), or the PDF is
+ * over the caller's cap. Everything else (5xx, 408, 429, a timeout, a
+ * network error, a malformed answer) is a plain `Error`, an outage worth
+ * retrying.
+ */
+export class DocumentConversionRefused extends Error {
+  constructor(
+    readonly reason: "refused" | "too_large",
+    message: string,
+  ) {
+    super(message);
+    this.name = "DocumentConversionRefused";
+  }
+}
+
+/** Reads a response body, stopping as soon as it passes `maxBytes`. */
+async function readCapped(response: Response, maxBytes: number) {
+  const declared = Number(response.headers.get("content-length") ?? "NaN");
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    // Refused without reading it: release the connection.
+    await response.body?.cancel().catch(() => undefined);
+    throw new DocumentConversionRefused("too_large", "The PDF is larger than the converter may return.");
+  }
+  if (!response.body) return Buffer.alloc(0);
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+    size += chunk.length;
+    if (size > maxBytes) throw new DocumentConversionRefused("too_large", "The PDF is larger than the converter may return.");
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks, size);
+}
+
 export async function convertDocumentPdf(
   html: string,
   type: DocumentType,
   signal?: AbortSignal,
+  assets: readonly DocumentConversionAsset[] = [],
+  options: { maxPdfBytes?: number } = {},
 ) {
   const questionPaper = type === "question_paper";
+  const maxPdfBytes = options.maxPdfBytes ?? DOCUMENT_PDF_MAX_BYTES;
+  if (questionPaper && assets.length > 0)
+    throw new Error("Question papers are converted without assets.");
+  assetNames(new Set(assets.map((asset) => asset.name)));
   const form = new FormData();
   form.append("files", new Blob([html], { type: "text/html" }), "index.html");
+  for (const asset of assets)
+    form.append("files", new Blob([asset.bytes as Uint8Array<ArrayBuffer>], { type: asset.contentType }), asset.name);
   form.append("paperWidth", type === "timetable" ? "11.7" : "8.27");
   form.append("paperHeight", type === "timetable" ? "8.27" : "11.7");
   form.append("preferCssPageSize", "true");
@@ -1050,13 +1254,15 @@ export async function convertDocumentPdf(
         ]),
       },
     );
+    if (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429)
+      throw new DocumentConversionRefused("refused", `PDF conversion was refused (${response.status}).`);
     if (!response.ok)
       throw new Error(`PDF conversion failed (${response.status}).`);
-    return Buffer.from(await response.arrayBuffer());
+    return readCapped(response, maxPdfBytes);
   });
   annotateTiming({ pdfHtmlBytes: Buffer.byteLength(html, "utf8"), pdfBytes: bytes.length });
-  if (bytes.length > 30_000_000 || bytes.subarray(0, 5).toString() !== "%PDF-")
-    throw new Error("PDF converter returned an invalid or oversized document.");
+  if (bytes.subarray(0, 5).toString() !== "%PDF-")
+    throw new Error("PDF converter returned an invalid document.");
   if (questionPaper) await measure("doc.pdf.pagecount", () => assertQuestionPaperPageCount(bytes));
   return bytes;
 }

@@ -43,6 +43,8 @@ const CORE_TOOLS = [
   'school.getCollectionRegister',
   'school.getDashboard',
   'school.getDocumentDownload',
+  // Generation is a background job: generateDocument returns it, this reads its outcome.
+  'school.getDocumentGenerationJob',
   'school.getExam',
   'school.getExamOverview',
   'school.getExamResult',
@@ -217,7 +219,9 @@ const HIDDEN_TOOLS = [
  * is paid in model tokens on every conversation, so growing it must be a
  * deliberate decision.
  */
-const CORE_LISTING_BUDGET_CHARS = 38_000;
+// 38,500 since getDocumentGenerationJob joined core (37 tools; packages/api/AGENTS.md):
+// tightening the generation descriptions could not bring the listing back under 38,000.
+const CORE_LISTING_BUDGET_CHARS = 38_500;
 
 let appRouter: AnyRouter;
 let catalog: McpCatalog;
@@ -306,7 +310,9 @@ describe('catalog metadata', () => {
 
     expect(classified).toEqual([...leafNames].sort());
     expect(catalog.core.map(({ name }) => name).sort()).toEqual(CORE_TOOLS);
-    expect(catalog.core).toHaveLength(36);
+    // 37 since getDocumentGenerationJob (deliberate: generation is a background job, and the
+    // assistant cannot fetch a PDF it generated without reading the job; packages/api/AGENTS.md).
+    expect(catalog.core).toHaveLength(37);
     // 85 on main, plus releaseExamToCadet, withdrawExamFromCadet,
     // get/saveStudentExamRemark and get/updateCadetPortalSettings (+6);
     // +4 result notification tools (release preview, release batch read,
@@ -320,8 +326,9 @@ describe('catalog metadata', () => {
     // get, get draft, versions, learn, validate, save, edit);
     // +1 systemAdmin.getPersonalSpaceStats (the admin dashboard's personal space counts);
     // +4 school.addClassSubject, updateClassSubject, removeClassSubject and
-    // moveClassSubjectToClassroom (one subject at a time, subjects added from an exam).
-    expect(catalog.advanced).toHaveLength(134);
+    // moveClassSubjectToClassroom (one subject at a time, subjects added from an exam);
+    // +1 school.listDocumentGenerationJobs (PDFs being created, and recent failures).
+    expect(catalog.advanced).toHaveLength(135);
   });
 });
 
@@ -345,6 +352,8 @@ describe('school feature gates in the catalog', () => {
       'school.listDocumentArtifacts',
       // Every source they generate from is a student management document, so the gate is theirs.
       'school.generateDocument',
+      'school.getDocumentGenerationJob',
+      'school.listDocumentGenerationJobs',
       'school.previewDocument',
       'school.listNotificationDeliveries',
     ]) {

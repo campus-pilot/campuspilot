@@ -22,6 +22,7 @@ import {
   createTestClient,
   includeTestExamClasses,
 } from "../../../../test/fixtures";
+import { generateDocumentNow } from "../../../../test/documents";
 import {
   buildDocumentContexts,
   documentScheduleSlot,
@@ -469,7 +470,7 @@ describe("examination document parity", () => {
     expect(preview.html).toContain("Oral");
     expect(preview.html).not.toContain("Attendance</h3>");
     expect(preview.html).not.toContain("Co-scholastic areas</h3>");
-    const generated = await manager.school.generateDocument(input);
+    const generated = await generateDocumentNow(manager, input);
     expect(generated.artifact.studentIds).toEqual([
       firstStudent,
       secondStudent,

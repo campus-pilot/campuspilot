@@ -8,8 +8,11 @@ export type StudentRecipient = {
   admissionNo: string;
 };
 
-/** The most recipients one document batch accepts. */
-export const MAX_STUDENT_RECIPIENTS = 500;
+/**
+ * The most recipients one document export accepts: the API's
+ * `MAX_DOCUMENT_SOURCE_ITEMS` (generation runs as a batched job).
+ */
+export const MAX_STUDENT_RECIPIENTS = 1_500;
 
 /** Remote filtering and pagination belong to the caller. Selected recipients
  * remain explicit values even when they are absent from the current page.
@@ -62,7 +65,8 @@ export function StudentRecipientCombobox(props: {
       />
       <p id="document-students-help" className="text-xs text-muted-foreground">
         {props.selected.length} selected · Choose up to{" "}
-        {MAX_STUDENT_RECIPIENTS} students across searches and pages.
+        {MAX_STUDENT_RECIPIENTS.toLocaleString("en-IN")} students across
+        searches and pages.
       </p>
       <DocumentErrors errors={props.errors} />
     </div>

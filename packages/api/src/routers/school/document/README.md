@@ -17,6 +17,10 @@ the backend contract for data, persistence, rendering, and authorization.
 | `document.catalog.legacy.ts` | Faithful source snapshot imported from the legacy application |
 | `document.render.ts` | Handlebars restrictions, sanitization, batch layout, and Gotenberg conversion |
 | `document.storage.ts` | Immutable S3 persistence, image validation/embedding, and compensation |
+| `document.images.ts` | Image references, conversion asset names, image reads for previews and batches |
+| `document.source.ts` | One repeatable-read build of any source's contexts, and the artifact provenance a source fixes |
+| `document.jobs.ts` | `generateDocument`'s start (validate, pin, queue) and the job reads |
+| `../../../workflows/document-generation/` | The worker job: outbox, signed control service, per-school Restate object, batching, merge, finish |
 | `document.router.integration.test.ts` | Procedure, authorization, persistence, conflict, storage, and artifact lifecycle coverage |
 | `document-exam.integration.test.ts` | Examination context, approval, schedule, rendering, PDF size/page, and legacy compatibility coverage |
 | `finance-document.context.ts` | Immutable bill, payment/refund receipt, and cutoff statement contexts |
@@ -50,7 +54,7 @@ that policy inside preview/generation's repeatable-read transaction and rejects 
 payment if a reversal exists. Contextual historical payment/refund receipt actions
 omit the policy and retain immutable regeneration behavior.
 
-Exports support a whole examination, one class, or up to 500 explicitly selected students. Every export is limited to 500 students. Historical sessions remain exportable. Only registered admissions are eligible. Session, class, exam, student, and tenant relationships are validated independently.
+Exports support a whole examination, one class, or up to 1,500 explicitly selected students. Every export is limited to 1,500 documents (`MAX_DOCUMENT_SOURCE_ITEMS`) and is generated as a batched job in the worker (docs/document-system.md "Generation jobs"). Historical sessions remain exportable. Only registered admissions are eligible. Session, class, exam, student, and tenant relationships are validated independently.
 
 Root attendance and co-scholastic areas use the explicit exam-wide assessment and working-day settings. Printing configured assessments requires their independent approval. Zero attendance remains zero; missing data remains null. Legacy per-subject values remain available only under each subject and are never promoted to shared facts. Four explicit print options control mode marks, attendance, co-scholastic areas and the grading key, without changing saved results or calculations. Hidden attendance does not require working-day configuration.
 
@@ -98,7 +102,7 @@ document migrations through the existing migration runner, including
 `0022_document-template-page-size.sql` for immutable full/half template metadata.
 Deploy the migrations with the server before using document generation.
 
-Sanitized HTML is wrapped in a restrictive CSP and displayed in an empty-sandbox iframe. School and student images are read directly from S3, validated, and embedded as raster data URIs. External assets, scripts, forms, navigation attributes, and prototype access are unavailable. The dev/test Gotenberg service disables JavaScript and both private/public outbound network access. Apply the same Chromium flags in hosted Gotenberg deployments:
+Sanitized HTML is wrapped in a restrictive CSP and displayed in an empty-sandbox iframe. School and student images are read directly from S3 and validated; previews embed them as raster data URIs, and generation jobs send each distinct image once per batch as a Gotenberg asset file referenced by a generated name (docs/document-system.md "Images as conversion assets"). External assets, scripts, forms, navigation attributes, and prototype access are unavailable. The dev/test Gotenberg service disables JavaScript and both private/public outbound network access. Apply the same Chromium flags in hosted Gotenberg deployments:
 
 ```dotenv
 CHROMIUM_DISABLE_JAVASCRIPT=true
@@ -106,7 +110,7 @@ CHROMIUM_DENY_PRIVATE_IPS=true
 CHROMIUM_DENY_PUBLIC_IPS=true
 ```
 
-Limits: 200 KB template source, 4,000-character editing instructions, 500 selected students, 5 MB per image, 20 MB embedded images, 25 MB rendered HTML, 30 MB resulting PDF. Conversion times out after 120 seconds. Large classes can use explicit student selections to create smaller batches.
+Limits: 200 KB template source, 4,000-character editing instructions, 1,500 documents per export, 5 MB per image, 20 MB of images per conversion batch, about 5 MB of HTML and 200 documents per batch (25 MB hard), 150 MB per batch PDF (30 MB for other conversions), 1 GB merged; one render budget per job (8 batches' worth), 3 jobs in flight per school and 2 per person. A batch conversion times out after 120 seconds and the merge after 10 minutes. Previews render the first two printed sheets only.
 
 Gotenberg's multipart HTML route and data-URI support: https://gotenberg.dev/docs/convert-with-chromium/convert-html-to-pdf
 Outbound filtering configuration: https://gotenberg.dev/docs/configuration

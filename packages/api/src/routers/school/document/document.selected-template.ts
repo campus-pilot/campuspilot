@@ -19,6 +19,24 @@ export async function getSelectedDocumentTemplate(
   input: { schoolId: string; documentType: dto.DocumentType },
   revision?: string,
 ) {
+  const row = await selectedDocumentTemplateRevision(db, input, revision);
+  return {
+    row,
+    content: await readDocumentTemplate(row.s3Key),
+  };
+}
+
+/**
+ * The selected revision's row without its source: what `generateDocument`
+ * checks before it queues a job (the job reads the source itself). Throws
+ * NOT_FOUND when none is selected and CONFLICT when the caller reviewed a
+ * different revision.
+ */
+export async function selectedDocumentTemplateRevision(
+  db: DatabaseExecutor,
+  input: { schoolId: string; documentType: dto.DocumentType },
+  revision?: string,
+) {
   const [selected] = await db
     .select({ artifact: artifactTable })
     .from(schoolDocumentTemplateTable)
@@ -44,10 +62,7 @@ export async function getSelectedDocumentTemplate(
     throw rpcError.conflict(
       "The template changed. Refresh the template and preview again.",
     );
-  return {
-    row: selected.artifact,
-    content: await readDocumentTemplate(selected.artifact.s3Key),
-  };
+  return selected.artifact;
 }
 
 /**

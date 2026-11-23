@@ -81,6 +81,11 @@ permission boundaries, immutable template lifecycle, all-classroom timetable
 invariant, safe Handlebars contract, and the checks required when extending a
 document type or marketplace design.
 
+PDF generation through `generateDocument` is a batched job in the worker: the
+API validates, pins and queues it and never waits; read "Generation jobs" and
+"Images as conversion assets" in the document system guide before changing
+generation, batching, image handling in documents or the CSP of converted HTML.
+
 Before implementing or redesigning a workflow, inspect existing screens with the
 same behavior (admission/staff tables, classroom/admission workspaces and student
 forms). Reuse shared controls and layouts instead of introducing local sizing or

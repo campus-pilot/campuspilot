@@ -9,6 +9,7 @@ import { DOCUMENT_MARKETPLACE, sampleDocumentContext } from './document.catalog'
 import {
   combineDocuments,
   convertDocumentPdf,
+  DocumentConversionRefused,
   DOCUMENT_RENDER_MAX_CHARS,
   DOCUMENT_TEMPLATE_BLOCK_HELPERS,
   DOCUMENT_TEMPLATE_STRUCTURE_LIMITS,
@@ -264,7 +265,16 @@ describe('document rendering', () => {
     );
     await expect(
       convertDocumentPdf('<p>Document</p>', 'report_card'),
-    ).rejects.toThrow('PDF converter returned an invalid or oversized document.');
+    ).rejects.toThrow('PDF converter returned an invalid document.');
+  });
+
+  it('tells a refused or oversized conversion (repeating it fails the same way) from an outage', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('bad form', { status: 400 }));
+    await expect(convertDocumentPdf('<p>Document</p>', 'report_card')).rejects.toMatchObject({ name: 'DocumentConversionRefused', reason: 'refused' });
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response('busy', { status: 429 }));
+    await expect(convertDocumentPdf('<p>Document</p>', 'report_card')).rejects.not.toBeInstanceOf(DocumentConversionRefused);
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(`%PDF-${'x'.repeat(100)}`, { status: 200 }));
+    await expect(convertDocumentPdf('<p>Document</p>', 'report_card', undefined, [], { maxPdfBytes: 50 })).rejects.toMatchObject({ reason: 'too_large' });
   });
 });
 
