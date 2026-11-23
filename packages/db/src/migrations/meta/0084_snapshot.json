@@ -1,5 +1,5 @@
 {
-  "id": "db8efe7f-bfa5-47b3-9f94-df9b1a1c387b",
+  "id": "34cd55a1-52bf-48be-9e49-5e356fe78a35",
   "prevId": "468c17de-650d-4711-b0eb-1e0faf307f6c",
   "version": "7",
   "dialect": "postgresql",
@@ -6578,6 +6578,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "printed_document_count": {
+          "name": "printed_document_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
         "warnings": {
           "name": "warnings",
           "type": "jsonb",
@@ -6853,7 +6859,7 @@
         },
         "document_generation_job_documents_check": {
           "name": "document_generation_job_documents_check",
-          "value": "\"document_generation_job\".\"document_count\" >= 1"
+          "value": "\"document_generation_job\".\"document_count\" >= 1 and (\"document_generation_job\".\"printed_document_count\" is null or \"document_generation_job\".\"printed_document_count\" >= 1)"
         }
       },
       "isRLSEnabled": false

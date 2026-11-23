@@ -39,7 +39,8 @@ export type DocumentLedgerCutoff = {
  * Restate. The worker (`workflows/document-generation`) renders the documents
  * in batches and creates exactly one `artifact` with the reserved
  * `artifact_id`. Every column is written when the job is created and never
- * changed, except the progress, outcome and outbox columns.
+ * changed, except the progress (batches, printed document count), outcome and
+ * outbox columns.
  */
 export const documentGenerationJobTable = pgTable(
   "document_generation_job",
@@ -75,6 +76,12 @@ export const documentGenerationJobTable = pgTable(
     name: text("name").notNull(),
     /** Documents (one per student, bill, receipt or statement; one timetable) the source had at start. */
     documentCount: integer("document_count").notNull(),
+    /**
+     * Documents the PDF prints, set by the worker when it prepares the job
+     * (null until then). Its own fact: the source can resolve to fewer or more
+     * documents than at start when the school's data changed in between.
+     */
+    printedDocumentCount: integer("printed_document_count"),
     /** Warnings the start read produced (for example excluded students). */
     warnings: jsonb("warnings").$type<string[]>().notNull().default([]),
     /** The `generatedAt` every document of the job prints: the moment the request was accepted. */
@@ -149,7 +156,7 @@ export const documentGenerationJobTable = pgTable(
     ),
     check(
       "document_generation_job_documents_check",
-      sql`${table.documentCount} >= 1`,
+      sql`${table.documentCount} >= 1 and (${table.printedDocumentCount} is null or ${table.printedDocumentCount} >= 1)`,
     ),
   ],
 );

@@ -17,6 +17,7 @@ CREATE TABLE "document_generation_job" (
 	"artifact_id" text NOT NULL,
 	"name" text NOT NULL,
 	"document_count" integer NOT NULL,
+	"printed_document_count" integer,
 	"warnings" jsonb DEFAULT '[]'::jsonb NOT NULL,
 	"generated_at" timestamp with time zone NOT NULL,
 	"review_hash" text,
@@ -39,7 +40,7 @@ CREATE TABLE "document_generation_job" (
         and ("document_generation_job"."status" <> 'queued' or "document_generation_job"."started_at" is null)
         and ("document_generation_job"."status" not in ('running', 'succeeded') or "document_generation_job"."started_at" is not null)),
 	CONSTRAINT "document_generation_job_progress_check" CHECK ("document_generation_job"."batches_done" >= 0 and ("document_generation_job"."batch_count" is null or ("document_generation_job"."batch_count" >= 1 and "document_generation_job"."batches_done" <= "document_generation_job"."batch_count"))),
-	CONSTRAINT "document_generation_job_documents_check" CHECK ("document_generation_job"."document_count" >= 1)
+	CONSTRAINT "document_generation_job_documents_check" CHECK ("document_generation_job"."document_count" >= 1 and ("document_generation_job"."printed_document_count" is null or "document_generation_job"."printed_document_count" >= 1))
 );
 --> statement-breakpoint
 ALTER TABLE "document_generation_job" ADD CONSTRAINT "document_generation_job_school_id_school_id_fk" FOREIGN KEY ("school_id") REFERENCES "public"."school"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
