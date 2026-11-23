@@ -2,6 +2,10 @@ import Handlebars from "handlebars";
 import sanitizeHtml from "sanitize-html";
 import { DOCUMENT_SANITIZER_OPTIONS, EMBEDDABLE_IMAGE, documentSanitizerOptions } from "./document.sanitize";
 import { DOCUMENT_ASSET_NAME } from "./document.images";
+import { cleanDocumentStyleAttribute, cleanStyleElements } from "./document.css";
+
+/** No conversion asset: previews, and conversions without images. */
+const NO_ASSETS: ReadonlySet<string> = new Set();
 import { env } from "@campuspilot/env/server";
 import { annotateTiming, measure } from "@campuspilot/logger/perf";
 import { rpcError } from "../../../errors";
@@ -830,13 +834,25 @@ function safeHtml(raw: string, type?: DocumentType, assets?: ReadonlySet<string>
     );
   const withAssets = type !== "question_paper" && Boolean(assets?.size);
   const options = documentSanitizerOptions(withAssets ? assets : undefined);
+  const allowedNames = withAssets && assets ? assets : NO_ASSETS;
   const clean = measure("doc.sanitize", () =>
-    sanitizeHtml(raw, {
-      ...options,
-      allowedTags: (DOCUMENT_SANITIZER_OPTIONS.allowedTags as string[]).filter(
-        (tag) => !["html", "head", "body"].includes(tag),
-      ),
-    }),
+    // CSS may load only what an <img src> may (`document.css.ts`): style
+    // attributes are cleaned as each element is written, <style> text after.
+    cleanStyleElements(
+      sanitizeHtml(raw, {
+        ...options,
+        allowedTags: (DOCUMENT_SANITIZER_OPTIONS.allowedTags as string[]).filter(
+          (tag) => !["html", "head", "body"].includes(tag),
+        ),
+        transformTags: {
+          "*": (tagName, attribs) => {
+            if (attribs.style === undefined) return { tagName, attribs };
+            return { tagName, attribs: { ...attribs, style: cleanDocumentStyleAttribute(attribs.style, allowedNames) } };
+          },
+        },
+      }),
+      allowedNames,
+    ),
   );
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${documentContentSecurityPolicy(type, { withAssets })}"></head><body>${clean}</body></html>`;
 }
@@ -904,41 +920,62 @@ export type DocumentRenderSize = {
   budget: number;
 };
 
+const JOB_BUDGET_MESSAGE =
+  "This export needs more rendering than one PDF can take. Select fewer students or use a simpler template.";
+
 /**
- * Renders each context on its own budget and returns only its size, so a
- * job can split its documents into batches that fit the conversion limits
- * before converting anything. The template is compiled once; no rendered
- * string is kept. Image references must already be replaced by names of the
- * longest generated length (`LONGEST_DOCUMENT_ASSET_NAME`), so a batch is
- * never larger than measured. A document that does not fit one budget is
- * refused here, as its batch would be.
+ * Renders each context once and returns only its size, so a job can split
+ * its documents into batches that fit the conversion limits before
+ * converting anything. The template is compiled once and no rendered string
+ * is kept. Image references must already be replaced by names of the longest
+ * generated length (`LONGEST_DOCUMENT_ASSET_NAME`), so a batch is never
+ * larger than measured.
+ *
+ * The whole job shares ONE budget, `jobBudget` (a batch's budget times the
+ * most batches a job may have), so the CPU a job can cost is bounded however
+ * many documents it has; one document may spend at most `documentBudget` (a
+ * batch's budget, the most its batch could give it). Rendering is
+ * synchronous, so the measuring yields to the event loop between documents
+ * (`setImmediate`): one document blocks the loop for at most its own budget,
+ * never for the whole job. Over either budget is a BAD_REQUEST.
  */
-export function measureDocumentSizes(
+export async function measureDocumentSizes(
   content: string,
   contexts: object[],
-): DocumentRenderSize[] {
-  if (activeMeter)
-    throw new Error("A document render started inside another render.");
+  limits: { documentBudget: number; jobBudget: number },
+): Promise<DocumentRenderSize[]> {
+  let template: CompiledTemplate;
   try {
-    const template = measure("doc.template.compile", () => prepareTemplate(content));
-    return measure("doc.template.measure", () =>
-      contexts.map((context) => {
-        const current: RenderMeter = { chars: 0, steps: 0, limit: DOCUMENT_RENDER_MAX_CHARS };
-        activeMeter = current;
-        try {
-          const raw = runMetered(template, context);
-          return { htmlBytes: Buffer.byteLength(raw, "utf8"), budget: current.chars + current.steps };
-        } finally {
-          activeMeter = null;
-        }
-      }),
-    );
+    template = measure("doc.template.compile", () => prepareTemplate(content));
   } catch (cause) {
     if (cause instanceof ORPCError) throw cause;
     throw rpcError.badRequest(SYNTAX_MESSAGE, cause);
   }
+  const sizes: DocumentRenderSize[] = [];
+  let spent = 0;
+  for (const context of contexts) {
+    if (activeMeter)
+      throw new Error("A document render started inside another render.");
+    const remaining = limits.jobBudget - spent;
+    const current: RenderMeter = { chars: 0, steps: 0, limit: Math.min(limits.documentBudget, remaining) };
+    activeMeter = current;
+    try {
+      const raw = measure("doc.template.measure", () => runMetered(template, context));
+      sizes.push({ htmlBytes: Buffer.byteLength(raw, "utf8"), budget: current.chars + current.steps });
+      spent += current.chars + current.steps;
+    } catch (cause) {
+      // The job's budget ran out (not this document's): say so.
+      if (cause instanceof ORPCError && remaining < limits.documentBudget && current.chars + current.steps > remaining)
+        throw rpcError.badRequest(JOB_BUDGET_MESSAGE);
+      if (cause instanceof ORPCError) throw cause;
+      throw rpcError.badRequest(SYNTAX_MESSAGE, cause);
+    } finally {
+      activeMeter = null;
+    }
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  return sizes;
 }
-
 /**
  * The unsanitized output of one render with what the meter counted for it:
  * for tests of the accounting (`chars` must equal `raw.length`).
@@ -1142,13 +1179,51 @@ export type DocumentConversionAsset = {
   bytes: Uint8Array;
 };
 
+/** The largest PDF one conversion may return, unless the caller sets its own cap. */
+export const DOCUMENT_PDF_MAX_BYTES = 30_000_000;
+
+/**
+ * A conversion that will fail the same way if it is repeated: Gotenberg
+ * refused the document (a 4xx answer other than 408 or 429), or the PDF is
+ * over the caller's cap. Everything else (5xx, 408, 429, a timeout, a
+ * network error, a malformed answer) is a plain `Error`, an outage worth
+ * retrying.
+ */
+export class DocumentConversionRefused extends Error {
+  constructor(
+    readonly reason: "refused" | "too_large",
+    message: string,
+  ) {
+    super(message);
+    this.name = "DocumentConversionRefused";
+  }
+}
+
+/** Reads a response body, stopping as soon as it passes `maxBytes`. */
+async function readCapped(response: Response, maxBytes: number) {
+  const declared = Number(response.headers.get("content-length") ?? "NaN");
+  if (Number.isFinite(declared) && declared > maxBytes)
+    throw new DocumentConversionRefused("too_large", "The PDF is larger than the converter may return.");
+  if (!response.body) return Buffer.alloc(0);
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+    size += chunk.length;
+    if (size > maxBytes) throw new DocumentConversionRefused("too_large", "The PDF is larger than the converter may return.");
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks, size);
+}
+
 export async function convertDocumentPdf(
   html: string,
   type: DocumentType,
   signal?: AbortSignal,
   assets: readonly DocumentConversionAsset[] = [],
+  options: { maxPdfBytes?: number } = {},
 ) {
   const questionPaper = type === "question_paper";
+  const maxPdfBytes = options.maxPdfBytes ?? DOCUMENT_PDF_MAX_BYTES;
   if (questionPaper && assets.length > 0)
     throw new Error("Question papers are converted without assets.");
   assetNames(new Set(assets.map((asset) => asset.name)));
@@ -1174,13 +1249,15 @@ export async function convertDocumentPdf(
         ]),
       },
     );
+    if (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429)
+      throw new DocumentConversionRefused("refused", `PDF conversion was refused (${response.status}).`);
     if (!response.ok)
       throw new Error(`PDF conversion failed (${response.status}).`);
-    return Buffer.from(await response.arrayBuffer());
+    return readCapped(response, maxPdfBytes);
   });
   annotateTiming({ pdfHtmlBytes: Buffer.byteLength(html, "utf8"), pdfBytes: bytes.length });
-  if (bytes.length > 30_000_000 || bytes.subarray(0, 5).toString() !== "%PDF-")
-    throw new Error("PDF converter returned an invalid or oversized document.");
+  if (bytes.subarray(0, 5).toString() !== "%PDF-")
+    throw new Error("PDF converter returned an invalid document.");
   if (questionPaper) await measure("doc.pdf.pagecount", () => assertQuestionPaperPageCount(bytes));
   return bytes;
 }

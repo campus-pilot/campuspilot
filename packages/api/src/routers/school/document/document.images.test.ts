@@ -74,3 +74,52 @@ describe('images as conversion assets', () => {
     expect(() => renderDocuments('<p>x</p>', [{}], { assets: new Set(['../logo.png']) })).toThrow();
   });
 });
+
+describe('CSS may load only what an image may (review S4)', () => {
+  const png = 'data:image/png;base64,iVBORw0KGgo=';
+  const sheet = (css: string, assets: string[] = []) => batchHtml(`<style>${css}</style><p style="color: red">x</p>`, {}, assets);
+
+  it('keeps raster data images and the batch\'s exact asset names in <style>', () => {
+    const html = sheet(`.a{background:url("${png}")}.b{background-image:url(${asset})}.c{color:blue}`, [asset]);
+    expect(html).toContain(png);
+    expect(html).toContain(`url(${asset})`);
+    expect(html).toContain('color:blue');
+  });
+
+  it.each([
+    ['a file in Gotenberg\'s temporary directory', '.a{background:url(file:///tmp/other/asset.png)}'],
+    ['a relative path', '.a{background:url(../index.html)}'],
+    ['the network', ".a{background:url('https://example.com/x.png')}"],
+    ['an SVG data URI', '.a{background:url("data:image/svg+xml,<svg/>")}'],
+    ['another batch\'s asset', `.a{background:url(${other})}`],
+    ['image-set with a path', '.a{background-image:image-set("x.png" 1x)}'],
+    ['an escaped url(', '.a{background:u\\72l(../x.png)}'],
+    ['image()', '.a{background:image("x.png")}'],
+    ['a url in an at-rule prelude', '@font-face{src:url(/etc/fonts/x.ttf)}'],
+  ])('removes %s', (_label, css) => {
+    const html = sheet(css, [asset]);
+    expect(html).not.toMatch(/url\(|image-set|image\(|u\\72l/);
+  });
+
+  it('removes @import whatever it names, and drops CSS that does not parse', () => {
+    expect(sheet(`@import url(${png});.a{color:red}`)).not.toContain('@import');
+    expect(sheet('.a{color:red')).not.toContain('.a{color:red');
+  });
+
+  it('cleans style attributes the same way, keeping the safe declarations', () => {
+    const html = batchHtml(
+      `<p style="color: green; background: url(file:///tmp/x.png)">a</p><p style="background-image: url(${asset})">b</p>`,
+      {},
+      [asset],
+    );
+    expect(html).toContain('color: green');
+    expect(html).not.toContain('file:');
+    expect(html).toContain(`url(${asset})`);
+  });
+
+  it('allows no asset name in previews (no assets), only raster data images', () => {
+    const [html] = renderDocuments(`<style>.a{background:url(${asset})}.b{background:url(${png})}</style>`, [{}]);
+    expect(html).not.toContain(asset);
+    expect(html).toContain(png);
+  });
+});
