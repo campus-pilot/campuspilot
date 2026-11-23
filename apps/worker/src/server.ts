@@ -9,6 +9,10 @@ import {
   dataMigrationWorkflow,
 } from '@campuspilot/api/workflows/data-migration';
 import {
+  documentGenerationControlService,
+  documentGenerationObject,
+} from '@campuspilot/api/workflows/document-generation';
+import {
   questionPaperControlService,
   questionPaperGenerationWorkflow,
 } from '@campuspilot/api/workflows/question-paper';
@@ -61,6 +65,8 @@ export function startWorker() {
       notificationSenderObject,
       questionPaperControlService,
       questionPaperGenerationWorkflow,
+      documentGenerationControlService,
+      documentGenerationObject,
       imageDerivativeControlService,
       leadControlService,
       leadAlertWorkflow,

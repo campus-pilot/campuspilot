@@ -13,6 +13,7 @@ import { attachAssistantVoice } from '@campuspilot/assistant/voice/server';
 import { sweepDemoSchoolOutbox } from '@campuspilot/api/routers/system-admin/demo-school/demo-school.outbox';
 import { configureQuestionPaperModel } from '@campuspilot/api/workflows/question-paper/model';
 import { sweepQuestionPaperOutbox } from '@campuspilot/api/workflows/question-paper/outbox';
+import { sweepDocumentGenerationOutbox } from '@campuspilot/api/workflows/document-generation/outbox';
 import { sweepImageDerivatives } from '@campuspilot/api/workflows/image-derivatives/outbox';
 import { releaseExpiredPageReservations } from '@campuspilot/api/routers/school/question-paper/question-paper.service';
 import { createQuestionPaperModel } from '@campuspilot/assistant/question-paper-model';
@@ -101,6 +102,16 @@ async function sweepQuestionPapers() {
 }
 
 /**
+ * One document generation sweep: hands queued PDF jobs to the worker that
+ * Restate has not accepted, fails jobs that can no longer progress, and
+ * removes temporary objects ended jobs left behind.
+ */
+async function sweepDocumentJobs() {
+  const result = await sweepDocumentGenerationOutbox();
+  if (Object.values(result).some((value) => value > 0)) log.info(result, 'document-generation.outbox.ok');
+}
+
+/**
  * One image derivative sweep: hands pages and chat images still waiting for
  * their thumbnail and model copy to the worker again, fails those past the
  * deadline, and removes page reservations whose photo never arrived.
@@ -137,6 +148,7 @@ const OUTBOX_SWEEPS: ReadonlyArray<{ errorMessage: string; run: () => Promise<vo
   { errorMessage: 'notification.outbox.error', run: sweepNotifications },
   { errorMessage: 'assistant.outbox.error', run: sweepAssistant },
   { errorMessage: 'question-paper.outbox.error', run: sweepQuestionPapers },
+  { errorMessage: 'document-generation.outbox.error', run: sweepDocumentJobs },
   { errorMessage: 'image-derivatives.outbox.error', run: sweepImages },
   { errorMessage: 'lead-alert.outbox.error', run: sweepLeadAlerts },
   { errorMessage: 'notification.results.sweep.error', run: sweepPublications },

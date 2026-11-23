@@ -31,6 +31,7 @@ import {
   createTestStudent,
   includeTestExamClasses,
 } from '../../../../test/fixtures';
+import { generateDocumentNow, readDocumentJob, runDocumentJob } from '../../../../test/documents';
 import { DOCUMENT_MARKETPLACE } from './document.catalog';
 import { combineDocuments, renderDocument } from './document.render';
 import { documentGrade } from './document.context';
@@ -217,6 +218,7 @@ describe('document templates, generation, and artifact lifecycle', () => {
         }),
       () =>
         c.school.deleteDocumentArtifact({ schoolId, artifactId: 'unknown', documentType: 'id_card' }),
+      () => c.school.getDocumentGenerationJob({ schoolId, jobId: 'unknown', documentType: 'id_card' }),
     ];
     for (const [client, code] of [
       [createTestClient(null), 'UNAUTHORIZED'],
@@ -416,7 +418,7 @@ describe('document templates, generation, and artifact lifecycle', () => {
         documentType === 'timetable' ? 'Mathematics' : '{{missing}}',
       );
       expect(preview.html).not.toContain('<script');
-      const generated = await manager.school.generateDocument(input);
+      const generated = await generateDocumentNow(manager, input);
       expect(generated.artifact.templateRevisionId).toBe(active.artifact.id);
       expect(generated.artifact.templateName).toBe(active.artifact.name);
       expect(generated.artifact.studentCount).toBe(
@@ -651,7 +653,7 @@ describe('document templates, generation, and artifact lifecycle', () => {
       schoolId,
       documentType: 'id_card',
     });
-    const { artifact } = await manager.school.generateDocument({
+    const { artifact } = await generateDocumentNow(manager, {
       schoolId,
       templateRevisionId: active!.artifact.id,
       source: {
@@ -710,7 +712,7 @@ describe('document templates, generation, and artifact lifecycle', () => {
         .where(eq(artifactTable.id, artifact.id)),
     ).toHaveLength(0);
   });
-  it('leaves no new references when conversion or upload fails', async () => {
+  it('leaves no new references when conversion or upload fails: the job fails visibly and its objects are removed', async () => {
     const active = await manager.school.getActiveDocumentTemplate({
       schoolId,
       documentType: 'id_card',
@@ -737,13 +739,20 @@ describe('document templates, generation, and artifact lifecycle', () => {
           ? Promise.resolve(new Response('Unavailable', { status: 503 }))
           : originalFetch(request, init),
       );
+    let converted: string;
     try {
-      await expect(
-        manager.school.generateDocument(input),
-      ).rejects.toMatchObject({ code: 'INTERNAL_SERVER_ERROR' });
+      // Starting never waits for the converter: the request succeeds and the job fails.
+      converted = (await manager.school.generateDocument(input)).jobId;
+      expect(await runDocumentJob(converted)).toEqual({ status: 'failed', code: 'conversion_failed' });
     } finally {
       failure.mockRestore();
     }
+    expect(await readDocumentJob(converted)).toMatchObject({
+      status: 'failed',
+      errorCode: 'conversion_failed',
+      errorMessage: 'The PDF could not be created. Try again.',
+      temporaryObjectsDeletedAt: expect.any(Date),
+    });
     const s3 = getS3Client();
     s3.middlewareStack.add(
       (next, context) => async (args) => {
@@ -753,13 +762,14 @@ describe('document templates, generation, and artifact lifecycle', () => {
       },
       { name: 'documentUploadFailure', step: 'initialize' },
     );
+    let uploaded: string;
     try {
-      await expect(
-        manager.school.generateDocument(input),
-      ).rejects.toMatchObject({ code: 'INTERNAL_SERVER_ERROR' });
+      uploaded = (await manager.school.generateDocument(input)).jobId;
+      expect(await runDocumentJob(uploaded)).toMatchObject({ status: 'failed' });
     } finally {
       s3.middlewareStack.remove('documentUploadFailure');
     }
+    expect((await readDocumentJob(uploaded)).status).toBe('failed');
     expect(
       (
         await db
@@ -768,6 +778,12 @@ describe('document templates, generation, and artifact lifecycle', () => {
           .where(eq(artifactTable.schoolId, schoolId))
       ).map((r) => r.id),
     ).toEqual(before.map((r) => r.id));
+    for (const jobId of [converted, uploaded]) {
+      const listed = await getS3Client().send(
+        new ListObjectsV2Command({ Bucket: env.S3_BUCKET, Prefix: `schools/${schoolId}/document-jobs/${jobId}/` }),
+      );
+      expect(listed.Contents ?? []).toEqual([]);
+    }
   });
   it('handles missing templates, empty classes, unknown exams and unavailable timetables as domain errors', async () => {
     const emptyClass = (await createTestClass({ schoolId })).schoolClass.id;
@@ -879,7 +895,7 @@ describe('document templates, generation, and artifact lifecycle', () => {
                 studentIds: studentIds.slice(0, 2),
                 examSlug: 'midterm',
               };
-      const generated = await manager.school.generateDocument({
+      const generated = await generateDocumentNow(manager, {
         schoolId,
         templateRevisionId: selected!.artifact.id,
         source,

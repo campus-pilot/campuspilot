@@ -246,11 +246,19 @@ await mkdir(new URL('documents/', local), { recursive: true });
 for (const documentType of types) {
   const source = sourceByType[documentType];
   const history = await rpc.school.listDocumentArtifacts({ schoolId, filters: { sessionId, documentType } });
-  let artifact = history.items.find((item) => item.templateRevisionId === templates.get(documentType));
+  let artifact: { id: string } | undefined = history.items.find((item) => item.templateRevisionId === templates.get(documentType));
   if (!artifact) {
     const preview = await rpc.school.previewDocument({ schoolId, source, templateRevisionId: templates.get(documentType)! });
     if (source.documentType === 'statement') source.expectedReviewHash = preview.reviewHash!;
-    artifact = (await rpc.school.generateDocument({ schoolId, source, templateRevisionId: templates.get(documentType)! })).artifact;
+    // Generation is a job in the worker: poll it until the PDF exists.
+    const { jobId } = await rpc.school.generateDocument({ schoolId, source, templateRevisionId: templates.get(documentType)! });
+    let job = await rpc.school.getDocumentGenerationJob({ schoolId, jobId, documentType });
+    for (let attempt = 0; (job.status === 'queued' || job.status === 'running') && attempt < 600; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      job = await rpc.school.getDocumentGenerationJob({ schoolId, jobId, documentType });
+    }
+    assert(job.status === 'succeeded' && job.artifactId, `Cannot generate ${documentType}: ${job.errorMessage ?? job.status}`);
+    artifact = { id: job.artifactId };
   }
   const download = await rpc.school.getDocumentDownload({ schoolId, artifactId: artifact.id, documentType });
   const response = await fetch(download.url);

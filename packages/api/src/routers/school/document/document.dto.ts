@@ -272,17 +272,32 @@ export const marketplaceTemplateInputSchema = templateScopeSchema
   .extend({ slug: z.string().min(1).max(100), printSize: noticePrintSizeSchema })
   .superRefine(validateNoticePrintSize);
 export const previewOutputSchema = z.object({
+  /** The sample: the first documents, enough to fill two physical sheets. */
   html: z.string(),
+  /** Students the whole selection includes (0 for timetables); finance documents count documents. */
   studentCount: z.number().int(),
+  /** Documents the whole selection resolves to. */
+  documentCount: z.number().int(),
+  /** Documents rendered in `html` (the first ones, in print order). */
+  sampleCount: z.number().int(),
   warnings: z.array(z.string()),
+  /** Statements only: the hash generation must present, over the whole selection. */
   reviewHash: z.string().nullable(),
 });
 
+/**
+ * The most documents one export may hold: explicit students, bill IDs,
+ * receipt transactions and statement admissions, and every whole-class,
+ * whole-examination or billing-run selection once resolved. Generation runs
+ * as a batched job in the worker (docs/document-system.md "Generation jobs"),
+ * so the bound is the job's, not one request's.
+ */
+export const MAX_DOCUMENT_SOURCE_ITEMS = 1_500;
 const examSlug = id.describe("Exam slug from school.listExams.");
 const selection = {
   sessionId: id,
   classId: id,
-  studentIds: z.array(id).min(1).max(500).optional(),
+  studentIds: z.array(id).min(1).max(MAX_DOCUMENT_SOURCE_ITEMS).optional(),
 };
 /** IDs remain independent inputs. The server verifies their school, session,
  * class and enrollment relationships instead of trusting a UI selection.
@@ -319,7 +334,7 @@ export const documentSourceSchema = z.discriminatedUnion("documentType", [
   z.object({
     documentType: z.literal("bill"),
     sessionId: id,
-    billIds: z.array(id).min(1).max(500).optional(),
+    billIds: z.array(id).min(1).max(MAX_DOCUMENT_SOURCE_ITEMS).optional(),
     billRunId: id.optional(),
   }).strict().superRefine((source, context) => {
     if (Boolean(source.billIds) === Boolean(source.billRunId)) context.addIssue({ code: "custom", message: "Choose bill IDs or one complete billing run." });
@@ -327,7 +342,7 @@ export const documentSourceSchema = z.discriminatedUnion("documentType", [
   z.object({
     documentType: z.literal("receipt"),
     sessionId: id,
-    transactions: z.array(z.object({ kind: z.enum(["payment", "refund"]), id })).min(1).max(500),
+    transactions: z.array(z.object({ kind: z.enum(["payment", "refund"]), id })).min(1).max(MAX_DOCUMENT_SOURCE_ITEMS),
     /** Session Documents uses this explicit policy for its payment-only bulk
      * picker. Contextual payment/refund regeneration intentionally omits it. */
     selectionPolicy: z.literal("posted_unreversed_payments").optional(),
@@ -346,7 +361,7 @@ export const documentSourceSchema = z.discriminatedUnion("documentType", [
   z.object({
     documentType: z.literal("statement"),
     sessionId: id,
-    admissionIds: z.array(id).min(1).max(500),
+    admissionIds: z.array(id).min(1).max(MAX_DOCUMENT_SOURCE_ITEMS),
     throughDate: z.string().date(),
     /** Required by generation after preview; preview omits it. */
     expectedReviewHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
@@ -411,4 +426,55 @@ export const listArtifactsOutputSchema =
 export const artifactScopeSchema = schoolScopeSchema.extend({
   artifactId: id,
   documentType: documentTypeSchema,
+});
+
+export const documentGenerationJobStatusSchema = z.enum(["queued", "running", "succeeded", "failed"]);
+/**
+ * A PDF generation job (docs/document-system.md "Generation jobs"). Its
+ * outcome is read here, never from the request that started it: the PDF is
+ * created in the background, and `artifactId` is set once it succeeded.
+ */
+export const documentGenerationJobDtoSchema = z.object({
+  id: z.string(),
+  schoolId: z.string(),
+  sessionId: z.string(),
+  documentType: documentTypeSchema,
+  status: documentGenerationJobStatusSchema,
+  name: z.string(),
+  documentCount: z.number().int(),
+  warnings: z.array(z.string()),
+  /** Null until the documents are split into batches. */
+  batchCount: z.number().int().nullable(),
+  batchesDone: z.number().int(),
+  /** Set when `status` is `succeeded`: the PDF's artifact (download it with getDocumentDownload). */
+  artifactId: z.string().nullable(),
+  /** Set when `status` is `failed`: a stable code and a message to show. */
+  errorCode: z.string().nullable(),
+  errorMessage: z.string().nullable(),
+  createdAt: z.string(),
+  startedAt: z.string().nullable(),
+  completedAt: z.string().nullable(),
+});
+export type DocumentGenerationJobDto = z.infer<typeof documentGenerationJobDtoSchema>;
+export const generateDocumentOutputSchema = z.object({
+  jobId: z.string(),
+  job: documentGenerationJobDtoSchema,
+});
+/** The job is addressed with its document type, so the permission is checked before the lookup (as for artifacts). */
+export const documentJobScopeSchema = schoolScopeSchema.extend({
+  jobId: id,
+  documentType: documentTypeSchema,
+});
+/**
+ * Failed jobs stay listed this long after they ended; queued and running
+ * jobs are always listed, and a job that succeeded is listed as its PDF.
+ */
+export const DOCUMENT_JOB_FAILED_LISTED_DAYS = 7;
+export const listDocumentJobsSchema = schoolScopeSchema.extend({
+  sessionId: id,
+  /** Which permission and type family to list, as for listDocumentArtifacts. */
+  documentDomain: z.enum(["academic", "finance", "all"]),
+});
+export const listDocumentJobsOutputSchema = z.object({
+  items: z.array(documentGenerationJobDtoSchema),
 });
