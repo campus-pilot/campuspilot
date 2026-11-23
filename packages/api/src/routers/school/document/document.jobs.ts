@@ -1,10 +1,12 @@
 import type { Database } from "@campuspilot/db";
 import { generateId } from "@campuspilot/db/id";
 import { documentGenerationJobTable } from "@campuspilot/db/schema/document-generation-job";
-import { and, desc, eq, gt, inArray, notInArray, or } from "drizzle-orm";
+import { and, count, desc, eq, gt, inArray, or, sql } from "drizzle-orm";
 
 import { rpcError } from "../../../errors";
 import { handOffDocumentJob } from "../../../workflows/document-generation/outbox";
+import { DOCUMENT_JOBS_PER_SCHOOL, DOCUMENT_JOBS_PER_USER } from "../../../workflows/document-generation/constants";
+import { createNextPageCursor, createPaginatedResult, resolvePaginationInput } from "../../../paginations";
 import * as dto from "./document.dto";
 import { selectedDocumentTemplateRevision } from "./document.selected-template";
 import { resolveDocumentSource } from "./document.source";
@@ -36,7 +38,8 @@ export function serializeDocumentJob(row: JobRow): dto.DocumentGenerationJobDto 
  * Accepts a generation request and queues its job; the PDF is made by the
  * worker (`workflows/document-generation`). Everything that can refuse the
  * request is checked here, before anything is queued, as generation always
- * did: the selected template revision (CONFLICT when it changed), the
+ * did, plus the job limits (`DOCUMENT_JOBS_PER_SCHOOL` queued or running jobs
+ * per school, `DOCUMENT_JOBS_PER_USER` per person; TOO_MANY_REQUESTS): the selected template revision (CONFLICT when it changed), the
  * source's relationships and approvals, the statement review hash, and the
  * document count. The contexts are built without reading any image (that
  * is the worker's work) and then discarded; what the job needs to describe
@@ -70,7 +73,29 @@ export async function startDocumentGeneration(
     throw rpcError.badRequest(
       `This selection has ${data.contexts.length.toLocaleString("en-IN")} documents. Create at most ${dto.MAX_DOCUMENT_SOURCE_ITEMS.toLocaleString("en-IN")} at a time.`,
     );
-  const [row] = await db
+  const row = await db.transaction(async (tx) => {
+    // One start at a time per school, so two concurrent requests cannot both
+    // pass the counts below (a transaction-scoped advisory lock: no row is
+    // locked and nothing else waits on it).
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`document-jobs:${input.schoolId}`}, 0))`);
+    const active = inArray(documentGenerationJobTable.status, ["queued", "running"]);
+    const [school] = await tx
+      .select({ value: count() })
+      .from(documentGenerationJobTable)
+      .where(and(eq(documentGenerationJobTable.schoolId, input.schoolId), active));
+    if (school!.value >= DOCUMENT_JOBS_PER_SCHOOL)
+      throw rpcError.tooManyRequests(
+        `This school already has ${DOCUMENT_JOBS_PER_SCHOOL} PDFs being created. Wait for one to finish (see Document history), then try again.`,
+      );
+    const [mine] = await tx
+      .select({ value: count() })
+      .from(documentGenerationJobTable)
+      .where(and(eq(documentGenerationJobTable.requestedBy, input.requestedBy), active));
+    if (mine!.value >= DOCUMENT_JOBS_PER_USER)
+      throw rpcError.tooManyRequests(
+        `You already have ${DOCUMENT_JOBS_PER_USER} PDFs being created. Wait for one to finish (see Document history), then try again.`,
+      );
+    const [inserted] = await tx
     .insert(documentGenerationJobTable)
     .values({
       schoolId: input.schoolId,
@@ -88,9 +113,11 @@ export async function startDocumentGeneration(
       ledgerCutoff: data.ledgerCutoff,
     })
     .returning();
+    return inserted!;
+  });
   const dispatch = options.dispatch ?? ((jobId: string) => handOffDocumentJob(db, jobId));
-  dispatch(row!.id);
-  return serializeDocumentJob(row!);
+  dispatch(row.id);
+  return serializeDocumentJob(row);
 }
 
 /** One job of the school, of the given document type (the permission was checked for that type). */
@@ -110,36 +137,46 @@ export async function getDocumentJob(db: Database, input: { schoolId: string; jo
   return serializeDocumentJob(row);
 }
 
-/** Most jobs one list returns; a session rarely has more than a few in flight. */
-const LISTED_JOBS = 50;
-
 /**
- * The session's jobs that History shows next to its PDFs: queued and running
- * jobs, and jobs that failed in the last `DOCUMENT_JOB_FAILED_LISTED_DAYS`
- * days, newest first. A job that succeeded is not listed: its PDF is.
+ * The session's jobs that History shows next to its PDFs, newest first:
+ * queued and running jobs, and jobs that failed in the last
+ * `DOCUMENT_JOB_FAILED_LISTED_DAYS` days, of the document types the caller
+ * could have started (`documentTypes`, decided by the procedure). A job that
+ * succeeded is not listed: its PDF is.
  */
-export async function listDocumentJobs(db: Database, input: { schoolId: string; sessionId: string; documentDomain: "academic" | "finance" | "all" }) {
-  const finance = ["bill", "receipt", "statement"] as const;
+export async function listDocumentJobs(
+  db: Database,
+  input: { schoolId: string; sessionId: string; limit: number; page?: number; cursor?: string },
+  documentTypes: readonly dto.DocumentType[],
+) {
+  const { currentPage, offset, pageSize } = resolvePaginationInput(input);
   const failedSince = new Date(Date.now() - dto.DOCUMENT_JOB_FAILED_LISTED_DAYS * 24 * 60 * 60 * 1000);
-  const rows = await db
-    .select()
-    .from(documentGenerationJobTable)
-    .where(
-      and(
-        eq(documentGenerationJobTable.schoolId, input.schoolId),
-        eq(documentGenerationJobTable.sessionId, input.sessionId),
-        input.documentDomain === "finance"
-          ? inArray(documentGenerationJobTable.documentType, [...finance])
-          : input.documentDomain === "academic"
-            ? notInArray(documentGenerationJobTable.documentType, [...finance])
-            : undefined,
-        or(
-          inArray(documentGenerationJobTable.status, ["queued", "running"]),
-          and(eq(documentGenerationJobTable.status, "failed"), gt(documentGenerationJobTable.completedAt, failedSince)),
-        ),
-      ),
-    )
-    .orderBy(desc(documentGenerationJobTable.createdAt), desc(documentGenerationJobTable.id))
-    .limit(LISTED_JOBS);
-  return { items: rows.map(serializeDocumentJob) };
+  const where = and(
+    eq(documentGenerationJobTable.schoolId, input.schoolId),
+    eq(documentGenerationJobTable.sessionId, input.sessionId),
+    documentTypes.length ? inArray(documentGenerationJobTable.documentType, [...documentTypes]) : sql`false`,
+    or(
+      inArray(documentGenerationJobTable.status, ["queued", "running"]),
+      and(eq(documentGenerationJobTable.status, "failed"), gt(documentGenerationJobTable.completedAt, failedSince)),
+    ),
+  );
+  const [rows, [total]] = await Promise.all([
+    db
+      .select()
+      .from(documentGenerationJobTable)
+      .where(where)
+      .orderBy(desc(documentGenerationJobTable.createdAt), desc(documentGenerationJobTable.id))
+      .offset(offset)
+      .limit(pageSize),
+    db.select({ value: count() }).from(documentGenerationJobTable).where(where),
+  ]);
+  const totalPages = Math.ceil(total!.value / pageSize);
+  return createPaginatedResult({
+    items: rows.map(serializeDocumentJob),
+    totalItems: total!.value,
+    currentPage,
+    pageSize,
+    totalPages,
+    nextCursor: createNextPageCursor(currentPage, totalPages),
+  });
 }

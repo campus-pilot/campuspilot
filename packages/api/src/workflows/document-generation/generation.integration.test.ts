@@ -227,7 +227,21 @@ describe('document generation jobs (batched, in the worker)', () => {
       expectedRevisionId: idCardRevision,
     });
     try {
-      expect(await runDocumentJob(jobId)).toMatchObject({ status: 'succeeded' });
+      const deps = defaultDocumentGenerationDeps();
+      const printed: string[] = [];
+      const outcome = await runDocumentJob(jobId, {
+        ...deps,
+        convert: (html, ...rest) => {
+          printed.push(html);
+          return deps.convert(html, ...rest);
+        },
+      });
+      expect(outcome).toMatchObject({ status: 'succeeded' });
+      // What was printed is the pinned revision's markup, not the newer one's.
+      expect(printed).toHaveLength(1);
+      expect(printed[0]).toContain('Batch student 00');
+      expect(printed[0]).toContain('alt="Logo"');
+      expect(printed[0]).not.toContain('Later Batch student');
       const job = await readDocumentJob(jobId);
       const [artifact] = await db.select().from(artifactTable).where(eq(artifactTable.id, job.artifactId));
       expect(artifact!.templateRevisionId).toBe(idCardRevision);
@@ -241,6 +255,34 @@ describe('document generation jobs (batched, in the worker)', () => {
           expectedRevisionId: next.revisionId,
         })
       ).revisionId;
+    }
+  });
+
+  it('limits queued and running jobs per person and per school (TOO_MANY_REQUESTS), counting only jobs in flight', async () => {
+    const principal = createTestClient((await createSchoolStaffSession(schoolId, [{ role: 'principal' }])).session);
+    const started = [
+      (await manager.school.generateDocument(idCards(studentIds.slice(0, 1)))).jobId,
+      (await manager.school.generateDocument(idCards(studentIds.slice(1, 2)))).jobId,
+    ];
+    await expect(manager.school.generateDocument(idCards(studentIds.slice(2, 3)))).rejects.toMatchObject({ code: 'TOO_MANY_REQUESTS', message: expect.stringMatching(/You already have 2 PDFs/) });
+    started.push((await principal.school.generateDocument(idCards(studentIds.slice(2, 3)))).jobId);
+    await expect(principal.school.generateDocument(idCards(studentIds.slice(3, 4)))).rejects.toMatchObject({ code: 'TOO_MANY_REQUESTS', message: expect.stringMatching(/This school already has 3 PDFs/) });
+    for (const jobId of started) expect(await runDocumentJob(jobId)).toMatchObject({ status: 'succeeded' });
+    // Ended jobs no longer count.
+    const again = await manager.school.generateDocument(idCards(studentIds.slice(3, 4)));
+    expect(await runDocumentJob(again.jobId)).toMatchObject({ status: 'succeeded' });
+  });
+
+  it('fails, without a PDF, a job whose school was suspended after the request', async () => {
+    const { jobId } = await manager.school.generateDocument(idCards(studentIds.slice(0, 1)));
+    await db.update(schoolTable).set({ suspendedAt: new Date(), suspendedReason: 'Test suspension' }).where(eq(schoolTable.id, schoolId));
+    try {
+      expect(await runDocumentJob(jobId)).toEqual({ status: 'failed', code: 'school_suspended' });
+      expect(await readDocumentJob(jobId)).toMatchObject({ status: 'failed', errorCode: 'school_suspended', errorMessage: expect.stringMatching(/suspended/i), startedAt: null });
+      const job = await readDocumentJob(jobId);
+      expect(await db.select().from(artifactTable).where(eq(artifactTable.id, job.artifactId))).toHaveLength(0);
+    } finally {
+      await db.update(schoolTable).set({ suspendedAt: null, suspendedReason: null }).where(eq(schoolTable.id, schoolId));
     }
   });
 

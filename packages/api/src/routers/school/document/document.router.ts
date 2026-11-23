@@ -16,7 +16,7 @@ import { schoolTable } from "@campuspilot/db/schema/school";
 import { SCHOOL_ACTIONS } from "@campuspilot/opa/policies/school";
 import { o, protectedProcedure } from "../../../index";
 import { rpcError, toRpcError } from "../../../errors";
-import { assertPermission } from "../../../permissions/authorization";
+import { assertPermission, checkPermissions } from "../../../permissions/authorization";
 import { assertSchoolFeatureEnabled } from "../../../feature-flags/feature-flags.service";
 import {
   createNextPageCursor,
@@ -85,16 +85,80 @@ function requireSourceTypePermission(
     },
   );
 }
-/** Reading a job needs the permission to generate its document type: the person who could start it may watch it. */
+type GeneratorDocumentType = Exclude<dto.DocumentType, dto.TemplateOnlyDocumentType>;
+const GENERATOR_DOCUMENT_TYPES = dto.documentTypeSchema.options.filter(
+  (type): type is GeneratorDocumentType => !(dto.TEMPLATE_ONLY_DOCUMENT_TYPES as readonly string[]).includes(type),
+);
+/**
+ * Every action starting a document of `type` needs: its generate action and
+ * the reads of its source data. Decided by the type alone (no source field
+ * changes it), so starting, reading and listing jobs share one rule.
+ */
+function startActions(type: dto.DocumentType) {
+  if (isFinanceDocument(type))
+    return [
+      SCHOOL_ACTIONS.GENERATE_FINANCE_DOCUMENTS,
+      SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES,
+      SCHOOL_ACTIONS.READ_SESSION_FINANCE,
+      SCHOOL_ACTIONS.READ_ADMISSION_LEDGER,
+    ];
+  const sourceReads =
+    type === "timetable"
+      ? [SCHOOL_ACTIONS.READ_EXAM_TIMETABLE, SCHOOL_ACTIONS.READ_EXAMS]
+      : type === "report_card"
+        ? [SCHOOL_ACTIONS.READ_STUDENT, SCHOOL_ACTIONS.READ_EXAM_RESULTS, SCHOOL_ACTIONS.READ_EXAMS, SCHOOL_ACTIONS.READ_EXAM_PLANS]
+        : type === "admit_card"
+          ? [SCHOOL_ACTIONS.READ_STUDENT, SCHOOL_ACTIONS.READ_EXAM_TIMETABLE, SCHOOL_ACTIONS.READ_EXAMS]
+          : [SCHOOL_ACTIONS.READ_STUDENT];
+  return [
+    SCHOOL_ACTIONS.GENERATE_DOCUMENTS,
+    SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES,
+    SCHOOL_ACTIONS.READ_SESSION,
+    SCHOOL_ACTIONS.READ_CLASS,
+    ...sourceReads,
+  ];
+}
+/**
+ * Reading a job needs what starting one of its type needs (`startActions`)
+ * and its type's feature: a job says what was exported, so nobody reads one
+ * they could not have started.
+ */
 const requireJobPermission = o.middleware<Record<never, never>, z.infer<typeof dto.documentJobScopeSchema>>(
   async ({ context, next, signal }, input) => {
-    await assertPermission(context, {
-      action: isFinanceDocument(input.documentType) ? SCHOOL_ACTIONS.GENERATE_FINANCE_DOCUMENTS : SCHOOL_ACTIONS.GENERATE_DOCUMENTS,
-      resource: { kind: "school", schoolId: input.schoolId },
-    }, signal);
+    for (const action of startActions(input.documentType))
+      await assertPermission(context, { action, resource: { kind: "school", schoolId: input.schoolId } }, signal);
+    await assertSchoolFeatureEnabled(context.db, input.schoolId, dto.DOCUMENT_TYPE_FEATURE[input.documentType]);
     return next();
   },
 );
+/** The generator types of a domain the caller could start (permissions and the type's feature). */
+async function startableDocumentTypes(
+  context: Parameters<typeof assertPermission>[0],
+  input: { schoolId: string; documentDomain: "academic" | "finance" | "all" },
+  signal?: AbortSignal,
+): Promise<GeneratorDocumentType[]> {
+  const candidates = GENERATOR_DOCUMENT_TYPES.filter((type) =>
+    input.documentDomain === "all" ? true : (input.documentDomain === "finance") === isFinanceDocument(type),
+  );
+  // One OPA round for every action of every candidate type.
+  const actions = [...new Set(candidates.flatMap(startActions))];
+  const results = await checkPermissions(
+    context,
+    actions.map((action) => ({ action, resource: { kind: "school" as const, schoolId: input.schoolId } })) as Parameters<typeof checkPermissions>[1],
+    signal,
+  );
+  const granted = new Set(actions.filter((_action, index) => results[index]));
+  const allowed = candidates.filter((type) => startActions(type).every((action) => granted.has(action)));
+  const features = new Map<string, boolean>();
+  const startable: GeneratorDocumentType[] = [];
+  for (const type of allowed) {
+    const feature = dto.DOCUMENT_TYPE_FEATURE[type];
+    if (!features.has(feature))
+      features.set(feature, await assertSchoolFeatureEnabled(context.db, input.schoolId, feature).then(() => true, () => false));
+    if (features.get(feature)) startable.push(type);
+  }
+  return startable;
+}
 /** Listing jobs needs the history permission of every domain listed, as listing their PDFs does. */
 const requireJobListPermission = o.middleware<Record<never, never>, z.infer<typeof dto.listDocumentJobsSchema>>(
   async ({ context, next, signal }, input) => {
@@ -283,42 +347,8 @@ const requireSourcePermissions = o.middleware<
   Record<never, never>,
   z.infer<typeof dto.generateDocumentSchema>
 >(async ({ context, next, signal }, input) => {
-  if (isFinanceDocument(input.source.documentType)) {
-    for (const action of [
-      SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES,
-      SCHOOL_ACTIONS.READ_SESSION_FINANCE,
-      SCHOOL_ACTIONS.READ_ADMISSION_LEDGER,
-    ]) await assertPermission(context, { action, resource: { kind: "school", schoolId: input.schoolId } }, signal);
-    return next();
-  }
-  const actions =
-    input.source.documentType === "timetable"
-      ? [SCHOOL_ACTIONS.READ_EXAM_TIMETABLE, SCHOOL_ACTIONS.READ_EXAMS]
-      : input.source.documentType === "report_card"
-        ? [
-            SCHOOL_ACTIONS.READ_STUDENT,
-            SCHOOL_ACTIONS.READ_EXAM_RESULTS,
-            SCHOOL_ACTIONS.READ_EXAMS,
-            SCHOOL_ACTIONS.READ_EXAM_PLANS,
-          ]
-        : input.source.documentType === "admit_card"
-          ? [
-              SCHOOL_ACTIONS.READ_STUDENT,
-              SCHOOL_ACTIONS.READ_EXAM_TIMETABLE,
-              SCHOOL_ACTIONS.READ_EXAMS,
-            ]
-          : [SCHOOL_ACTIONS.READ_STUDENT];
-  for (const action of [
-    SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES,
-    SCHOOL_ACTIONS.READ_SESSION,
-    SCHOOL_ACTIONS.READ_CLASS,
-    ...actions,
-  ])
-    await assertPermission(
-      context,
-      { action, resource: { kind: "school", schoolId: input.schoolId } },
-      signal,
-    );
+  for (const action of startActions(input.source.documentType).slice(1))
+    await assertPermission(context, { action, resource: { kind: "school", schoolId: input.schoolId } }, signal);
   return next();
 });
 /**
@@ -655,7 +685,7 @@ export const schoolDocumentRouter = {
     .route(
       route(
         "List PDF generation jobs in progress",
-        "List a session's queued and running PDF jobs and those that failed in the last 7 days, newest first. Jobs that succeeded are listed by listDocumentArtifacts as their PDF.",
+        "List a session's queued and running PDF jobs and those that failed in the last 7 days, newest first, of the document types the caller could start. Jobs that succeeded are listed by listDocumentArtifacts as their PDF.",
       ),
     )
     .meta({
@@ -670,9 +700,9 @@ export const schoolDocumentRouter = {
     .use(requireJobListPermission)
     .use(requireSchoolFeature(dto.GENERATOR_DOCUMENT_FEATURE))
     .output(dto.listDocumentJobsOutputSchema)
-    .handler(async ({ context, input }) => {
+    .handler(async ({ context, input, signal }) => {
       try {
-        return await listDocumentJobs(context.db, input);
+        return await listDocumentJobs(context.db, input, await startableDocumentTypes(context, input, signal));
       } catch (error) {
         throw toRpcError(error);
       }

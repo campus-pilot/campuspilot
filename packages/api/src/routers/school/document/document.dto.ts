@@ -470,11 +470,11 @@ export const documentJobScopeSchema = schoolScopeSchema.extend({
  * jobs are always listed, and a job that succeeded is listed as its PDF.
  */
 export const DOCUMENT_JOB_FAILED_LISTED_DAYS = 7;
-export const listDocumentJobsSchema = schoolScopeSchema.extend({
+/** Newest first, with the id as the tie-breaker; the only order offered. */
+export const listDocumentJobsSchema = createListInputSchema({
+  ...schoolScopeSchema.shape,
   sessionId: id,
   /** Which permission and type family to list, as for listDocumentArtifacts. */
   documentDomain: z.enum(["academic", "finance", "all"]),
 });
-export const listDocumentJobsOutputSchema = z.object({
-  items: z.array(documentGenerationJobDtoSchema),
-});
+export const listDocumentJobsOutputSchema = createPaginatedOutputSchema(documentGenerationJobDtoSchema);

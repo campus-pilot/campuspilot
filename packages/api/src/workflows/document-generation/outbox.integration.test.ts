@@ -17,10 +17,10 @@ import { dispatchDocumentGenerationJob, sweepDocumentGenerationOutbox } from './
 import { documentJobPrefix } from './storage';
 
 /**
- * Restate is replaced by a controllable fake. Jobs of other test files that
- * share this database (a sweep sees every school's rows) always fail to hand
- * over here, with the error an unsigned deployment gives, so this file never
- * marks another file's job as handed over.
+ * Restate is replaced by a controllable fake. Every sweep here is scoped to
+ * this file's school, so other suites' rows can neither crowd out these jobs
+ * (the per-sweep limit) nor be touched; a job of another file would still
+ * fail to hand over, with the error an unsigned deployment gives.
  */
 const restate = vi.hoisted(() => ({ mine: new Set<string>(), fail: false, sent: [] as string[] }));
 vi.mock('./restate', () => ({
@@ -77,7 +77,7 @@ describe('document generation outbox', () => {
     expect(restate.sent).toEqual([queued.id]);
     expect(await reload(queued.id)).toMatchObject({ status: 'queued', handoverAttempts: 1, lastHandoverError: null, handedOverAt: expect.any(Date) });
     expect(await dispatchDocumentGenerationJob(db, queued.id)).toBe(false);
-    await sweepDocumentGenerationOutbox(db);
+    await sweepDocumentGenerationOutbox(db, { schoolId });
     expect(restate.sent).toEqual([queued.id]);
   });
 
@@ -85,11 +85,11 @@ describe('document generation outbox', () => {
     const queued = await job({});
     const stuck = await job({ createdAt: ago(DOCUMENT_GENERATION_HANDOVER_DEADLINE_MS + 60_000) });
     restate.fail = true;
-    await sweepDocumentGenerationOutbox(db);
+    await sweepDocumentGenerationOutbox(db, { schoolId });
     expect(await reload(queued.id)).toMatchObject({ status: 'queued', handedOverAt: null, lastHandoverError: 'Restate is unreachable.' });
     expect(await reload(stuck.id)).toMatchObject({ status: 'failed', errorCode: 'dispatch_failed', errorMessage: 'The PDF could not be started. Try again.' });
     restate.fail = false;
-    await sweepDocumentGenerationOutbox(db);
+    await sweepDocumentGenerationOutbox(db, { schoolId });
     expect(await reload(queued.id)).toMatchObject({ status: 'queued', handedOverAt: expect.any(Date) });
   });
 
@@ -97,7 +97,7 @@ describe('document generation outbox', () => {
     const late = await job({ handedOverAt: ago(DOCUMENT_GENERATION_START_DEADLINE_MS + 60_000), handoverAttempts: 1 });
     const waiting = await job({ handedOverAt: ago(60_000), handoverAttempts: 1 });
     const hung = await job({ status: 'running', handedOverAt: ago(DOCUMENT_GENERATION_RUN_DEADLINE_MS + 120_000), startedAt: ago(DOCUMENT_GENERATION_RUN_DEADLINE_MS + 60_000) });
-    await sweepDocumentGenerationOutbox(db);
+    await sweepDocumentGenerationOutbox(db, { schoolId });
     expect(await reload(late.id)).toMatchObject({ status: 'failed', errorCode: 'not_started' });
     expect(await reload(waiting.id)).toMatchObject({ status: 'queued' });
     expect(await reload(hung.id)).toMatchObject({ status: 'failed', errorCode: 'not_finished' });
@@ -113,7 +113,7 @@ describe('document generation outbox', () => {
     const ended = await job({ status: 'failed', errorCode: 'not_finished', errorMessage: 'x', startedAt: ago(DOCUMENT_GENERATION_CLEANUP_GRACE_MS * 3), completedAt: ago(DOCUMENT_GENERATION_CLEANUP_GRACE_MS * 2) });
     const prefix = documentJobPrefix(schoolId, ended.id);
     await getS3Client().send(new PutObjectCommand({ Bucket: env.S3_BUCKET, Key: `${prefix}batch-0001.json`, Body: '{}', ContentType: 'application/json' }));
-    await sweepDocumentGenerationOutbox(db);
+    await sweepDocumentGenerationOutbox(db, { schoolId });
     const listed = await getS3Client().send(new ListObjectsV2Command({ Bucket: env.S3_BUCKET, Prefix: prefix }));
     expect(listed.Contents ?? []).toEqual([]);
     expect(await reload(ended.id)).toMatchObject({ temporaryObjectsDeletedAt: expect.any(Date) });

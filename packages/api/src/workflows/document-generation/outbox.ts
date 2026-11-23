@@ -103,12 +103,17 @@ async function failJobs(db: DatabaseExecutor, ids: string[], code: SweepErrorCod
  * replicas take disjoint rows) and fails those past the deadline in the same
  * short transaction. Returns the rest to send after commit.
  */
-async function claimUnsent(db: DatabaseExecutor): Promise<{ toSend: string[]; expired: number }> {
+/** Which jobs a sweep handles: every school's (the server), or one school's (tests). */
+type SweepScope = { schoolId?: string };
+const inScope = (scope: SweepScope) =>
+  scope.schoolId === undefined ? undefined : eq(documentGenerationJobTable.schoolId, scope.schoolId);
+
+async function claimUnsent(db: DatabaseExecutor, scope: SweepScope): Promise<{ toSend: string[]; expired: number }> {
   return db.transaction(async (transaction) => {
     const rows = await transaction
       .select({ id: documentGenerationJobTable.id, createdAt: documentGenerationJobTable.createdAt })
       .from(documentGenerationJobTable)
-      .where(and(eq(documentGenerationJobTable.status, 'queued'), isNull(documentGenerationJobTable.handedOverAt)))
+      .where(and(eq(documentGenerationJobTable.status, 'queued'), isNull(documentGenerationJobTable.handedOverAt), inScope(scope)))
       .orderBy(asc(documentGenerationJobTable.createdAt))
       .limit(SWEEP_LIMIT)
       .for('update', { skipLocked: true });
@@ -120,7 +125,7 @@ async function claimUnsent(db: DatabaseExecutor): Promise<{ toSend: string[]; ex
 }
 
 /** Fails jobs Restate accepted but the worker never started, and running jobs past the deadline. */
-async function failStale(db: DatabaseExecutor) {
+async function failStale(db: DatabaseExecutor, scope: SweepScope) {
   const notStarted = await db
     .select({ id: documentGenerationJobTable.id })
     .from(documentGenerationJobTable)
@@ -130,6 +135,7 @@ async function failStale(db: DatabaseExecutor) {
         isNotNull(documentGenerationJobTable.handedOverAt),
         isNull(documentGenerationJobTable.startedAt),
         lt(documentGenerationJobTable.handedOverAt, new Date(Date.now() - DOCUMENT_GENERATION_START_DEADLINE_MS)),
+        inScope(scope),
       ),
     )
     .orderBy(asc(documentGenerationJobTable.handedOverAt))
@@ -141,6 +147,7 @@ async function failStale(db: DatabaseExecutor) {
       and(
         eq(documentGenerationJobTable.status, 'running'),
         lt(documentGenerationJobTable.startedAt, new Date(Date.now() - DOCUMENT_GENERATION_RUN_DEADLINE_MS)),
+        inScope(scope),
       ),
     )
     .orderBy(asc(documentGenerationJobTable.startedAt))
@@ -159,7 +166,7 @@ async function failStale(db: DatabaseExecutor) {
  * not succeed when no artifact holds it. One failing job does not stop the
  * others.
  */
-async function cleanupEnded(db: DatabaseExecutor) {
+async function cleanupEnded(db: DatabaseExecutor, scope: SweepScope) {
   const rows = await db
     .select({
       id: documentGenerationJobTable.id,
@@ -173,6 +180,7 @@ async function cleanupEnded(db: DatabaseExecutor) {
         inArray(documentGenerationJobTable.status, ['succeeded', 'failed']),
         isNull(documentGenerationJobTable.temporaryObjectsDeletedAt),
         lt(documentGenerationJobTable.completedAt, new Date(Date.now() - DOCUMENT_GENERATION_CLEANUP_GRACE_MS)),
+        inScope(scope),
       ),
     )
     .orderBy(asc(documentGenerationJobTable.completedAt))
@@ -202,11 +210,11 @@ async function cleanupEnded(db: DatabaseExecutor) {
  * after the claiming transaction commits, so the control service sees the
  * rows; a replica sending the same job again joins one invocation.
  */
-export async function sweepDocumentGenerationOutbox(db: DatabaseExecutor = defaultDb) {
-  const { toSend, expired } = await claimUnsent(db);
+export async function sweepDocumentGenerationOutbox(db: DatabaseExecutor = defaultDb, scope: SweepScope = {}) {
+  const { toSend, expired } = await claimUnsent(db, scope);
   let handedOver = 0;
   for (const jobId of toSend) if (await dispatchDocumentGenerationJob(db, jobId)) handedOver += 1;
-  const stale = await failStale(db);
-  const cleaned = await cleanupEnded(db);
+  const stale = await failStale(db, scope);
+  const cleaned = await cleanupEnded(db, scope);
   return { unsent: toSend.length, handedOver, expired, ...stale, cleaned };
 }

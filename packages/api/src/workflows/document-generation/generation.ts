@@ -29,6 +29,7 @@ import {
 import {
   combineDocuments,
   convertDocumentPdf,
+  DocumentConversionRefused,
   documentsPerSheet,
   measureDocumentSizes,
   renderDocuments,
@@ -37,8 +38,10 @@ import { readDocumentTemplate } from '../../routers/school/document/document.sto
 import { resolveDocumentSource, sourceProvenance } from '../../routers/school/document/document.source';
 import { DOCUMENT_BATCH_LIMITS, DocumentBatchPlanError, planDocumentBatches, type DocumentBatchLimits } from './batches';
 import { DOCUMENT_GENERATION_JOB_FAILURES, type DocumentGenerationJobErrorCode } from './constants';
-import { withConversionSlot } from './conversion-slots';
+import { SlotWaitTimeout, withConversionSlot, withPrepareSlot } from './conversion-slots';
 import type { DocumentGenerationJobInput } from './input';
+import { SCHOOL_SUSPENDED_REASON, schoolWriteRefusalMessageOf } from '../../school-access/school-access.contract';
+import { readSchoolWriteFacts, resolveSchoolWriteRefusal } from '../../school-access/school-access.service';
 import { log } from './log';
 import {
   batchContextsKey,
@@ -51,6 +54,7 @@ import {
   getJson,
   manifestKey,
   mergeBatchPdfs,
+  MERGED_PDF_MAX_BYTES,
   putJson,
   putObject,
 } from './storage';
@@ -127,19 +131,35 @@ export function defaultDocumentGenerationDeps(): DocumentGenerationDeps {
   return { db: defaultDb, convert: convertDocumentPdf, merge: mergeBatchPdfs, batchLimits: DOCUMENT_BATCH_LIMITS };
 }
 
-/** The facts the claim step journals: ids, keys and the pinned inputs, none of them large. */
+/**
+ * What the claim step journals: ids only. The source, the pinned cutoff and
+ * the other inputs can hold thousands of ids, so each step that needs them
+ * reads them from the job row ({@link loadJobInputs}); they never change
+ * after the job is created.
+ */
 type ClaimedJob = {
   jobId: string;
   schoolId: string;
   documentType: DocumentType;
-  source: DocumentSource;
   templateRevisionId: string;
   artifactId: string;
-  generatedAt: string;
+};
+
+/** The job's pinned inputs, read from its row by the steps that need them. */
+type JobInputs = {
+  source: DocumentSource;
+  generatedAt: Date;
   reviewHash: string | null;
   ledgerCutoff: DocumentLedgerCutoff[] | null;
   requestedBy: string;
 };
+
+/**
+ * PDF size one batch conversion may return. Above the converter's default
+ * (30 MB, one request's PDF) because a batch may carry 20 MB of photos; the
+ * merged PDF has its own limit (`MERGED_PDF_MAX_BYTES`).
+ */
+export const BATCH_PDF_MAX_BYTES = 150_000_000;
 
 /** What the prepare step journals: where the batches are and how the documents print. */
 type PreparedJob = {
@@ -147,6 +167,11 @@ type PreparedJob = {
   documentCount: number;
   batches: Array<{ documents: number }>;
 };
+
+/** The most batches a job of the largest size has (one batch per `maxDocuments`). */
+function maxJobBatches(limits: DocumentBatchLimits) {
+  return Math.ceil(MAX_DOCUMENT_SOURCE_ITEMS / limits.maxDocuments);
+}
 
 /** The manifest the prepare step stores for the finish step (ids can be many, so they are not journaled). */
 const manifestSchema = z.object({
@@ -206,25 +231,38 @@ export async function runDocumentGeneration(
   if (!job) return { status: 'skipped' };
   let phase: 'prepare' | 'convert' = 'prepare';
   try {
-    const prepared = await run('prepare', () =>
-      withTimingScope(log, 'document-generation.prepare.timing', { jobId: job.jobId }, () => prepareJob(deps, job)),
+    // Slots are taken outside the journaled steps: a long wait never runs a
+    // step twice, and one that outlasts the limit retries the invocation.
+    const prepared = await withPrepareSlot(() =>
+      run('prepare', () =>
+        withTimingScope(log, 'document-generation.prepare.timing', { jobId: job.jobId }, () => prepareJob(deps, job)),
+      ),
     );
     phase = 'convert';
     const single = prepared.batches.length === 1;
     const finalKey = documentPdfKey(job.schoolId, job.artifactId);
     let pdf: { byteSize: number; sha256: string } | null = null;
+    let batchBytes = 0;
     for (const [index, batch] of prepared.batches.entries()) {
-      const stored = await run(`batch:${index + 1}`, () =>
-        withTimingScope(log, 'document-generation.batch.timing', { jobId: job.jobId, batch: index + 1, documents: batch.documents }, () =>
-          convertBatch(deps, job, prepared, index, single ? finalKey : batchPdfKey(documentJobPrefix(job.schoolId, job.jobId), index)),
+      const stored = await withConversionSlot(() =>
+        run(`batch:${index + 1}`, () =>
+          withTimingScope(log, 'document-generation.batch.timing', { jobId: job.jobId, batch: index + 1, documents: batch.documents }, () =>
+            convertBatch(deps, job, prepared, index, single ? finalKey : batchPdfKey(documentJobPrefix(job.schoolId, job.jobId), index)),
+          ),
         ),
       );
+      batchBytes += stored.byteSize;
       if (single) pdf = stored;
     }
     if (!pdf) {
-      pdf = await run('merge', () =>
-        withTimingScope(log, 'document-generation.merge.timing', { jobId: job.jobId, batches: prepared.batches.length }, () =>
-          mergeJob(deps, job, prepared.batches.length, finalKey),
+      // Decided from the journaled batch sizes, before anything is sent to Gotenberg.
+      if (batchBytes > MERGED_PDF_MAX_BYTES)
+        throw new DocumentJobFailure('pdf_too_large', undefined, `The batches hold ${batchBytes} bytes.`);
+      pdf = await withConversionSlot(() =>
+        run('merge', () =>
+          withTimingScope(log, 'document-generation.merge.timing', { jobId: job.jobId, batches: prepared.batches.length }, () =>
+            mergeJob(deps, job, prepared.batches.length, finalKey),
+          ),
         ),
       );
     }
@@ -234,6 +272,8 @@ export async function runDocumentGeneration(
     log.info({ jobId: job.jobId, documents: prepared.documentCount, batches: prepared.batches.length, pdfBytes: finished.byteSize }, 'document-generation.job.succeeded');
     return { status: 'succeeded', artifactId: job.artifactId };
   } catch (error) {
+    // Not a failure of the job: Restate retries the invocation from its journal.
+    if (error instanceof SlotWaitTimeout) throw error;
     if (error instanceof JobStopped) {
       await step('cleanup', () => cleanupJob(deps.db, job));
       return { status: 'skipped' };
@@ -277,6 +317,8 @@ async function claimJob(db: Database, jobId: string, expectedSchoolId: string | 
     const documentType = documentTypeSchema.parse(row.documentType);
     if (!source.success || source.data.documentType !== documentType)
       throw new DocumentJobFailure('invalid_source', undefined, 'The stored source does not parse.');
+    // A school suspended (or left without a plan) after the request gets no PDF.
+    await assertSchoolStillWritable(tx, row.schoolId);
     if (row.status === 'queued')
       await tx
         .update(documentGenerationJobTable)
@@ -286,15 +328,44 @@ async function claimJob(db: Database, jobId: string, expectedSchoolId: string | 
       jobId: row.id,
       schoolId: row.schoolId,
       documentType,
-      source: source.data,
       templateRevisionId: row.templateRevisionId,
       artifactId: row.artifactId,
-      generatedAt: row.generatedAt.toISOString(),
-      reviewHash: row.reviewHash,
-      ledgerCutoff: row.ledgerCutoff ?? null,
-      requestedBy: row.requestedBy,
     };
   });
+}
+
+/**
+ * Fails the job when its school became read-only after the request
+ * (suspended, or without a plan; docs/school-suspension.md). Checked when
+ * the worker claims the job, before any work.
+ */
+async function assertSchoolStillWritable(db: Parameters<Parameters<Database['transaction']>[0]>[0], schoolId: string) {
+  const facts = await readSchoolWriteFacts(db, schoolId);
+  const refusal = facts ? resolveSchoolWriteRefusal(facts) : null;
+  if (!refusal) return;
+  throw new DocumentJobFailure(
+    refusal === SCHOOL_SUSPENDED_REASON ? 'school_suspended' : 'no_plan',
+    schoolWriteRefusalMessageOf(refusal, 'school'),
+  );
+}
+
+/** The job's pinned inputs (see {@link JobInputs}); a job whose row is gone has stopped. */
+async function loadJobInputs(db: Database, jobId: string): Promise<JobInputs> {
+  const [row] = await db
+    .select({
+      source: documentGenerationJobTable.source,
+      generatedAt: documentGenerationJobTable.generatedAt,
+      reviewHash: documentGenerationJobTable.reviewHash,
+      ledgerCutoff: documentGenerationJobTable.ledgerCutoff,
+      requestedBy: documentGenerationJobTable.requestedBy,
+    })
+    .from(documentGenerationJobTable)
+    .where(eq(documentGenerationJobTable.id, jobId))
+    .limit(1);
+  if (!row) throw new JobStopped();
+  const source = documentSourceSchema.safeParse(row.source);
+  if (!source.success) throw new DocumentJobFailure('invalid_source', undefined, 'The stored source does not parse.');
+  return { source: source.data, generatedAt: row.generatedAt, reviewHash: row.reviewHash, ledgerCutoff: row.ledgerCutoff ?? null, requestedBy: row.requestedBy };
 }
 
 /** Refuses to continue a job that is no longer running (the sweep failed it, or its school was purged). */
@@ -367,15 +438,16 @@ async function headImages(keys: string[]): Promise<Map<string, DocumentImageHead
  */
 async function prepareJob(deps: DocumentGenerationDeps, job: ClaimedJob): Promise<PreparedJob> {
   await assertRunning(deps.db, job.jobId);
+  const inputs = await loadJobInputs(deps.db, job.jobId);
   const template = await loadPinnedTemplate(deps.db, job);
   const data = await measure('doc.job.contexts', () =>
-    resolveDocumentSource(deps.db, job.schoolId, job.source, {
+    resolveDocumentSource(deps.db, job.schoolId, inputs.source, {
       images: 'reference',
-      generatedAt: new Date(job.generatedAt),
-      ...(job.ledgerCutoff ? { ledgerCutoff: job.ledgerCutoff } : {}),
+      generatedAt: inputs.generatedAt,
+      ...(inputs.ledgerCutoff ? { ledgerCutoff: inputs.ledgerCutoff } : {}),
     }),
   ).catch(sourceFailure);
-  if (job.documentType === 'statement' && data.reviewHash !== job.reviewHash)
+  if (job.documentType === 'statement' && data.reviewHash !== inputs.reviewHash)
     throw new DocumentJobFailure('source_changed', undefined, 'The statement review hash changed.');
   if (data.contexts.length === 0 || data.contexts.length > MAX_DOCUMENT_SOURCE_ITEMS)
     throw new DocumentJobFailure('invalid_source', undefined, `The source resolved to ${data.contexts.length} documents.`);
@@ -389,9 +461,12 @@ async function prepareJob(deps: DocumentGenerationDeps, job: ClaimedJob): Promis
   }
   let sizes;
   try {
-    sizes = measureDocumentSizes(
+    // One budget for the whole job (a batch's budget times the most batches a
+    // job may have), measured a document at a time with the loop free between.
+    sizes = await measureDocumentSizes(
       template.content,
       data.contexts.map((context) => withResolvedImages(context, () => LONGEST_DOCUMENT_ASSET_NAME)),
+      { documentBudget: deps.batchLimits.maxBudget, jobBudget: deps.batchLimits.maxBudget * maxJobBatches(deps.batchLimits) },
     );
   } catch (error) {
     if (error instanceof ORPCError) throw new DocumentJobFailure('document_too_large', error.message, `${error.code}: ${error.message}`);
@@ -426,7 +501,8 @@ async function prepareJob(deps: DocumentGenerationDeps, job: ClaimedJob): Promis
   annotateTiming({ documents: data.contexts.length, batches: plan.length, images: heads.size });
   const updated = await deps.db
     .update(documentGenerationJobTable)
-    .set({ batchCount: plan.length, batchesDone: 0 })
+    // The documents the job really prints: the start's count may differ if data changed since.
+    .set({ batchCount: plan.length, batchesDone: 0, documentCount: data.contexts.length })
     .where(and(eq(documentGenerationJobTable.id, job.jobId), eq(documentGenerationJobTable.status, 'running')))
     .returning({ id: documentGenerationJobTable.id });
   if (updated.length === 0) throw new JobStopped();
@@ -489,14 +565,21 @@ async function convertBatch(
     throw error;
   }
   annotateTiming({ htmlBytes: Buffer.byteLength(html, 'utf8'), assets: assets.size, assetBytes: imageBytes });
-  const bytes = await withConversionSlot(() =>
-    deps.convert(
+  let bytes: Buffer;
+  try {
+    bytes = await deps.convert(
       html,
       job.documentType,
       undefined,
       [...assets.entries()].map(([name, image]) => ({ name, contentType: image.contentType, bytes: image.bytes })),
-    ),
-  );
+      { maxPdfBytes: BATCH_PDF_MAX_BYTES },
+    );
+  } catch (error) {
+    // Repeating these fails the same way: the job fails now, with its own message.
+    if (error instanceof DocumentConversionRefused)
+      throw new DocumentJobFailure(error.reason === 'too_large' ? 'pdf_too_large' : 'conversion_refused', undefined, error.message);
+    throw error;
+  }
   const stored = await measure('doc.job.batch.store', () => putObject(outputKey, bytes, 'application/pdf'));
   await deps.db
     .update(documentGenerationJobTable)
@@ -510,7 +593,7 @@ async function mergeJob(deps: DocumentGenerationDeps, job: ClaimedJob, batchCoun
   await assertRunning(deps.db, job.jobId);
   const prefix = documentJobPrefix(job.schoolId, job.jobId);
   const files = Array.from({ length: batchCount }, (_, index) => ({ key: batchPdfKey(prefix, index), name: batchPdfName(index) }));
-  const merged = await withConversionSlot(() => measure('doc.pdf.merge', () => deps.merge(files, finalKey)));
+  const merged = await measure('doc.pdf.merge', () => deps.merge(files, finalKey));
   annotateTiming({ pdfBytes: merged.byteSize });
   return merged;
 }
@@ -524,7 +607,8 @@ async function mergeJob(deps: DocumentGenerationDeps, job: ClaimedJob, batchCoun
  */
 async function finishJob(db: Database, job: ClaimedJob, prepared: PreparedJob, pdf: { byteSize: number; sha256: string }) {
   const manifest = manifestSchema.parse(await getJson(manifestKey(documentJobPrefix(job.schoolId, job.jobId))));
-  const provenance = sourceProvenance(job.source);
+  const inputs = await loadJobInputs(db, job.jobId);
+  const provenance = sourceProvenance(inputs.source);
   await db.transaction(async (tx) => {
     const [row] = await tx
       .select({ status: documentGenerationJobTable.status })
@@ -551,7 +635,7 @@ async function finishJob(db: Database, job: ClaimedJob, prepared: PreparedJob, p
         studentIds: manifest.studentIds,
         studentCount: manifest.studentIds.length,
         financeSource: manifest.financeSource as (typeof artifactTable.$inferInsert)['financeSource'],
-        createdBy: job.requestedBy,
+        createdBy: inputs.requestedBy,
       })
       .onConflictDoNothing({ target: artifactTable.id });
     await tx
