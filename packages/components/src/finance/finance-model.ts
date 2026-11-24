@@ -164,6 +164,33 @@ export function civilDateTimeInTimeZone(timeZone: string, instant = new Date()):
   return `${value("year")}-${value("month")}-${value("day")}T${value("hour")}:${value("minute")}`;
 }
 
+/**
+ * The reversal time a dialog offers, chosen in minutes while the facts it
+ * reverses may carry seconds (an entry posted through the API at 10:00:37).
+ * The server refuses a reversal that takes effect before its target (the
+ * latest target, for a billing run), so:
+ * - `earliest`: the civil minute of the latest target, the lowest value the
+ *   dialog accepts;
+ * - `initial`: now, or that minute when the target is later than now;
+ * - `instant(chosen)`: the chosen minute as an instant, raised to the latest
+ *   target's exact instant when it falls within that target's minute, so a
+ *   same-time reversal is never refused for precision. A minute before it
+ *   is never raised (the dialog refuses it), so the rule itself is unchanged.
+ */
+export function reversalTimeChoice(timeZone: string, targets: ReadonlyArray<Date>, now = new Date()) {
+  const latest = targets.reduce<Date | null>((at, target) => (!at || target > at ? target : at), null);
+  const earliest = latest ? civilDateTimeInTimeZone(timeZone, latest) : null;
+  const current = civilDateTimeInTimeZone(timeZone, now);
+  return {
+    earliest,
+    initial: earliest && earliest > current ? earliest : current,
+    instant(chosen: string) {
+      const at = instantFromCivilDateTime(chosen, timeZone);
+      return latest && earliest === chosen && at < latest ? latest : at;
+    },
+  };
+}
+
 /** Converts a datetime-local civil value in an explicit IANA timezone to an
  * instant. The round-trip guard rejects nonexistent DST wall times. */
 export function instantFromCivilDateTime(value: string, timeZone: string): Date {

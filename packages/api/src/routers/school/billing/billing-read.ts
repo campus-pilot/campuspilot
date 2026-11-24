@@ -15,6 +15,7 @@ import {
   ilike,
   inArray,
   lte,
+  max,
 } from "drizzle-orm";
 
 import { rpcError } from "../../../errors";
@@ -179,7 +180,7 @@ export async function getBillingRunDetail(
     eq(financeBillTable.sessionId, input.sessionId),
     eq(financeBillTable.billRunId, input.billRunId),
   );
-  const [bills, billTotals] = await Promise.all([
+  const [bills, billTotals, [latestBill]] = await Promise.all([
     db
       .select()
       .from(financeBillTable)
@@ -191,6 +192,17 @@ export async function getBillingRunDetail(
       .limit(pageSize)
       .offset(offset),
     db.select({ value: count() }).from(financeBillTable).where(billWhere),
+    db
+      .select({ effectiveAt: max(financeLedgerEntryTable.effectiveAt) })
+      .from(financeBillTable)
+      .innerJoin(
+        financeLedgerEntryTable,
+        and(
+          eq(financeLedgerEntryTable.schoolId, financeBillTable.schoolId),
+          eq(financeLedgerEntryTable.id, financeBillTable.ledgerEntryId),
+        ),
+      )
+      .where(billWhere),
   ]);
   const billIds = bills.map(({ id }) => id);
   const [lines, reversalRows] = await Promise.all([
@@ -238,6 +250,7 @@ export async function getBillingRunDetail(
 
   return {
     ...runDto(run, reversedBillCount),
+    latestBillEffectiveAt: latestBill?.effectiveAt ?? null,
     configSnapshot: run.configSnapshot,
     inputSnapshot: run.inputSnapshot,
     bills: createPaginatedResult({

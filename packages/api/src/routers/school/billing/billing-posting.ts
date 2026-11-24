@@ -893,7 +893,7 @@ async function reverseBillInTransaction(
     .where(and(eq(financeLedgerEntryTable.schoolId, command.schoolId), eq(financeLedgerEntryTable.id, bill.ledgerEntryId)))
     .limit(1);
   if (!billFact) throw rpcError.notFound("Bill");
-  assertReversalNotBeforeTarget(billFact, command.effectiveAt);
+  await assertReversalNotBeforeTarget(transaction, command, [billFact], command.effectiveAt);
   const reversal = await appendFinanceLedgerEntry(transaction, {
     schoolId: command.schoolId,
     admissionId: command.admissionId,
@@ -1145,7 +1145,7 @@ export async function reversePostedBillingRun(
             .where(and(eq(financeLedgerEntryTable.schoolId, command.schoolId), inArray(financeLedgerEntryTable.id, ledgerEntryIds)))
         : [];
       if (validated.some(({ existing }) => !existing))
-        for (const fact of billFacts) assertReversalNotBeforeTarget(fact, command.effectiveAt);
+        await assertReversalNotBeforeTarget(transaction, command, billFacts, command.effectiveAt);
 
       const existingChildCount = validated.filter(({ existing }) => existing).length;
       if (existingChildCount !== 0 && existingChildCount !== validated.length) {

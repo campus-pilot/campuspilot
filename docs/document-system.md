@@ -969,7 +969,12 @@ jobs"). No WhatsApp or Cadet Portal delivery.
   there is none (no fact yet, or facts from before snapshots existed), the
   admission's current name, number and parents and its current enrollment's
   class, section and roll number in the session. The session years are the
-  requested session's.
+  requested session's. Decision: an account printed from current records takes
+  that identity when the job prepares its documents, not at preview. Its amounts
+  are pinned by the review (no ledger fact through the date, read up to sequence
+  0), but the identity is not part of the review hash, so a name or class
+  corrected between preview and generation prints corrected; a posting-time
+  snapshot never changes.
 - **Order**: by the snapshot's class, section, roll number, name and admission
   number.
 - **Review**: like statements, each account's high-water ledger sequence through
@@ -984,8 +989,13 @@ jobs"). No WhatsApp or Cadet Portal delivery.
   sequences applied in SQL; then one query per kind of document behind the
   printed facts. Never queries per admission, never the account's whole history.
 - **Reversals** never take effect before what they reverse (refused when posted,
+  naming the target's time in the session's time zone;
   `packages/api/src/routers/school/billing/README.md`), so a reversal is never in
-  an earlier period than its target.
+  an earlier period than its target. The reversal dialogs choose minutes, start
+  at the later of now and the target's minute (a run's latest bill,
+  `latestBillEffectiveAt`), refuse an earlier minute, and send the target's exact
+  instant for its own minute (`reversalTimeChoice`), so a fact posted with
+  seconds can be reversed in the same minute.
 - **Partial designs**: `otherCreditsThisPeriod` totals every credit row that is
   neither a payment nor a discount (waivers, write-offs, credit corrections,
   reversals of earlier charges; null when zero), so a design that prints only the

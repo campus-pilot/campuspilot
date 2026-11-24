@@ -297,7 +297,26 @@ export async function appendFinanceLedgerEntry(
  * the period, and no period's rows would add up. Refused for every reversal
  * (ledger entries, bills and billing runs). Equal instants are allowed.
  */
-export function assertReversalNotBeforeTarget(target: { effectiveAt: Date }, reversalEffectiveAt: Date) {
-  if (reversalEffectiveAt.getTime() < target.effectiveAt.getTime())
-    throw rpcError.badRequest("A reversal cannot take effect before the entry it reverses. Choose an effective date on or after that entry's.");
+export async function assertReversalNotBeforeTarget(
+  transaction: DatabaseTransaction,
+  scope: { schoolId: string; sessionId: string },
+  targets: ReadonlyArray<{ effectiveAt: Date }>,
+  reversalEffectiveAt: Date,
+) {
+  // The latest target is the one that decides (a billing run reverses many bills).
+  const latest = targets.reduce<Date | null>((at, target) => (!at || target.effectiveAt > at ? target.effectiveAt : at), null);
+  if (!latest || reversalEffectiveAt.getTime() >= latest.getTime()) return;
+  // Named in the session's finance time zone, to the second: the screens
+  // choose minutes, a fact posted through the API may carry seconds.
+  const [session] = await transaction
+    .select({ financeConfig: schoolSessionTable.financeConfig })
+    .from(schoolSessionTable)
+    .where(and(eq(schoolSessionTable.schoolId, scope.schoolId), eq(schoolSessionTable.id, scope.sessionId)))
+    .limit(1);
+  const configured = (session?.financeConfig as { timeZone?: unknown } | null)?.timeZone;
+  const timeZone = typeof configured === "string" ? configured : "UTC";
+  const when = new Intl.DateTimeFormat("en-IN", { timeZone, dateStyle: "medium", timeStyle: "medium", hourCycle: "h23" }).format(latest);
+  throw rpcError.badRequest(
+    `A reversal cannot take effect before ${targets.length > 1 ? "the latest entry" : "the entry"} it reverses (${when}, ${timeZone}). Choose that time or later.`,
+  );
 }

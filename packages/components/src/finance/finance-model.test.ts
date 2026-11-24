@@ -22,6 +22,7 @@ import {
   financeDateTimeError,
   formatFinanceInstant,
   reversalActionForEntry,
+  reversalTimeChoice,
   adjustmentTargetFields,
   groupFinanceIssues,
   paymentDeepLinkTarget,
@@ -139,5 +140,23 @@ describe("finance presentation model", () => {
     expect(groupFinanceIssues([{ scope: "configuration" as const, code: "missing" }, { scope: "admission" as const, code: "skipped" }]).map(({ scope }) => scope)).toEqual(["configuration", "admission"]);
     expect(paymentDeepLinkTarget("payment-1", "admission-1")).toEqual({ id: "payment-1", admissionId: "admission-1" });
     expect(paymentDeepLinkTarget("payment-1", undefined)).toEqual({ id: "payment-1", admissionId: undefined });
+  });
+});
+
+describe("reversalTimeChoice", () => {
+  const target = new Date("2026-11-24T04:30:37.000Z"); // 10:00:37 in Kolkata
+
+  it("never lets a same-minute reversal fall before a target posted with seconds", () => {
+    const choice = reversalTimeChoice("Asia/Kolkata", [target], new Date("2026-11-24T04:30:50.000Z"));
+    expect(choice.earliest).toBe("2026-11-24T10:00");
+    expect(choice.initial).toBe("2026-11-24T10:00");
+    expect(choice.instant("2026-11-24T10:00").toISOString()).toBe(target.toISOString());
+    expect(choice.instant("2026-11-24T10:01").toISOString()).toBe("2026-11-24T04:31:00.000Z");
+  });
+
+  it("starts at the latest target when it is later than now, and offers now otherwise", () => {
+    const later = new Date("2026-11-30T18:30:00.000Z");
+    expect(reversalTimeChoice("Asia/Kolkata", [target, later], new Date("2026-11-24T05:00:00.000Z")).initial).toBe("2026-12-01T00:00");
+    expect(reversalTimeChoice("Asia/Kolkata", [], new Date("2026-11-24T05:00:00.000Z"))).toMatchObject({ earliest: null, initial: "2026-11-24T10:30" });
   });
 });

@@ -456,6 +456,7 @@ function AdmissionFinanceActions({
           selectedEntry.type === "bill"
             ? detailString(selectedEntry.detail, "billId")
             : undefined,
+        effectiveAt: selectedEntry.effectiveAt,
       }
     : {
         id: "",

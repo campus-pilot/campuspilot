@@ -51,7 +51,7 @@ export async function resolveDocumentSource(
       contexts: data.contexts,
       name: data.name,
       studentIds: [],
-      // A Bill due names the students it leaves out; the other finance documents have no warnings.
+      // Finance builders may return warnings; a Bill due prints everyone in scope and returns none today.
       warnings: "warnings" in data ? data.warnings : [],
       financeSource: data.financeSource,
       reviewHash: data.reviewHash,

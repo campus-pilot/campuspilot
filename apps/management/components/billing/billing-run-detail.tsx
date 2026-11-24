@@ -7,12 +7,11 @@ import { z } from "zod";
 import { SCHOOL_ACTIONS } from "@campuspilot/api/routers/authorization/authorization.dto";
 import { billingRunDetailDtoSchema } from "@campuspilot/api/routers/school/billing/billing.dto";
 import {
-  civilDateTimeInTimeZone,
   financeDateTimeError,
   formatMinor,
   idempotencyForDraft,
-  instantFromCivilDateTime,
   markIdempotencyAmbiguous,
+  reversalTimeChoice,
   type IdempotencyDraftState,
 } from "@campuspilot/components/finance";
 import {
@@ -222,6 +221,7 @@ function RunReversalForm({
   periodKey,
   amount,
   timeZone,
+  latestBillEffectiveAt,
   onClose,
 }: {
   schoolId: string;
@@ -230,6 +230,8 @@ function RunReversalForm({
   periodKey: string;
   amount: string;
   timeZone: string;
+  /** When the run's latest bill takes effect; the reversal may not take effect before it (`reversalTimeChoice`). */
+  latestBillEffectiveAt: Date | null;
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -239,15 +241,22 @@ function RunReversalForm({
   const mutation = useMutation({
     mutationFn: (input: any) => client.school.reverseBillingRun(input),
   });
+  const time = reversalTimeChoice(timeZone, latestBillEffectiveAt ? [latestBillEffectiveAt] : []);
   const schema = reversalSchema.superRefine((value, context) => {
     const message = financeDateTimeError(value.effectiveAt, timeZone);
     if (message)
       context.addIssue({ code: "custom", path: ["effectiveAt"], message });
+    else if (time.earliest && value.effectiveAt < time.earliest)
+      context.addIssue({
+        code: "custom",
+        path: ["effectiveAt"],
+        message: `Choose ${time.earliest.replace("T", " ")} or later: the reversal cannot take effect before the run's bills.`,
+      });
   });
   const form = useForm({
     defaultValues: {
       reason: "",
-      effectiveAt: civilDateTimeInTimeZone(timeZone),
+      effectiveAt: time.initial,
     },
     validators: { onSubmit: schema },
     onSubmit: async () => setConfirmOpen(true),
@@ -256,10 +265,7 @@ function RunReversalForm({
     form.setErrorMap({});
     const parsed = schema.safeParse(value);
     if (!parsed.success) return;
-    const effectiveAt = instantFromCivilDateTime(
-      parsed.data.effectiveAt,
-      timeZone,
-    ).toISOString();
+    const effectiveAt = time.instant(parsed.data.effectiveAt).toISOString();
     const fingerprint = JSON.stringify({
       schoolId,
       sessionId,
@@ -345,6 +351,7 @@ function RunReversalForm({
                       <Input
                         id="run-reversal-effective"
                         type="datetime-local"
+                        min={time.earliest ?? undefined}
                         value={field.state.value}
                         onBlur={field.handleBlur}
                         onChange={(event) =>
@@ -497,6 +504,7 @@ function RunReversalDialog({
       periodKey={query.data.periodKey}
       amount={formatMinor(query.data.totalAmountMinor, query.data.currency)}
       timeZone={query.data.timeZone}
+      latestBillEffectiveAt={query.data.latestBillEffectiveAt}
       onClose={onClose}
     />
   );
