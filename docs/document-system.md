@@ -51,10 +51,15 @@ Do not infer one surface's state from another fact. In particular:
 | `/school/:schoolId/settings/templates/statement` | Admission account-statement template editor |
 | `/school/:schoolId/settings/templates/notice` | Notice template editor (schools with the `notices` feature only) |
 | `/school/:schoolId/sessions/:sessionId/billing/documents` | Compatibility redirect to session-wide document history |
-| `/school/:schoolId/marketplace/templates?type=:documentType&template=:slug&preview=1` | Marketplace on one document type tab and one design (each parameter optional); `preview=1` opens that design's full-screen preview |
-| `/school/:schoolId/marketplace/templates/:documentType/:slug` | Former dedicated preview page: redirects to the marketplace with that type, design and the preview open |
+| `/school/:schoolId/marketplace/templates` | Marketplace root: opens the first document type the school has. A former `?type=&template=&preview=1` link is redirected on the server to the matching address below |
+| `/school/:schoolId/marketplace/templates/:documentType` | Opens the design the school uses (imported from the catalog and still listed), else the first listed. The template settings' *Marketplace* and *Browse marketplace* open this |
+| `/school/:schoolId/marketplace/templates/:documentType/:slug` | One marketplace design; `?preview=1` opens its full-screen preview |
 
-The marketplace is intentionally school-scoped rather than session-scoped. The
+The marketplace is a place of its own, like Settings, which it is reached from: its
+own route group (`app/(protected)/school/[schoolId]/(marketplace)`) and layout, with
+the Settings header (breadcrumbs, command bar) and session switcher, and its own
+sidebar instead of the dashboard's (see "Browse and import a marketplace template").
+It is intentionally school-scoped rather than session-scoped. The
 settings slugs are existing human-facing configuration names and are not required
 to equal the API's `DocumentType` values. Keep their mapping explicit.
 
@@ -148,49 +153,54 @@ the generator.
 
 ### Browse and import a marketplace template
 
-1. The marketplace shows the school's document types as a row of line tabs that
-   scrolls sideways when they do not fit (`ScrollableTabsList`, as in the
-   examination workspace). Only types the school has are offered (the `notices`
-   and `assistant` features add Notices and Question papers; the rest belong to
-   student management); the tabs wait for those flags rather than switching once
-   they arrive. A requested type the school does not have opens the first one. When
-   the flags cannot be read the page says so with *Retry* (`FeatureUnknown`), never
-   that there are no templates; a school with no such type gets a notice saying where
-   templates come from.
-2. Under the type, its designs are a second, pill-style scrollable tab row; the
-   design the school uses now carries a check (and "(in use)" for assistive
-   technology). Under that the selected design shows its name, paper, description
-   and actions, then **its PDF with the school's data** (see "Preview context";
-   `PdfPreview`, the builder's
-   viewer) in a frame most of the screen tall. The design shown is the requested
-   one, else the one the school uses when it was imported from the catalog and is
-   still listed (`artifact.marketplaceSlug`), else the first. A requested design
-   the catalog no longer lists says so and shows that fallback. The design tabs
-   activate on Enter or a click, not on focus (`activationMode="manual"`), so
-   arrowing along the row converts nothing.
-3. Only the open type's catalog is read and only the selected design is converted
-   (Radix mounts only the active tab's content), never a page of thumbnails. See
-   "Marketplace PDF previews" below for the cost guard.
-4. *Preview* opens the design full screen (the whole screen on a phone, all but a
+1. The marketplace has its own sidebar (`marketplace-navigation.tsx`), shown as the
+   shell's usual sheet on a phone, as in Settings. First *Back to settings*, in the
+   place of Settings' *Back to dashboard*: it opens the settings template of the type
+   being browsed (`settingsTemplateOf`, the explicit slug mapping), or Settings when
+   no type is open, and is never shown as the current page. Then one item per
+   document type the school has, in the settings templates' order and with their
+   icons, each gated by the same read permission as its settings entry (finance
+   types: `READ_FINANCE_DOCUMENT_TEMPLATES`). Only types the school has are offered
+   (`marketplaceTypesOf`: the `notices` and `assistant` features add Notices and
+   Question papers; the rest belong to student management); the marketplace waits
+   for those flags rather than switching once they arrive. When the flags cannot be
+   read the page says so with *Retry* (`FeatureUnknown`), never that there are no
+   templates; a school with no such type gets a notice saying where templates come
+   from.
+2. Only the open type is expanded: it lists its designs as sub-items, other types
+   none, so only the open type's catalog is read (the sidebar and the page share the
+   one `listMarketplaceTemplates` query, read only once the read permission is
+   known). Following another type opens and expands it. The sidebar marks no design
+   as in use; the design page's *Use template* button says *In use* instead.
+3. A type's address opens the design the school uses when it was imported from the
+   catalog and is still listed (`artifact.marketplaceSlug`), else the first listed
+   (`defaultDesignOf`); the root opens the first type. These redirects happen with
+   `redirect()` during render once the client knows the features and the catalog,
+   never in an effect. A type the school does not have says so (with the sidebar to
+   choose another); an address that is not a document type is not found.
+4. The design page shows a compact header naming the type, the design's name,
+   paper, description and actions, then **its PDF with the school's data** (see
+   "Preview context"; `PdfPreview`, the builder's viewer) in a frame most of the screen tall. Only that design is
+   converted, never a page of thumbnails; see "Marketplace PDF previews" below for
+   the cost guard. A slug the catalog no longer lists says "This design is no longer
+   in the marketplace" and leaves the sidebar to choose another; a different design
+   is never shown in its place. The breadcrumbs read Template marketplace › type ›
+   design (the design's name from the cached catalog; the trail ends at the type
+   while it is not known).
+5. *Preview* opens the design full screen (the whole screen on a phone, all but a
    small margin on a larger one; `PreviewDialogContent` size `full`, the dialog
    shell the question paper chat uses for drafts). It shows the page's cached
    conversion, scrolls page by page, and offers the same actions (*Use template*,
    *Open current template*, and *Preview as* for a Notice design) beside its title.
-   *Preview* is the dialog's `DialogTrigger`, so focus returns to it on close.
-5. Type, design and the open preview live in the address (`marketplace-model.ts`:
-   `?type=&template=&preview=1`), so a reload or a shared link restores the view. The
-   address is rewritten with the History API, never `router.*` (the route is an
-   async server component: a router navigation refetches its payload on every tab,
-   and the tabs and the dialog waited for it). Picking a type or design replaces the
-   entry (`replaceState`); opening the preview pushes one, marked in `history.state`,
-   so Back closes the full-screen preview instead of leaving the marketplace. Closing
-   the dialog goes back past that entry, or, when the preview was opened by a link,
-   replaces the entry without `preview`. A design and the preview are only honoured
-   with the type they were asked with, and the dialog opens only for the design asked
-   for, never for a fallback. The `template` value is any slug the API would accept
-   (1 to 100 characters), so an old link to a delisted design is told apart from no
-   request. The former `/:documentType/:slug` page redirects to this address with the
-   preview open.
+   *Preview* is the dialog's `DialogTrigger`, so focus returns to it on close. The
+   open preview is `?preview=1` on the design's address, rewritten with the History
+   API, never `router.*` (a router navigation would refetch the route's payload and
+   the dialog would wait for it): opening pushes an entry, marked in
+   `history.state`, so Back closes the preview instead of leaving the design;
+   closing goes back past that entry, or, when the preview was opened by a link,
+   replaces the entry without `preview`. Moving between types and designs is an
+   ordinary router navigation through the sidebar; the route pages stay thin so its
+   payload is trivial.
 6. Use template sends the catalog slug and `expectedRevisionId`.
 7. The server copies the catalog source to a new immutable, school-owned S3 object,
    creates an artifact row, and atomically selects that revision.
@@ -609,10 +619,11 @@ callbacks and must not call APIs.
 | `PdfPreview` (components) | API-free pdf.js preview with skeleton, updating and error states; reused by the marketplace |
 | `TemplateDraftCard`, `template-draft-model.ts` (components) | The chat's template draft card and the pure reading of drafts and the working copy |
 | `TemplateRevisionList`, `TemplateRevisionNotice` (components) | API-free revision rows and the read-only revision notice |
-| `DocumentTemplateMarketplace` (`document-template-marketplace.tsx`) | Type tabs, design tabs, the selected design's PDF, the full-screen preview and Use template; its address in `marketplace-model.ts` |
+| `MarketplaceLanding`, `MarketplaceTypeLanding`, `MarketplaceDesignPage` (`document-template-marketplace.tsx`) | The marketplace's root and type redirects, and a design's page: its PDF, the full-screen preview and Use template; its addresses in `marketplace-model.ts` |
+| `marketplaceNavigation` (`marketplace-navigation.tsx`) | The marketplace's sidebar: Back to settings, the school's types, the open type's designs |
 | `TemplatePdfPreview`, `TemplateRevisionPdfPreview`, `MarketplaceTemplatePdfPreview` (`template-pdf-preview.tsx`) | A source, a saved revision by id, or a marketplace design by slug, as its PDF; shared query defaults |
 | `PreviewDialogContent` (components) | API-free preview dialog shell: `tall` (the chat's draft and version previews) or `full` (the marketplace) |
-| `ScrollableTabsList` (components) | A tab row that scrolls sideways instead of squeezing (marketplace, examination workspace) |
+| `ScrollableTabsList` (components) | A tab row that scrolls sideways instead of squeezing (examination workspace) |
 | `DocumentKindCards` | API-free accessible visual card group for the Documents workspace |
 | `BillDueGenerator`, `BillDueDialog` (`bill-due.tsx`) | The Bills dialog's By date tab and the admission ledger's Bill dialog |
 | `FinancePreviewPanel` (`finance-preview-panel.tsx`) | The finance generators' shared preview and create panel |
@@ -964,8 +975,8 @@ One bill template prints ordinary bills and Bills due, so both have one shape
    design-specific invariant.
 7. For a half design, verify two recipients produce one PDF page and three
    recipients produce two pages.
-8. Check the marketplace's type and design tabs, the design's PDF and its
-   full-screen preview at desktop, 390 px, and 320 px.
+8. Check the design in the marketplace's sidebar (under its type), the design's
+   PDF and its full-screen preview at desktop, 390 px, and 320 px.
 
 ### Add or change a template variable
 
@@ -991,8 +1002,9 @@ Adding a document type is cross-cutting. At minimum update:
 4. OPA action catalog/grants when new permissions are introduced, followed by the
    generated action workflow;
 5. marketplace catalog entries, synthetic context, and variable documentation;
-6. `documentKinds`, card icon/copy, Settings route mapping, marketplace routes, and
-   generator fields;
+6. `documentKinds`, card icon/copy, Settings route mapping (`SETTINGS_TEMPLATES`,
+   which also orders the marketplace's sidebar), the template icon
+   (`TEMPLATE_ICONS`), and generator fields;
 7. missing-template warnings, history labels, contextual export links, and legacy
    redirects where applicable;
 8. authorization, DTO, renderer, persistence, integration, and responsive browser
@@ -1131,7 +1143,7 @@ conversion. What differs is recorded here because it is easy to get wrong.
 
 - **Feature gate.** Every template procedure refuses `documentType: 'notice'`
   for a school without the `notices` feature (after the permission check).
-  The marketplace shows the Notice card only when the feature is enabled.
+  The marketplace offers the Notice type only when the feature is enabled.
   Notice templates use the academic template actions
   (`READ_DOCUMENT_TEMPLATES` / `MANAGE_DOCUMENT_TEMPLATES`).
 - **Context.** `buildNoticeContext` (`notice.render.ts`) exposes only
@@ -1541,11 +1553,11 @@ Browser verification must cover:
   (assistant), a draft held while you typed after sending (*Replace my edits*), New
   chat with a shown draft, revision select, history dialog, read-only revision and
   Restore (with and without unsaved changes), an unknown `?revision=`;
-- marketplace type and design tabs (scrolling at 390 px; arrow keys move focus
-  without converting), the selected design's PDF, the full-screen preview (deep link,
-  close, Back closes it, focus back on *Preview*, Use template from it), the old
-  `/:documentType/:slug` redirect, a design no longer listed, active state, import
-  conflict/error state;
+- the marketplace sidebar (Back to settings per type, only the open type expanded,
+  the mobile sheet), the root and type redirects, an old `?type=&template=&preview=1`
+  link, the design's PDF, the full-screen preview (deep link, close, Back closes it,
+  focus back on *Preview*, Use template from it), a design no longer listed, a type
+  the school does not have, *In use* state, import conflict/error state;
 - desktop, 390 px, and the application minimum of 320 px;
 - page-level overflow, keyboard access, focus labels, permission-gated actions,
   iframe output, and console errors.
