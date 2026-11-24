@@ -92,7 +92,8 @@ export const artifactTable = pgTable(
             timeZone: string;
             /** The billing period containing `throughDate`; `endDate` is exclusive, as on a billing run. */
             period: { cadence: "monthly" | "quarterly" | "yearly"; startDate: string; endDate: string };
-            accounts: Array<{ admissionId: string; highWaterSequence: string }>;
+            /** `highWaterSequence` is null for an account with no ledger fact through the date (printed with zeros). */
+            accounts: Array<{ admissionId: string; highWaterSequence: string | null }>;
           }
         | null
       >(),
