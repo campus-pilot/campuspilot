@@ -448,6 +448,8 @@ describe('document template marketplace', () => {
       ['id_card-classic', '.body'],
       ['admit_card-default', '.ac-body'],
       ['admit_card-minimal', '.acm-body'],
+      ['standard-id-card', '.body'],
+      ['standard-admit-card', '.ac-body'],
     ] as const) {
       const css = cssOf(template(slug).content);
       expect(css, slug).toMatch(

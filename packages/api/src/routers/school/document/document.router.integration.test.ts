@@ -234,9 +234,10 @@ describe('document templates, generation, and artifact lifecycle', () => {
     }
     for (const call of calls(teacher).slice(6))
       await expect(call()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    // The four legacy ID card designs and the CampusPilot Standard one.
     expect(
       (await teacher.school.listMarketplaceTemplates(read)).items,
-    ).toHaveLength(4);
+    ).toHaveLength(5);
   });
   it('validates list boundaries and rejects unsupported template syntax', async () => {
     await expect(
@@ -606,7 +607,8 @@ describe('document templates, generation, and artifact lifecycle', () => {
     );
     expect(html).toContain('{{unknown helper}}');
     expect(documentGrade(20, { a: { label: 'A', minScore: 80 } })).toBe('—');
-    expect(DOCUMENT_MARKETPLACE).toHaveLength(25);
+    // 25 legacy, statement, notice and question paper designs plus the 7 CampusPilot Standard designs.
+    expect(DOCUMENT_MARKETPLACE).toHaveLength(32);
   });
   it('cleans losing concurrent uploads and preserves exactly one active revision', async () => {
     const current = await manager.school.getActiveDocumentTemplate({

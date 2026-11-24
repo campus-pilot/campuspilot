@@ -148,8 +148,9 @@ describe("Bill due", () => {
       balanceAfter: "0.00",
       bill: { total: "0.00" },
     });
+    // renderDocument returns the sanitised, CSP-wrapped document: compare its body.
     const html = renderDocument("{{#if balanceBefore}}OPENING{{/if}}{{#if paidThisPeriod}}PAID{{/if}}DUE {{balanceAfter}}", context);
-    expect(html).toBe("DUE 0.00");
+    expect(/<body[^>]*>([\s\S]*?)<\/body>/.exec(html)?.[1]?.trim()).toBe("DUE 0.00");
   });
 
   it("uses the session's anchored quarter as the period", async () => {

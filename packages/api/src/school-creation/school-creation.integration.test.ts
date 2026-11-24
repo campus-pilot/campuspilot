@@ -1,6 +1,7 @@
 import { db } from '@campuspilot/db';
 import { readSchoolFeatureConfig } from '@campuspilot/db/feature-flags/store';
 import { user } from '@campuspilot/db/schema/auth';
+import { artifactTable, schoolDocumentTemplateTable } from '@campuspilot/db/schema/artifact';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { schoolCreationTable } from '@campuspilot/db/schema/school-creation';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
@@ -74,8 +75,13 @@ describe('school.createSchool', () => {
     expect(members.items).toMatchObject([{ userId, isOwner: true, roles: [{ role: 'principal' }] }]);
     // It starts with the CampusPilot Standard templates selected, as its own revisions.
     expect(await selectedTemplateSlugs(schoolId)).toEqual(DEFAULT_DOCUMENT_TEMPLATE_SLUGS);
-    const bill = await client.school.getActiveDocumentTemplate({ schoolId, documentType: 'bill' });
-    expect(bill).toMatchObject({ artifact: { schoolId, marketplaceSlug: 'standard-bill', pageSize: 'half', name: 'CampusPilot Standard Fee Bill', createdBy: userId } });
+    // Read from the database: the template procedures also gate on the school's features, which provisioning does not depend on.
+    const [bill] = await db
+      .select({ artifact: artifactTable })
+      .from(schoolDocumentTemplateTable)
+      .innerJoin(artifactTable, eq(artifactTable.id, schoolDocumentTemplateTable.artifactId))
+      .where(and(eq(schoolDocumentTemplateTable.schoolId, schoolId), eq(schoolDocumentTemplateTable.documentType, 'bill')));
+    expect(bill?.artifact).toMatchObject({ schoolId, kind: 'template', marketplaceSlug: 'standard-bill', pageSize: 'half', name: 'CampusPilot Standard Fee Bill', createdBy: userId });
     // The trial gives a plan, so the owner can change things.
     await client.school.updateSchool({ schoolId, name: 'Sunrise School' });
 

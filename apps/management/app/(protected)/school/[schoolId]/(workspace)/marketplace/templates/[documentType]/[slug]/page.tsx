@@ -1,5 +1,5 @@
 import { notFound, redirect } from 'next/navigation';
-import { documentTypeSchema } from '@campuspilot/api/routers/school/document/document.dto';
+import { templateDocumentTypeSchema } from '@campuspilot/api/routers/school/document/document.dto';
 import { marketplaceHref } from '@/components/documents/marketplace-model';
 
 /**
@@ -14,7 +14,8 @@ export default async function Page({
   params: Promise<{ schoolId: string; documentType: string; slug: string }>;
 }) {
   const { schoolId, documentType, slug } = await params;
-  const type = documentTypeSchema.safeParse(documentType);
+  // Only types with templates of their own have marketplace designs (a Bill due is printed with the bill template).
+  const type = templateDocumentTypeSchema.safeParse(documentType);
   if (!type.success) notFound();
   redirect(marketplaceHref(schoolId, { type: type.data, template: slug, preview: true }));
 }
