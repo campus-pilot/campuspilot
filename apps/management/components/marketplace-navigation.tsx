@@ -1,10 +1,10 @@
-import { DOCUMENT_LABELS, type DocumentType } from '@campuspilot/api/routers/school/document/document.dto';
+import { DOCUMENT_LABELS, type TemplateDocumentType as DocumentType } from '@campuspilot/api/routers/school/document/document.dto';
 import type { AppShellNavigationEntry, AppShellNavigationItem } from '@campuspilot/components/app-shell';
 import { ArrowLeft, LayoutTemplate } from 'lucide-react';
 import { marketplaceHref } from './documents/marketplace-model';
 import { schoolHref } from './school-route';
-import { TEMPLATE_ICONS, templateReadGate } from './settings-navigation';
-import { settingsTemplateOf } from './settings-templates';
+import { templateReadGate } from './settings-navigation';
+import { settingsTemplateOf, TEMPLATE_ICONS } from './settings-templates';
 
 export type MarketplaceNavigationInput = {
   schoolId: string;
@@ -61,7 +61,7 @@ function marketplaceTypeItem(schoolId: string, type: DocumentType, designs: read
     label: DOCUMENT_LABELS[type],
     href: marketplaceHref(schoolId, { type }),
     icon: TEMPLATE_ICONS[type],
-    wrap: templateReadGate(schoolId, settingsTemplateOf(type)),
+    wrap: templateReadGate(schoolId, type),
     items: designs.map((design) => ({
       type: 'item',
       id: `marketplace-${type}-${design.slug}`,

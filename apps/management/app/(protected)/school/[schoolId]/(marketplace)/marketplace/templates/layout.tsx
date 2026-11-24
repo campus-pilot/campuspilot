@@ -4,10 +4,10 @@ import type { ReactNode } from 'react';
 import { useParams, usePathname } from 'next/navigation';
 import { skipToken, useQuery } from '@tanstack/react-query';
 import {
-  documentTypeSchema,
-  type DocumentType,
+  templateDocumentTypeSchema as documentTypeSchema,
+  type TemplateDocumentType as DocumentType,
 } from '@campuspilot/api/routers/school/document/document.dto';
-import { templateReadAction } from '@/components/documents/document-common';
+import { templateReadAction } from '@/components/documents/template-permissions';
 import { useMarketplaceTypes } from '@/components/documents/document-template-marketplace';
 import { offeredTypeOf } from '@/components/documents/marketplace-model';
 import { ManagementShell, type ManagementShellState } from '@/components/management-shell';
@@ -18,7 +18,8 @@ import { SchoolDocumentHead } from '@/components/school-document-head';
 import { useSchoolShellSessions } from '@/components/session-selection';
 import { SessionSwitcher } from '@/components/session-switcher';
 import { orpc } from '@/lib/orpc';
-import { templateMarketplacePage, type MarketplaceRouteParams } from './_route';
+import type { MarketplaceRouteParams } from '@/components/documents/marketplace-breadcrumbs';
+import { templateMarketplacePage } from './_route';
 
 /**
  * The template marketplace, a place of its own like Settings (which it is

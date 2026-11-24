@@ -5,6 +5,7 @@ import type { SchoolFeatureKey } from '@campuspilot/api/routers/school/feature-f
 import {
   defaultDesignOf,
   footprintLabel,
+  landingTypeOf,
   legacyMarketplaceRedirect,
   legacyMarketplaceRequestOf,
   marketplaceHref,
@@ -72,6 +73,16 @@ test('waits while a feature is read and says when one could not be read, never "
   assert.equal(marketplaceTypesOf(pending).status, 'pending');
   const unknown = () => ({ enabled: false, status: 'unknown' as const });
   assert.deepEqual(marketplaceTypesOf(unknown), { types: [], status: 'unknown' });
+});
+
+test('opens the first type the user may read, and none when they may read none', () => {
+  const types = ['report_card', 'id_card', 'bill', 'receipt'] as const;
+  assert.equal(landingTypeOf(types, () => true), 'report_card');
+  // A role that reads finance templates only lands on Bills, not on a refused Report cards.
+  const financeOnly = (type: string) => type === 'bill' || type === 'receipt';
+  assert.equal(landingTypeOf(types, financeOnly), 'bill');
+  assert.equal(landingTypeOf(types, () => false), null);
+  assert.equal(landingTypeOf([], () => true), null);
 });
 
 test('names the requested type only when the school has it, with no fallback', () => {

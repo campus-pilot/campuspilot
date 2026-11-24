@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { documentTypeSchema } from '@campuspilot/api/routers/school/document/document.dto';
+import { templateDocumentTypeSchema } from '@campuspilot/api/routers/school/document/document.dto';
 import type { SchoolFeatureKey } from '@campuspilot/api/routers/school/feature-flags/feature-flags.dto';
 import { firstSettingsTemplate, SETTINGS_TEMPLATES, settingsTemplateOf } from './settings-templates';
 
@@ -40,7 +40,7 @@ describe('settings templates', () => {
 
   it('has exactly one template per document type, at its explicitly mapped address', () => {
     const types = SETTINGS_TEMPLATES.map(({ documentType }) => documentType);
-    assert.deepEqual([...types].sort(), [...documentTypeSchema.options].sort());
+    assert.deepEqual([...types].sort(), [...templateDocumentTypeSchema.options].sort());
     assert.equal(settingsTemplateOf('report_card').path, '/settings/templates/examination');
     assert.equal(settingsTemplateOf('id_card').path, '/settings/templates/id-card');
     assert.equal(settingsTemplateOf('question_paper').path, '/settings/templates/question-paper');

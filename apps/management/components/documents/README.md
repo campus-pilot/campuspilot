@@ -40,6 +40,8 @@ for the management implementation.
 | `document-template-marketplace.tsx` | The marketplace's pages: root and type redirects, a design's PDF, full-screen preview dialog, import mutation |
 | `marketplace-model.ts` | The marketplace's addresses (`/templates/:type/:slug?preview=1`), the former query address, which types the school has and which design a type opens |
 | `../marketplace-navigation.tsx` | The marketplace's own sidebar (Back to settings, types, the open type's designs) |
+| `marketplace-breadcrumbs.ts` | Which paths are the marketplace's and its trail (Template marketplace › type › design) |
+| `template-permissions.ts` | The one decision of which permission reads or manages a type's template (finance types have their own) |
 | `template-prompt-editor.tsx` | Provider-neutral portable-prompt dialog |
 | `document-export-link.tsx` | Contextual links from source-domain screens into Documents |
 | `student-recipient-picker.tsx` | Searchable, paginated explicit-recipient selection that retains choices across searches |

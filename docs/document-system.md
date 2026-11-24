@@ -51,7 +51,7 @@ Do not infer one surface's state from another fact. In particular:
 | `/school/:schoolId/settings/templates/statement` | Admission account-statement template editor |
 | `/school/:schoolId/settings/templates/notice` | Notice template editor (schools with the `notices` feature only) |
 | `/school/:schoolId/sessions/:sessionId/billing/documents` | Compatibility redirect to session-wide document history |
-| `/school/:schoolId/marketplace/templates` | Marketplace root: opens the first document type the school has. A former `?type=&template=&preview=1` link is redirected on the server to the matching address below |
+| `/school/:schoolId/marketplace/templates` | Marketplace root: opens the first document type the school has whose templates the user may read (one check of both template read permissions), or says access is unavailable when there is none. A former `?type=&template=&preview=1` link is redirected on the server to the matching address below |
 | `/school/:schoolId/marketplace/templates/:documentType` | Opens the design the school uses (imported from the catalog and still listed), else the first listed. The template settings' *Marketplace* and *Browse marketplace* open this |
 | `/school/:schoolId/marketplace/templates/:documentType/:slug` | One marketplace design; `?preview=1` opens its full-screen preview |
 
@@ -174,7 +174,11 @@ the generator.
    as in use; the design page's *Use template* button says *In use* instead.
 3. A type's address opens the design the school uses when it was imported from the
    catalog and is still listed (`artifact.marketplaceSlug`), else the first listed
-   (`defaultDesignOf`); the root opens the first type. These redirects happen with
+   (`defaultDesignOf`); the root opens the first type the user may read
+   (`landingTypeOf`: a role that reads only finance templates lands on Bills). Which
+   permission reads a type's template is decided in one place
+   (`template-permissions.ts`, from the API's `FINANCE_DOCUMENT_TYPES`) for the
+   sidebar, the root, the catalog query and the pages. These redirects happen with
    `redirect()` during render once the client knows the features and the catalog,
    never in an effect. A type the school does not have says so (with the sidebar to
    choose another); an address that is not a document type is not found.

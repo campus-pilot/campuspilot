@@ -7,6 +7,7 @@ import { useForm, useStore } from '@tanstack/react-form';
 import { useQuery } from '@tanstack/react-query';
 import { Check, LayoutTemplate, Maximize2 } from 'lucide-react';
 import { z } from 'zod';
+import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import {
   DOCUMENT_LABELS,
   type TemplateDocumentType as DocumentType,
@@ -34,6 +35,7 @@ import {
 import {
   defaultDesignOf,
   footprintLabel,
+  landingTypeOf,
   marketplaceHref,
   marketplaceTypesOf,
 } from './marketplace-model';
@@ -191,13 +193,35 @@ function MarketplaceCatalog({ scope, children }: { scope: DocumentTemplateScope;
   return children({ items: marketState.data.items, active: activeState.data });
 }
 
-/** `/marketplace/templates`: opens the first type the school has. */
+/** The two template read permissions (academic, finance), asked in one check by the marketplace's root. */
+const TEMPLATE_READ_ACTIONS = [SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES] as const;
+
+/**
+ * Opens the first of the school's types the user may read the templates of
+ * (`landingTypeOf`), deciding each type's permission with `templateReadAction`
+ * like the sidebar and the pages do. A user who may read none is told so
+ * rather than sent to a type that would refuse.
+ */
+function MarketplaceLandingRedirect({ schoolId, types }: { schoolId: string; types: readonly DocumentType[] }) {
+  const access = useQuery(
+    orpc.authorization.checkPermissions.queryOptions({
+      input: { permissions: TEMPLATE_READ_ACTIONS.map((action) => ({ action, resource: { kind: 'school' as const, schoolId } })) },
+    }),
+  );
+  const state = resolveQueryBoundary(access);
+  if (state.kind === 'failed') return <DocumentReadError error={state.error} retry={access.refetch} />;
+  if (state.kind === 'pending') return <DocumentLoading />;
+  const mayRead = (type: DocumentType) => state.data.results[TEMPLATE_READ_ACTIONS.indexOf(templateReadAction(type))] === true;
+  const type = landingTypeOf(types, mayRead);
+  if (!type) return <DocumentNotice>Template marketplace access is unavailable for your account.</DocumentNotice>;
+  return <RedirectTo href={marketplaceHref(schoolId, { type })} />;
+}
+
+/** `/marketplace/templates`: opens the first type the school has that the user may read. */
 export function MarketplaceLanding({ schoolId }: { schoolId: string }) {
   return (
     <MarketplaceFrame title="Document templates">
-      <MarketplaceTypes schoolId={schoolId}>
-        {(types) => <RedirectTo href={marketplaceHref(schoolId, { type: types[0] })} />}
-      </MarketplaceTypes>
+      <MarketplaceTypes schoolId={schoolId}>{(types) => <MarketplaceLandingRedirect schoolId={schoolId} types={types} />}</MarketplaceTypes>
     </MarketplaceFrame>
   );
 }

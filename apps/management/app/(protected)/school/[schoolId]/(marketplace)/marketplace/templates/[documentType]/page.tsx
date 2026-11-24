@@ -1,5 +1,5 @@
 import { notFound } from 'next/navigation';
-import { documentTypeSchema } from '@campuspilot/api/routers/school/document/document.dto';
+import { templateDocumentTypeSchema as documentTypeSchema } from '@campuspilot/api/routers/school/document/document.dto';
 import { MarketplaceTypeLanding } from '@/components/documents/document-template-marketplace';
 
 /** A document type's address: the client opens the type's default design (`MarketplaceTypeLanding`). */

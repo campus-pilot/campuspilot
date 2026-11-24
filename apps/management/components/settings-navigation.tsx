@@ -2,54 +2,37 @@ import type { ReactNode } from 'react';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import type { TemplateDocumentType as DocumentType } from '@campuspilot/api/routers/school/document/document.dto';
 import type { SchoolFeatureKey } from '@campuspilot/api/routers/school/feature-flags/feature-flags.dto';
-import type { AppShellIcon, AppShellNavigationEntry } from '@campuspilot/components/app-shell';
+import type { AppShellNavigationEntry } from '@campuspilot/components/app-shell';
 import {
   ArrowLeft,
-  BookOpenCheck,
   CalendarDays,
-  CalendarRange,
   ChartNoAxesColumn,
-  ClipboardCheck,
-  CreditCard,
-  FileBadge,
-  FileQuestionMark,
   Files,
-  GraduationCap,
-  ReceiptText,
   School,
-  ScrollText,
   Settings,
   Sparkles,
 } from 'lucide-react';
 import { RequireFeature } from './require-feature';
 import { RequirePermissions } from './require-permissions';
 import { schoolHref, schoolSessionHref } from './school-route';
-import { firstSettingsTemplate, SETTINGS_TEMPLATES, type SettingsTemplate } from './settings-templates';
+import { templateReadAction } from './documents/template-permissions';
+import { firstSettingsTemplate, SETTINGS_TEMPLATES, TEMPLATE_ICONS } from './settings-templates';
 
-/** The sidebar icon of each document type's template, shared by the settings and marketplace sidebars. */
-export const TEMPLATE_ICONS: Record<DocumentType, AppShellIcon> = {
-  report_card: ClipboardCheck,
-  id_card: FileBadge,
-  admit_card: GraduationCap,
-  timetable: CalendarRange,
-  bill: CreditCard,
-  receipt: ReceiptText,
-  statement: ScrollText,
-  notice: BookOpenCheck,
-  question_paper: FileQuestionMark,
-};
-
-/**
- * Gates a navigation entry on the permission that reads a template: finance
- * templates (bills, receipts, statements) have their own read permission,
- * the others the academic one. The settings and marketplace sidebars use the
- * same gate for the same type.
- */
-export function templateReadGate(schoolId: string, template: Pick<SettingsTemplate, 'finance'>) {
-  const action = template.finance ? SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES : SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES;
+/** Gates a navigation entry on one school permission. */
+function schoolPermissionGate(schoolId: string, action: ReturnType<typeof templateReadAction>) {
   return (children: ReactNode) => (
     <RequirePermissions permissions={{ action, resource: { kind: 'school', schoolId } }}>{children}</RequirePermissions>
   );
+}
+
+/**
+ * Gates a navigation entry on the permission that reads a type's template
+ * (`templateReadAction`: finance types have their own). The settings and
+ * marketplace sidebars use this one gate, and the marketplace's catalog query
+ * and pages decide from the same function, so they cannot disagree.
+ */
+export function templateReadGate(schoolId: string, documentType: DocumentType) {
+  return schoolPermissionGate(schoolId, templateReadAction(documentType));
 }
 
 export type SettingsNavigationInput = {
@@ -88,7 +71,8 @@ export function settingsNavigation({
   selectedSessionId,
 }: SettingsNavigationInput): AppShellNavigationEntry[] {
   const firstTemplate = firstSettingsTemplate(has);
-  const withTemplatePermission = templateReadGate(schoolId, { finance: false });
+  // The Templates entry itself needs the academic read, as before; each template below has its own gate.
+  const withTemplatePermission = schoolPermissionGate(schoolId, SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES);
   return [
     {
       type: 'item',
@@ -188,7 +172,7 @@ export function settingsNavigation({
               // A feature and a permission are separate gates; a template needs both.
               wrap: (children: ReactNode) => (
                 <RequireFeature schoolId={schoolId} feature={template.feature}>
-                  {templateReadGate(schoolId, template)(children)}
+                  {templateReadGate(schoolId, template.documentType)(children)}
                 </RequireFeature>
               ),
             })),

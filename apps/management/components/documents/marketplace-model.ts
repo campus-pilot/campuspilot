@@ -97,6 +97,17 @@ export function marketplaceTypesOf(feature: (key: SchoolFeatureKey) => FeatureVi
   return { types: views.filter(({ view }) => view.enabled).map(({ type }) => type), status };
 }
 
+/**
+ * The type the marketplace's root opens: the first type the school has whose
+ * templates the user may read (`mayRead`; finance types have their own read
+ * permission, so a role may read Bills but not Report cards). Null when the
+ * user may read none, so the root says so instead of opening a type that
+ * would only refuse.
+ */
+export function landingTypeOf(types: readonly DocumentType[], mayRead: (type: DocumentType) => boolean): DocumentType | null {
+  return types.find(mayRead) ?? null;
+}
+
 /** The type an address names when the school has it, else null (no fallback: the screen says so instead). */
 export function offeredTypeOf(requested: DocumentType | null, offered: readonly DocumentType[]): DocumentType | null {
   return requested && offered.includes(requested) ? requested : null;
