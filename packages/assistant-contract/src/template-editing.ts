@@ -72,7 +72,7 @@ export function templatePaperRule(documentType: TemplateDocumentType, pageSize?:
  */
 export function templateTypeRule(documentType: TemplateDocumentType): string | null {
   if (documentType === 'bill') {
-    return 'This one template prints ordinary bills and bills due (a bill for one student as of a chosen date). On a bill due billDue is set, bill.number is null (print a number such as DUE/{{billDue.date.day}}/{{billDue.date.month}}/{{billDue.date.year}} in its place) and credits[] lists payments, discounts and other credits of the period; on an ordinary bill billDue is null and credits[] is empty. Show "Statement through" only inside {{#if billDue}}. Dates are parts ({iso,day,month,year,monthName}), never preformatted; print bill.period (cadence, start, end) instead of bill.periodKey. balanceBefore and the period totals are null when zero; balanceAfter (the amount due) is always present.';
+    return 'This one template prints ordinary bills and bills due (a bill for one student as of a chosen date). On a bill due billDue is set, bill.number is null (print a number such as DUE/{{billDue.date.day}}/{{billDue.date.month}}/{{billDue.date.year}} in its place) and credits[] lists payments, discounts and other credits of the period; on an ordinary bill billDue is null and credits[] is empty. Show "Statement through" only inside {{#if billDue}}. Dates are parts ({iso,day,month,year,monthName}), never preformatted; print bill.period (cadence, start, end) instead of bill.periodKey. balanceBefore and the period totals are null when zero; balanceAfter (the amount due) is always present. A design that prints only paidThisPeriod and discountThisPeriod must also print otherCreditsThisPeriod (every other credit) to add up.';
   }
   return null;
 }

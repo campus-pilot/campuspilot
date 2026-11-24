@@ -1,6 +1,6 @@
 import type { DatabaseExecutor } from "@campuspilot/db";
 import { admissionTable } from "@campuspilot/db/schema/admission";
-import { classTable } from "@campuspilot/db/schema/class";
+import { classTable, sectionTable } from "@campuspilot/db/schema/class";
 import {
   financeAdjustmentTable,
   financeBillLineTable,
@@ -14,13 +14,13 @@ import { currencyCodeSchema, currencyMinorUnitDigits } from "@campuspilot/db/sch
 import { financeSchemaConfigSchema } from "@campuspilot/db/schema/jsonb/finance-config";
 import { schoolSessionTable } from "@campuspilot/db/schema/session";
 import { studentTable } from "@campuspilot/db/schema/student";
-import { and, asc, eq, inArray, isNotNull, lt, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { createHash } from "node:crypto";
 
 import { rpcError } from "../../../errors";
 import { calculateBillingPeriod, isValidLocalDate, localDateToInstant } from "../billing/period";
 import { MAX_DOCUMENT_SOURCE_ITEMS, type DocumentSource } from "./document.dto";
-import { ledgerAccountKey, loadInChunks, signed, type CutoffMap } from "./finance-document.ledger";
+import { ledgerAccountKey, loadInChunks, type CutoffMap } from "./finance-document.ledger";
 import {
   dayAfter,
   documentBillingPeriod,
@@ -33,6 +33,16 @@ import {
 
 type BillDueSource = Extract<DocumentSource, { documentType: "bill_due" }>;
 type LedgerType = (typeof financeLedgerEntryTable.$inferSelect)["type"];
+
+/**
+ * The pinned high-water sequence of an account that had no ledger fact
+ * through the date when the Bill due was reviewed. Sequences start at 1, so
+ * reading "up to 0" reads nothing: the job prints that account with zeros,
+ * exactly as reviewed, whatever was posted since. In the review hash and the
+ * artifact's finance source the same account carries `highWaterSequence:
+ * null` (no cutoff), its own explicit marker.
+ */
+const NO_FACTS_HIGH_WATER = "0";
 
 /**
  * What a ledger fact is called on a Bill due, by the server (templates print
@@ -98,7 +108,29 @@ export type BillDueCredit = {
   amountMinor: string;
 };
 
-type Entry = {
+/**
+ * Where a printed student's identity comes from, its own fact (never
+ * inferred from whether amounts are zero):
+ * - `posting_snapshot`: the identity captured when the account's newest
+ *   ledger fact through the date was posted (the finance documents' rule:
+ *   what was true when the money moved);
+ * - `current_records`: the admission and its enrollment in the session as
+ *   they are now, for an account with no fact through the date, or whose
+ *   facts predate identity snapshots. Everyone in scope is printed, so such
+ *   an account is not left out; there is no posting-time identity to use.
+ */
+type PrintedIdentity = {
+  source: "posting_snapshot" | "current_records";
+  admissionName: string;
+  admissionNumber: string;
+  fatherName: string;
+  motherName: string;
+  classLabel: string | null;
+  sectionLabel: string | null;
+  rollNumber: number | null;
+};
+
+type PeriodFact = {
   id: string;
   admissionId: string;
   sequence: bigint;
@@ -108,18 +140,17 @@ type Entry = {
   effectiveAt: Date;
   reversalOfEntryId: string | null;
   note: string | null;
-  hasSnapshot: boolean;
 };
 
-function compareEntries(left: Entry, right: Entry) {
+function compareFacts(left: PeriodFact, right: PeriodFact) {
   const effective = left.effectiveAt.getTime() - right.effectiveAt.getTime();
   if (effective !== 0) return effective;
   if (left.sequence !== right.sequence) return left.sequence < right.sequence ? -1 : 1;
   return left.id.localeCompare(right.id);
 }
 
-/** A stable print order from the posting-time identity: class, section, roll number, name, admission number. */
-function compareIdentity(left: FinanceDocumentIdentitySnapshot, right: FinanceDocumentIdentitySnapshot) {
+/** A stable print order: class, section, roll number, name, admission number. */
+function compareIdentity(left: PrintedIdentity, right: PrintedIdentity) {
   const text = (a: string | null, b: string | null) => (a ?? "").localeCompare(b ?? "", "en", { numeric: true, sensitivity: "base" });
   return (
     text(left.classLabel, right.classLabel) ||
@@ -134,8 +165,7 @@ function compareIdentity(left: FinanceDocumentIdentitySnapshot, right: FinanceDo
  * The admissions a Bill due is for, as the source names them. A session or a
  * class means every student enrolled in it (registered or not: an
  * unregistered student can still owe money). Chosen admissions must belong
- * to the school. Who is enrolled is read only to choose the accounts; what
- * is printed about a student comes from the posting-time ledger identity.
+ * to the school; a class must be the school's (another school's is NOT_FOUND).
  */
 async function recipientAdmissionIds(db: DatabaseExecutor, schoolId: string, source: BillDueSource): Promise<string[]> {
   const { recipients } = source;
@@ -171,11 +201,26 @@ async function recipientAdmissionIds(db: DatabaseExecutor, schoolId: string, sou
 }
 
 /**
+ * The ledger condition of a chunk of accounts: the school, the accounts, the
+ * session currency and, in a job, each account's pinned sequence, applied in
+ * SQL (a join on the pinned values), never after loading.
+ */
+function accountFacts(schoolId: string, admissionIds: string[], currency: string, pinned: Map<string, string> | null): SQL {
+  const base = sql`e.school_id = ${schoolId} and e.currency = ${currency} and e.admission_id in (${sql.join(admissionIds.map((id) => sql`${id}`), sql`, `)})`;
+  if (!pinned) return base;
+  const cut = JSON.stringify(admissionIds.map((admissionId) => ({ admission_id: admissionId, high_water: pinned.get(admissionId)! })));
+  return sql`${base} and e.sequence <= (select c.high_water from jsonb_to_recordset(${cut}::jsonb) as c(admission_id text, high_water bigint) where c.admission_id = e.admission_id)`;
+}
+
+/**
  * Builds Bills due: for each admission, a bill as of `throughDate` in the
  * same context shape as an ordinary bill, so bill templates print it
  * (docs/document-system.md "Bill due"). Read inside the caller's
  * repeatable-read transaction.
  *
+ * - **Who**: everyone in scope is printed, including an account with no
+ *   ledger fact through the date (zeros, and its identity from the current
+ *   records, see {@link PrintedIdentity}).
  * - **Period**: the billing period containing `throughDate`, from the
  *   session's `recurring` cadence and `cycleStartMonth`
  *   (`calculateBillingPeriod`). Facts count by their ledger effective date,
@@ -187,20 +232,19 @@ async function recipientAdmissionIds(db: DatabaseExecutor, schoolId: string, sou
  *   one row per bill line), other debits in their own row, and one
  *   `credits[]` row per credit. A reversal and the fact it reverses both
  *   disappear when both are in the period; a reversal of an older fact is
- *   its own row.
- * - **Balances**: `balanceBefore` is the balance at the period start,
- *   `balanceAfter` the amount due at the end of `throughDate`, and
- *   `balanceBefore + bill.total - credits = balanceAfter` always holds.
- * - **Pinning**: like statements, each account's high-water ledger sequence
- *   (through the date) is reviewed and hashed; a generation job reads each
- *   account only up to its pinned sequence (`cutoff`).
- * - **Bulk**: every read is one set-based query per chunk of accounts or
- *   facts, never queries per admission, so 1,500 admissions cost a few
- *   dozen queries.
- *
- * An account with no ledger fact through the date has no posting-time
- * identity to print, so it is left out with a warning; when nobody is left
- * the request is refused.
+ *   its own row (posting refuses a reversal dated before its target, so a
+ *   reversal is never older than what it reverses).
+ * - **Balances**: `balanceBefore` (a grouped sum of the facts before the
+ *   period) is the balance at the period start, `balanceAfter` the amount
+ *   due at the end of `throughDate`, and `balanceBefore + bill.total -
+ *   credits = balanceAfter` always holds.
+ * - **Pinning**: each account's high-water ledger sequence through the date
+ *   (null when it has none) is reviewed and hashed; a generation job reads
+ *   each account only up to its pinned sequence, in SQL.
+ * - **Bulk**: per chunk of accounts, one grouped query for the opening
+ *   balances and high waters, one for the period's facts and one for the
+ *   newest identity snapshots (`DISTINCT ON`); then one query per kind of
+ *   document behind the printed facts. Never queries per admission.
  */
 export async function buildBillDueContexts(
   db: DatabaseExecutor,
@@ -233,98 +277,136 @@ export async function buildBillDueContexts(
     throw rpcError.badRequest(`This selection has more than ${MAX_DOCUMENT_SOURCE_ITEMS.toLocaleString("en-IN")} students. Create at most ${MAX_DOCUMENT_SOURCE_ITEMS.toLocaleString("en-IN")} at a time.`);
   if (!admissionIds.length) throw rpcError.badRequest("This selection has no students.");
 
-  // Every fact of the accounts through the date, without its identity
-  // snapshot (read below only for the one fact each account prints).
-  const rows = await loadInChunks(admissionIds, (ids) =>
+  // In a job, every account in scope was pinned when it was accepted; an
+  // account that was not (the scope changed since) means the source changed.
+  let pinned: Map<string, string> | null = null;
+  if (cutoff) {
+    pinned = new Map();
+    for (const admissionId of admissionIds) {
+      const sequence = cutoff.get(ledgerAccountKey(admissionId, currency));
+      if (sequence === undefined) throw rpcError.conflict("This document's accounts changed after it was requested. Create it again.");
+      pinned.set(admissionId, sequence.toString());
+    }
+  }
+
+  const startAt = period.startAt.toISOString();
+  const end = endAt.toISOString();
+  // Opening balance (before the period) and high water (through the date) per account, one grouped query per chunk.
+  const totals = await loadInChunks(admissionIds, async (ids) => {
+    const result = await db.execute<{ admission_id: string; before_minor: string; after_minor: string; high_water: string | null }>(sql`
+      select e.admission_id,
+        coalesce(sum(case when e.direction = 'debit' then e.amount_minor else -e.amount_minor end) filter (where e.effective_at < ${startAt}::timestamptz), 0)::text as before_minor,
+        sum(case when e.direction = 'debit' then e.amount_minor else -e.amount_minor end)::text as after_minor,
+        max(e.sequence)::text as high_water
+      from finance_ledger_entry e
+      where ${accountFacts(schoolId, ids, currency, pinned)} and e.effective_at < ${end}::timestamptz
+      group by e.admission_id`);
+    return result.rows;
+  });
+  const totalsByAdmission = new Map(totals.map((row) => [row.admission_id, row]));
+  // The period's facts only.
+  const periodRows = await loadInChunks(admissionIds, async (ids) => {
+    const result = await db.execute<{ id: string; admission_id: string; sequence: string; type: LedgerType; direction: "debit" | "credit"; amount_minor: string; effective_at: string | Date; reversal_of_entry_id: string | null; note: string | null }>(sql`
+      select e.id, e.admission_id, e.sequence::text as sequence, e.type, e.direction, e.amount_minor::text as amount_minor, e.effective_at, e.reversal_of_entry_id, e.note
+      from finance_ledger_entry e
+      where ${accountFacts(schoolId, ids, currency, pinned)} and e.effective_at >= ${startAt}::timestamptz and e.effective_at < ${end}::timestamptz`);
+    return result.rows;
+  });
+  // The newest identity snapshot through the date per account.
+  const snapshotRows = await loadInChunks(admissionIds, async (ids) => {
+    const result = await db.execute<{ admission_id: string; document_snapshot: FinanceDocumentIdentitySnapshot }>(sql`
+      select distinct on (e.admission_id) e.admission_id, e.document_snapshot
+      from finance_ledger_entry e
+      where ${accountFacts(schoolId, ids, currency, pinned)} and e.effective_at < ${end}::timestamptz and e.document_snapshot is not null
+      order by e.admission_id, e.sequence desc`);
+    return result.rows;
+  });
+  const snapshotByAdmission = new Map(snapshotRows.map((row) => [row.admission_id, row.document_snapshot]));
+
+  // Accounts without a posting-time identity print the current records.
+  const withoutSnapshot = admissionIds.filter((admissionId) => {
+    const snapshot = snapshotByAdmission.get(admissionId);
+    return !snapshot?.admissionName || !snapshot.admissionNumber;
+  });
+  const currentRows = await loadInChunks(withoutSnapshot, (ids) =>
     db
       .select({
-        id: financeLedgerEntryTable.id,
-        admissionId: financeLedgerEntryTable.admissionId,
-        sequence: financeLedgerEntryTable.sequence,
-        type: financeLedgerEntryTable.type,
-        direction: financeLedgerEntryTable.direction,
-        amountMinor: financeLedgerEntryTable.amountMinor,
-        effectiveAt: financeLedgerEntryTable.effectiveAt,
-        reversalOfEntryId: financeLedgerEntryTable.reversalOfEntryId,
-        note: financeLedgerEntryTable.note,
-        hasSnapshot: sql<boolean>`${financeLedgerEntryTable.documentSnapshot} is not null`,
+        admissionId: admissionTable.id,
+        admissionName: admissionTable.name,
+        admissionNumber: admissionTable.admissionNo,
+        fatherName: admissionTable.fatherName,
+        motherName: admissionTable.motherName,
+        classLabel: classTable.label,
+        sectionLabel: sectionTable.label,
+        rollNumber: studentTable.rollNo,
       })
-      .from(financeLedgerEntryTable)
-      .where(
-        and(
-          eq(financeLedgerEntryTable.schoolId, schoolId),
-          inArray(financeLedgerEntryTable.admissionId, ids),
-          eq(financeLedgerEntryTable.currency, currency),
-          lt(financeLedgerEntryTable.effectiveAt, endAt),
-        ),
-      ),
+      .from(admissionTable)
+      .leftJoin(studentTable, and(eq(studentTable.schoolId, schoolId), eq(studentTable.admissionId, admissionTable.id), eq(studentTable.sessionId, source.sessionId)))
+      .leftJoin(classTable, and(eq(classTable.schoolId, schoolId), eq(classTable.id, studentTable.classId)))
+      .leftJoin(sectionTable, and(eq(sectionTable.schoolId, schoolId), eq(sectionTable.id, studentTable.sectionId)))
+      .where(and(eq(admissionTable.schoolId, schoolId), inArray(admissionTable.id, ids))),
   );
-  const entriesByAdmission = new Map<string, Entry[]>();
-  for (const row of rows) {
-    if (cutoff) {
-      // An account the job did not pin had no fact through the date when it
-      // was accepted: it stays left out. Facts posted after it are not read.
-      const pinned = cutoff.get(ledgerAccountKey(row.admissionId, currency));
-      if (pinned === undefined || row.sequence > pinned) continue;
-    }
-    const list = entriesByAdmission.get(row.admissionId) ?? [];
-    list.push(row);
-    entriesByAdmission.set(row.admissionId, list);
-  }
-  const included = admissionIds.filter((admissionId) => entriesByAdmission.get(admissionId)?.length);
-  const leftOut = admissionIds.length - included.length;
-  if (!included.length) throw rpcError.badRequest(`No selected student has account activity through ${source.throughDate}.`);
-
-  // The posting-time identity each account prints: its newest fact through
-  // the date that carries one (facts from before identity snapshots existed
-  // carry none).
-  const identityEntryIds = included.map((admissionId) => {
-    const facts = entriesByAdmission.get(admissionId)!;
-    let newest: Entry | undefined;
-    for (const fact of facts) if (fact.hasSnapshot && (!newest || fact.sequence > newest.sequence)) newest = fact;
-    if (!newest) throw rpcError.conflict("A selected account has no immutable identity snapshot to print a bill with.");
-    return newest.id;
-  });
-  const snapshots = await loadInChunks(identityEntryIds, (ids) =>
-    db
-      .select({ admissionId: financeLedgerEntryTable.admissionId, snapshot: financeLedgerEntryTable.documentSnapshot })
-      .from(financeLedgerEntryTable)
-      .where(and(eq(financeLedgerEntryTable.schoolId, schoolId), inArray(financeLedgerEntryTable.id, ids), isNotNull(financeLedgerEntryTable.documentSnapshot))),
-  );
-  const identityByAdmission = new Map(snapshots.map((row) => [row.admissionId, row.snapshot!]));
+  const currentByAdmission = new Map(currentRows.map((row) => [row.admissionId, row]));
+  const identityOf = (admissionId: string): PrintedIdentity => {
+    const snapshot = snapshotByAdmission.get(admissionId);
+    if (snapshot?.admissionName && snapshot.admissionNumber)
+      return {
+        source: "posting_snapshot",
+        admissionName: snapshot.admissionName,
+        admissionNumber: snapshot.admissionNumber,
+        fatherName: snapshot.fatherName,
+        motherName: snapshot.motherName,
+        classLabel: snapshot.classLabel,
+        sectionLabel: snapshot.sectionLabel,
+        rollNumber: snapshot.rollNumber,
+      };
+    const current = currentByAdmission.get(admissionId);
+    if (!current) throw rpcError.notFound("Admission");
+    return { source: "current_records", ...current };
+  };
 
   // Which facts of the period print, per account: a reversal and the fact it
   // reverses cancel out when both are in the period.
-  const periodFactsByAdmission = new Map<string, Entry[]>();
-  const balances = new Map<string, { before: bigint; after: bigint }>();
-  const allEntries = new Map<string, Entry>();
-  for (const admissionId of included) {
-    const facts = entriesByAdmission.get(admissionId)!.sort(compareEntries);
-    let before = BigInt(0);
-    let after = BigInt(0);
-    const inPeriod: Entry[] = [];
-    for (const fact of facts) {
-      allEntries.set(fact.id, fact);
-      after += signed(fact);
-      if (fact.effectiveAt < period.startAt) before += signed(fact);
-      else inPeriod.push(fact);
-    }
-    const periodIds = new Set(inPeriod.map((fact) => fact.id));
+  const factsByAdmission = new Map<string, PeriodFact[]>();
+  for (const row of periodRows) {
+    const list = factsByAdmission.get(row.admission_id) ?? [];
+    list.push({
+      id: row.id,
+      admissionId: row.admission_id,
+      sequence: BigInt(row.sequence),
+      type: row.type,
+      direction: row.direction,
+      amountMinor: BigInt(row.amount_minor),
+      effectiveAt: new Date(row.effective_at),
+      reversalOfEntryId: row.reversal_of_entry_id,
+      note: row.note,
+    });
+    factsByAdmission.set(row.admission_id, list);
+  }
+  const printedByAdmission = new Map<string, PeriodFact[]>();
+  for (const [admissionId, facts] of factsByAdmission) {
+    facts.sort(compareFacts);
+    const ids = new Set(facts.map((fact) => fact.id));
     const cancelled = new Set<string>();
-    for (const fact of inPeriod)
-      if (fact.reversalOfEntryId && periodIds.has(fact.reversalOfEntryId)) {
+    for (const fact of facts)
+      if (fact.reversalOfEntryId && ids.has(fact.reversalOfEntryId)) {
         cancelled.add(fact.id);
         cancelled.add(fact.reversalOfEntryId);
       }
-    periodFactsByAdmission.set(admissionId, inPeriod.filter((fact) => !cancelled.has(fact.id)));
-    balances.set(admissionId, { before, after });
+    printedByAdmission.set(admissionId, facts.filter((fact) => !cancelled.has(fact.id)));
   }
 
-  // The documents behind the printed facts and behind what their reversals
-  // reverse, a set-based read per kind.
-  const printed = [...periodFactsByAdmission.values()].flat();
-  const detailIds = [...new Set(printed.flatMap((fact) => (fact.reversalOfEntryId ? [fact.id, fact.reversalOfEntryId] : [fact.id])))];
-  const [bills, payments, refunds, adjustments] = await Promise.all([
+  // The documents behind the printed facts and behind what their reversals reverse.
+  const printed = [...printedByAdmission.values()].flat();
+  const targetIds = [...new Set(printed.flatMap((fact) => (fact.reversalOfEntryId ? [fact.reversalOfEntryId] : [])))];
+  const detailIds = [...new Set([...printed.map((fact) => fact.id), ...targetIds])];
+  const [targets, bills, payments, refunds, adjustments] = await Promise.all([
+    loadInChunks(targetIds, (ids) =>
+      db
+        .select({ id: financeLedgerEntryTable.id, type: financeLedgerEntryTable.type })
+        .from(financeLedgerEntryTable)
+        .where(and(eq(financeLedgerEntryTable.schoolId, schoolId), inArray(financeLedgerEntryTable.id, ids))),
+    ),
     loadInChunks(detailIds, (ids) =>
       db
         .select({ id: financeBillTable.id, ledgerEntryId: financeBillTable.ledgerEntryId, billNumber: financeBillTable.billNumber, issueDate: financeBillTable.issueDate })
@@ -350,6 +432,7 @@ export async function buildBillDueContexts(
         .where(and(eq(financeAdjustmentTable.schoolId, schoolId), inArray(financeAdjustmentTable.ledgerEntryId, ids))),
     ),
   ]);
+  const targetTypeById = new Map(targets.map((target) => [target.id, target.type]));
   const billByLedger = new Map(bills.map((bill) => [bill.ledgerEntryId, bill]));
   const paymentByLedger = new Map(payments.map((payment) => [payment.ledgerEntryId, payment]));
   const refundByLedger = new Map(refunds.map((refund) => [refund.ledgerEntryId, refund]));
@@ -387,34 +470,34 @@ export async function buildBillDueContexts(
   const throughDate = documentDateParts(source.throughDate);
   const exponent = currencyMinorUnitDigits(currencyCodeSchema.parse(currency));
 
-  const contexts = included.map((admissionId) => {
-    const identity = identityByAdmission.get(admissionId);
-    if (!identity?.admissionName || !identity.admissionNumber) throw rpcError.conflict("A selected account has no immutable identity snapshot to print a bill with.");
+  const documents = admissionIds.map((admissionId) => {
+    const identity = identityOf(admissionId);
     const billLines: BillDueLine[] = [];
     const credits: BillDueCredit[] = [];
     const totals = { payment: BigInt(0), discount: BigInt(0), waiver: BigInt(0), write_off: BigInt(0), credit_correction: BigInt(0), refund: BigInt(0) };
     let linesTotal = BigInt(0);
     let creditsTotal = BigInt(0);
-    const debitRow = (fact: Entry, row: Omit<BillDueLine, "amount" | "amountMinor" | "issueDate" | "billNumber" | "slug" | "pricingSource">) => {
+    const debitRow = (fact: PeriodFact, row: Omit<BillDueLine, "amount" | "amountMinor" | "issueDate" | "billNumber" | "slug" | "pricingSource">) => {
       billLines.push({ ...row, slug: null, billNumber: null, pricingSource: null, issueDate: localDate(fact.effectiveAt), amount: money(fact.amountMinor), amountMinor: fact.amountMinor.toString() });
       linesTotal += fact.amountMinor;
     };
-    const creditRow = (fact: Entry, row: Omit<BillDueCredit, "amount" | "amountMinor" | "date">) => {
+    const creditRow = (fact: PeriodFact, row: Omit<BillDueCredit, "amount" | "amountMinor" | "date">) => {
       credits.push({ ...row, date: localDate(fact.effectiveAt), amount: money(fact.amountMinor), amountMinor: fact.amountMinor.toString() });
       creditsTotal += fact.amountMinor;
     };
-    for (const fact of periodFactsByAdmission.get(admissionId)!) {
+    for (const fact of printedByAdmission.get(admissionId) ?? []) {
       if (fact.type === "bill" || fact.type === "manual_debit_adjustment") {
         const bill = billByLedger.get(fact.id);
         const items = bill ? linesByBill.get(bill.id) : undefined;
-        if (!bill || !items?.length) throw rpcError.conflict(`Bill ledger fact ${fact.id} has no posted bill lines.`);
+        if (!bill || !items?.length)
+          throw rpcError.conflict(`A bill of ${identity.admissionName} (${identity.admissionNumber}) has no posted lines.`);
         const issueDate = documentDateParts(bill.issueDate);
         let billTotal = BigInt(0);
         for (const item of items) {
           billLines.push({ kind: "bill_line", slug: item.slug, name: item.name, note: null, billNumber: bill.billNumber, reference: bill.billNumber, issueDate, amount: money(item.amountMinor), amountMinor: item.amountMinor.toString(), pricingSource: item.pricingSource });
           billTotal += item.amountMinor;
         }
-        if (billTotal !== fact.amountMinor) throw rpcError.conflict(`Bill ${bill.billNumber} lines do not add up to its ledger amount.`);
+        if (billTotal !== fact.amountMinor) throw rpcError.conflict(`The lines of bill ${bill.billNumber} do not add up to its amount.`);
         linesTotal += billTotal;
       } else if (fact.type === "refund") {
         const refund = refundByLedger.get(fact.id);
@@ -424,8 +507,8 @@ export async function buildBillDueContexts(
         debitRow(fact, { kind: "debit_correction", name: ENTRY_LABELS.debit_correction, note: adjustmentByLedger.get(fact.id)?.reasonNote ?? fact.note, reference: null });
       } else if (fact.type === "reversal") {
         // The reversal of a fact posted before the period: its own row, on the side its direction puts it.
-        const target = fact.reversalOfEntryId ? allEntries.get(fact.reversalOfEntryId) : undefined;
-        const label = target ? `${ENTRY_LABELS[target.type]} reversal` : ENTRY_LABELS.reversal;
+        const targetType = fact.reversalOfEntryId ? targetTypeById.get(fact.reversalOfEntryId) : undefined;
+        const label = targetType ? `${ENTRY_LABELS[targetType]} reversal` : ENTRY_LABELS.reversal;
         const reference = fact.reversalOfEntryId ? referenceOf(fact.reversalOfEntryId) : null;
         if (fact.direction === "debit") debitRow(fact, { kind: "reversal", name: label, note: fact.note, reference });
         else creditRow(fact, { kind: "reversal", label, reference, note: fact.note });
@@ -435,7 +518,8 @@ export async function buildBillDueContexts(
         totals[fact.type] += fact.amountMinor;
       }
     }
-    const { before, after } = balances.get(admissionId)!;
+    const before = BigInt(totalsByAdmission.get(admissionId)?.before_minor ?? "0");
+    const after = BigInt(totalsByAdmission.get(admissionId)?.after_minor ?? "0");
     // The printed rows must explain the amount due exactly.
     if (before + linesTotal - creditsTotal !== after) throw rpcError.internal();
     const periodTotals = Object.fromEntries(
@@ -473,30 +557,32 @@ export async function buildBillDueContexts(
         balanceAfter: money(after),
         balanceAfterMinor: after.toString(),
         ...periodTotals,
+        /**
+         * Every credit row that is neither a payment nor a discount (waivers,
+         * write-offs, credit corrections, reversals of earlier charges), so a
+         * design that prints only the paid and discount totals can still add
+         * up to the amount due; null when zero.
+         */
+        otherCreditsThisPeriod: optionalDocumentMoney(creditsTotal - totals.payment - totals.discount, currency),
         refundThisPeriod: optionalDocumentMoney(totals.refund, currency),
         generatedAt,
       },
     };
   });
-  contexts.sort((left, right) => compareIdentity(left.identity, right.identity));
+  documents.sort((left, right) => compareIdentity(left.identity, right.identity));
 
-  // Each account's reviewed high-water sequence through the date (the pinned one in a job).
-  const accounts = included
-    .map((admissionId) => ({
-      admissionId,
-      highWaterSequence: entriesByAdmission.get(admissionId)!.reduce((high, fact) => (fact.sequence > high ? fact.sequence : high), BigInt(0)).toString(),
-    }))
+  // Each account's reviewed high-water sequence through the date; null for an account with no fact (no cutoff).
+  const accounts = admissionIds
+    .map((admissionId) => ({ admissionId, highWaterSequence: totalsByAdmission.get(admissionId)?.high_water ?? null }))
     .sort((left, right) => left.admissionId.localeCompare(right.admissionId));
   const reviewHash = createHash("sha256")
     .update(JSON.stringify({ documentType: "bill_due", schoolId, sessionId: source.sessionId, currency, timeZone, throughDate: source.throughDate, periodKey: period.key, recipients: source.recipients, accounts }))
     .digest("hex");
-  const first = contexts[0]!.context;
+  const first = documents[0]!.context;
   return {
-    contexts: contexts.map((item) => item.context),
-    name: contexts.length === 1 ? `Bill due ${first.admission.number} ${source.throughDate}` : `${contexts.length} bills due ${source.throughDate}`,
-    warnings: leftOut
-      ? [`${leftOut.toLocaleString("en-IN")} ${leftOut === 1 ? "student has" : "students have"} no account activity through ${source.throughDate} and ${leftOut === 1 ? "is" : "are"} not included.`]
-      : [],
+    contexts: documents.map((item) => item.context),
+    name: documents.length === 1 ? `Bill due ${first.admission.number} ${source.throughDate}` : `${documents.length} bills due ${source.throughDate}`,
+    warnings: [] as string[],
     financeSource: {
       kind: "bill_due" as const,
       currency,
@@ -506,6 +592,6 @@ export async function buildBillDueContexts(
       accounts,
     },
     reviewHash,
-    ledgerCutoff: accounts.map((account) => ({ admissionId: account.admissionId, currency, highWaterSequence: account.highWaterSequence })),
+    ledgerCutoff: accounts.map((account) => ({ admissionId: account.admissionId, currency, highWaterSequence: account.highWaterSequence ?? NO_FACTS_HIGH_WATER })),
   };
 }

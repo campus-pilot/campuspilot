@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 import { createFinanceConfig, createFinanceIdempotencyKey } from "../../../../test/finance/factories";
 import { createFinanceScenario, type FinanceScenario } from "../../../../test/finance/scenario";
 import { generateDocumentNow } from "../../../../test/documents";
-import { createTestAdmission, createTestStudent } from "../../../../test/fixtures";
+import { createTestAdmission, createTestClass, createTestSession, createTestStudent } from "../../../../test/fixtures";
 import { buildFinanceDocumentContexts } from "./finance-document.context";
 import { renderDocument } from "./document.render";
 
@@ -168,10 +168,21 @@ describe("Bill due", () => {
     });
   });
 
-  it("accepts a future date, includes everyone in a class scope and names who has no activity", async () => {
+  it("accepts a future date and prints everyone in a class scope, a student with no activity from the current records", async () => {
     await manualBill("2026-11-01", [{ title: "Tuition", amountMinor: "100000" }], "class-bill");
     const quiet = await createTestAdmission({ schoolId: scenario.school.id });
     await createTestStudent({ schoolId: scenario.school.id, admissionId: quiet.id, sessionId: scenario.activeSession.id, classId: scenario.schoolClass.id, sectionId: scenario.section.id, rollNo: 2 });
+    const both = await buildFinanceDocumentContexts(db, scenario.school.id, { ...source("2026-11-24"), recipients: { kind: "class", classId: scenario.schoolClass.id } });
+    expect(both.contexts).toHaveLength(2);
+    expect(both.contexts[1]).toMatchObject({
+      admission: { name: quiet.name, number: quiet.admissionNo, classLabel: scenario.schoolClass.label, rollNumber: "2" },
+      lines: [],
+      credits: [],
+      balanceBefore: null,
+      balanceAfter: "0.00",
+    });
+    // The account with no fact is reviewed with no cutoff.
+    expect(both.financeSource).toMatchObject({ accounts: expect.arrayContaining([{ admissionId: quiet.id, highWaterSequence: null }]) });
     const template = await accountant().selectMarketplaceTemplate({ schoolId: scenario.school.id, documentType: "bill", slug: "standard-bill", expectedRevisionId: null });
     const preview = await scenario.actors.accountant.client.school.previewDocument({
       schoolId: scenario.school.id,
@@ -179,7 +190,7 @@ describe("Bill due", () => {
       source: { documentType: "bill_due", sessionId: scenario.activeSession.id, throughDate: "2027-01-15", recipients: { kind: "class", classId: scenario.schoolClass.id } },
       templateRevisionId: template.revisionId,
     });
-    expect(preview).toMatchObject({ documentCount: 1, warnings: ["1 student has no account activity through 2027-01-15 and is not included."] });
+    expect(preview).toMatchObject({ documentCount: 2, warnings: [] });
     expect(preview.reviewHash).toMatch(/^[a-f0-9]{64}$/);
     expect(preview.html).toContain("DUE/15/01/2027");
     // A statement still refuses the same future date.
@@ -212,6 +223,30 @@ describe("Bill due", () => {
     const history = await accountant().listDocumentArtifacts({ schoolId: scenario.school.id, filters: { documentDomain: "finance", sessionId: scenario.activeSession.id } });
     expect(history.items.map((item) => item.documentType)).toContain("bill_due");
     await expect(accountant().getActiveDocumentTemplate({ schoolId: scenario.school.id, documentType: "bill_due" as never })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("refuses a class, session or admissions of another school", async () => {
+    const outsider = await createTestAdmission({ schoolId: scenario.outsiderSchool.id });
+    const otherSession = await createTestSession({ schoolId: scenario.outsiderSchool.id, sessionStartYear: 2026, sessionEndYear: 2027, isActive: true });
+    const { schoolClass: otherClass } = await createTestClass({ schoolId: scenario.outsiderSchool.id });
+    await expect(buildFinanceDocumentContexts(db, scenario.school.id, { ...source("2026-11-24"), recipients: { kind: "admissions", admissionIds: [scenario.admission.id, outsider.id] } })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(buildFinanceDocumentContexts(db, scenario.school.id, { ...source("2026-11-24"), recipients: { kind: "class", classId: otherClass.id } })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(buildFinanceDocumentContexts(db, scenario.school.id, { ...source("2026-11-24"), sessionId: otherSession.id, recipients: { kind: "session" } })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const template = await accountant().selectMarketplaceTemplate({ schoolId: scenario.school.id, documentType: "bill", slug: "standard-bill", expectedRevisionId: null });
+    await expect(accountant().previewDocument({ schoolId: scenario.school.id, source: { ...source("2026-11-24"), recipients: { kind: "admissions", admissionIds: [outsider.id] } }, templateRevisionId: template.revisionId })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("totals the credits that are neither payments nor discounts, so a design printing only those two still adds up", async () => {
+    const november = await manualBill("2026-11-01", [{ title: "Tuition", amountMinor: "100000" }], "other-credits");
+    await payment("40000", "2026-11-05T06:00:00Z", "other-credits-payment");
+    await accountant().recordAdjustment({
+      ...scope(), currency: "INR", kind: "waiver", billId: november.id,
+      calculation: { kind: "fixed", amountMinor: "10000" }, reasonCode: "SCHOLARSHIP", reasonNote: "Merit scholarship",
+      effectiveAt: "2026-11-06T06:00:00Z", idempotencyKey: createFinanceIdempotencyKey("other-credits-waiver"),
+    });
+    const context = await billDue("2026-11-24");
+    expect(context).toMatchObject({ paidThisPeriod: "400.00", discountThisPeriod: null, waiverThisPeriod: "100.00", otherCreditsThisPeriod: "100.00", balanceAfter: "500.00" });
+    expect((await billDue("2026-10-31")).otherCreditsThisPeriod).toBeNull();
   });
 
   it("gives ordinary bills their run's period, null for a bill without one, and hides a zero opening balance", async () => {

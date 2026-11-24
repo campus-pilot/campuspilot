@@ -225,7 +225,8 @@ export const artifactDtoSchema = z.object({
       throughDate: z.string(),
       timeZone: z.string(),
       period: z.object({ cadence: z.enum(["monthly", "quarterly", "yearly"]), startDate: z.string(), endDate: z.string() }),
-      accounts: z.array(z.object({ admissionId: z.string(), highWaterSequence: z.string() })),
+      /** `highWaterSequence` is null for an account with no ledger fact through the date. */
+      accounts: z.array(z.object({ admissionId: z.string(), highWaterSequence: z.string().nullable() })),
     }),
   ]).nullable(),
   generationOptions: documentGenerationOptionsSchema,
