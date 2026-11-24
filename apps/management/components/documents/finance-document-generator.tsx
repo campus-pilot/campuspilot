@@ -2,7 +2,7 @@
 
 import { useForm } from "@tanstack/react-form";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, Eye, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { z } from "zod";
 import {
   MAX_DOCUMENT_SOURCE_ITEMS,
@@ -14,10 +14,10 @@ import {
   DocumentButton,
   DocumentErrors,
   DocumentNotice,
-  DocumentPreview,
 } from "@campuspilot/components/documents/document-controls";
 import { Badge } from "@campuspilot/ui/components/badge";
 import { Input } from "@campuspilot/ui/components/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@campuspilot/ui/components/tabs";
 import { RequirePermissions } from "@/components/require-permissions";
 import { client, orpc } from "@/lib/orpc";
 import { SimplePagination } from "@/components/billing/finance-ui";
@@ -28,8 +28,8 @@ import {
   documentPermission,
   type DocumentScope,
 } from "./document-common";
-import { CreatePdfButton, DocumentDownload } from "./document-generator";
-import { DocumentJobTracker } from "./document-job";
+import { BillDueGenerator } from "./bill-due";
+import { FinancePreviewPanel } from "./finance-preview-panel";
 
 type FinanceDocumentType = "bill" | "receipt";
 type FinanceSource = Extract<
@@ -73,7 +73,7 @@ export function FinanceDocumentGenerator({
     SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES,
     SCHOOL_ACTIONS.READ_SESSION_FINANCE,
     SCHOOL_ACTIONS.READ_ADMISSION_LEDGER,
-    ...(documentType === "bill" ? [SCHOOL_ACTIONS.READ_BILLING_RUNS] : []),
+    // Billing runs are read by the Bills creator's Billing cycles tab only, which checks it itself.
   ];
   return (
     <RequirePermissions
@@ -125,9 +125,39 @@ function FinanceDocumentGeneratorData({
     onHistory,
   };
   return documentType === "bill" ? (
-    <BillGenerator key={template.data.artifact.id} {...props} />
+    <BillsCreator key={template.data.artifact.id} {...props} />
   ) : (
     <ReceiptGenerator key={template.data.artifact.id} {...props} />
+  );
+}
+
+/**
+ * The Bills creator: **By date** (a Bill due per student as of a chosen date,
+ * the default) and **Billing cycles** (the bills of one posted billing run).
+ * Both print with the school's bill template. The tab is local view state,
+ * not a form value; each tab keeps its own form while the dialog is open
+ * (Radix keeps only the active tab's content mounted, so switching starts
+ * that tab afresh).
+ */
+function BillsCreator(props: GeneratorProps) {
+  return (
+    <Tabs defaultValue="date" className="flex min-w-0 flex-col gap-4">
+      <TabsList>
+        <TabsTrigger value="date">By date</TabsTrigger>
+        <TabsTrigger value="cycles">Billing cycles</TabsTrigger>
+      </TabsList>
+      <TabsContent value="date" className="min-w-0">
+        <BillDueGenerator {...props} />
+      </TabsContent>
+      <TabsContent value="cycles" className="min-w-0">
+        <RequirePermissions
+          permissions={documentPermission(props.scope.schoolId, SCHOOL_ACTIONS.READ_BILLING_RUNS)}
+          fallback={<DocumentNotice>You do not have access to billing runs.</DocumentNotice>}
+        >
+          <BillGenerator {...props} />
+        </RequirePermissions>
+      </TabsContent>
+    </Tabs>
   );
 }
 
@@ -218,7 +248,7 @@ function useFinanceGeneration({
   return form;
 }
 
-type GeneratorProps = {
+export type GeneratorProps = {
   scope: DocumentScope;
   templateId: string;
   onHistory: () => void;
@@ -595,89 +625,33 @@ function FinancePreviewAndActions({
       })}
     >
       {({ values, submitting, canSubmit }) => {
-        const fingerprint = source
-          ? generationFingerprint(source, templateId)
-          : "";
+        const fingerprint = source ? generationFingerprint(source, templateId) : "";
         const previewCurrent = values.preview?.fingerprint === fingerprint;
         const generatedCurrent = values.generated?.fingerprint === fingerprint;
         return (
-          <section className="flex min-w-0 flex-col gap-3">
-            {previewCurrent
-              ? values.preview?.warnings.map((warning) => (
-                  <DocumentNotice key={warning}>{warning}</DocumentNotice>
-                ))
-              : null}
-            {values.error ? (
-              <DocumentNotice error>{values.error}</DocumentNotice>
-            ) : null}
-            <div className="flex flex-wrap gap-2">
-              <CreatePdfButton
-                disabled={!source || submitting || !canSubmit}
-                running={submitting && values.mode === "generate"}
-                onCreate={() => {
-                  form.setFieldValue("mode", "generate");
-                  void form.handleSubmit();
-                }}
-              />
-              <DocumentButton
-                variant="outline"
-                disabled={!source || submitting || !canSubmit}
-                onClick={() => {
-                  form.setFieldValue("mode", "preview");
-                  void form.handleSubmit();
-                }}
-              >
-                <Eye />
-                {submitting && values.mode === "preview"
-                  ? "Preparing preview…"
-                  : "Preview document"}
-              </DocumentButton>
-            </div>
-            {previewCurrent && values.preview ? (
-              <p className="text-xs text-muted-foreground">
-                The PDF will contain{" "}
-                {values.preview.recipientCount.toLocaleString("en-IN")}{" "}
-                {documentType === "bill" ? "bills" : "receipts"}
-                {values.preview.sampleCount < values.preview.recipientCount
-                  ? `; the preview shows the first ${values.preview.sampleCount}`
-                  : ""}
-                .
-              </p>
-            ) : null}
-            <DocumentPreview
-              html={previewCurrent ? values.preview?.html : undefined}
-            />
-            {generatedCurrent && values.generated ? (
-              <DocumentJobTracker
-                key={values.generated.job.id}
-                schoolId={scope.schoolId}
-                job={values.generated.job}
-                ready={(artifactId) => (
-                  <RequirePermissions
-                    permissions={documentPermission(
-                      scope.schoolId,
-                      SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS,
-                    )}
-                    fallback={
-                      <DocumentNotice>
-                        The PDF was created, but your account cannot download
-                        finance documents.
-                      </DocumentNotice>
-                    }
-                  >
-                    <DocumentDownload
-                      schoolId={scope.schoolId}
-                      artifactId={artifactId}
-                      documentType={documentType}
-                    />
-                    <DocumentButton variant="ghost" onClick={onHistory}>
-                      View document history <ArrowRight />
-                    </DocumentButton>
-                  </RequirePermissions>
-                )}
-              />
-            ) : null}
-          </section>
+          <FinancePreviewPanel
+            state={{
+              ready: Boolean(source),
+              preview: previewCurrent ? values.preview : null,
+              job: generatedCurrent ? (values.generated?.job ?? null) : null,
+              error: values.error,
+              submitting,
+              mode: values.mode,
+              canSubmit,
+            }}
+            documentType={documentType}
+            documentsLabel={documentType === "bill" ? "bills" : "receipts"}
+            scope={scope}
+            onCreate={() => {
+              form.setFieldValue("mode", "generate");
+              void form.handleSubmit();
+            }}
+            onPreview={() => {
+              form.setFieldValue("mode", "preview");
+              void form.handleSubmit();
+            }}
+            onHistory={onHistory}
+          />
         );
       }}
     </form.Subscribe>

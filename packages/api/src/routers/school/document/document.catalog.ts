@@ -1,8 +1,9 @@
 export {
+  DEFAULT_DOCUMENT_TEMPLATE_SLUGS,
   DOCUMENT_MARKETPLACE,
   NOTICE_DEFAULT_TEMPLATE_SLUG,
 } from "./document.catalog.marketplace";
-import type { DocumentType } from "./document.dto";
+import type { TemplateDocumentType as DocumentType } from "./document.dto";
 import type { QuestionPaperContext } from "../question-paper/question-paper.context";
 import { QUESTION_PAPER_SLOT } from "../question-paper/question-paper.slot";
 import { withReportModeLayout } from "./document.report-modes";
@@ -109,10 +110,45 @@ const SAMPLE_DOCUMENT_SOURCE = {
   generatedAt: "2026-10-15T09:00:00.000Z",
   admission: { name: "Aarav Sharma", number: "2026-0142", fatherName: "Raj Sharma", motherName: "Meera Sharma", classLabel: "Grade 8", sectionLabel: "A", rollNumber: "12" },
   currency: { code: "INR", exponent: 2 },
-  bill: { id: "sample-bill", number: "B/2026/000001", issueDate: "2026-10-01", periodKey: "2026-10", total: "2500.00", totalMinor: "250000" },
-  lines: [{ slug: "tuition", name: "Tuition fee", amount: "2500.00", amountMinor: "250000", pricingSource: "session" }],
+  bill: {
+    id: "sample-bill",
+    number: "B/2026/000001",
+    issueDate: "2026-10-01",
+    periodKey: "monthly:2026-10",
+    period: {
+      cadence: "monthly",
+      start: { iso: "2026-10-01", day: "01", month: "10", year: "2026", monthName: "October" },
+      end: { iso: "2026-10-31", day: "31", month: "10", year: "2026", monthName: "October" },
+    },
+    total: "2500.00",
+    totalMinor: "250000",
+  },
+  /** Null on an ordinary bill; see `SAMPLE_BILL_DUE_CONTEXT` for a Bill due. */
+  billDue: null,
+  lines: [
+    {
+      kind: "bill_line",
+      slug: "tuition",
+      name: "Tuition fee",
+      note: null,
+      billNumber: "B/2026/000001",
+      reference: "B/2026/000001",
+      issueDate: { iso: "2026-10-01", day: "01", month: "10", year: "2026", monthName: "October" },
+      amount: "2500.00",
+      amountMinor: "250000",
+      pricingSource: "session",
+    },
+  ],
+  credits: [] as object[],
   balanceBefore: "500.00",
   balanceAfter: "3000.00",
+  paidThisPeriod: null,
+  discountThisPeriod: null,
+  waiverThisPeriod: null,
+  writeOffThisPeriod: null,
+  creditCorrectionThisPeriod: null,
+  otherCreditsThisPeriod: null,
+  refundThisPeriod: null,
   payment: { id: "sample-payment", receiptNumber: "R/2026/000001", receivedAt: "2026-10-15T09:00:00.000Z", amount: "1500.00", amountMinor: "150000", method: "cash", externalReference: null, payerName: "Raj Sharma", note: null },
   transaction: { kind: "payment", isRefund: false, id: "sample-payment", documentNumber: "R/2026/000001" },
   previousBalance: "3000.00",
@@ -122,6 +158,50 @@ const SAMPLE_DOCUMENT_SOURCE = {
 };
 /** The sample carries the same derived report mode columns as live contexts. */
 export const SAMPLE_DOCUMENT_CONTEXT = withReportModeLayout(SAMPLE_DOCUMENT_SOURCE);
+
+const sampleDate = (iso: string, monthName: string) => ({ iso, day: iso.slice(8, 10), month: iso.slice(5, 7), year: iso.slice(0, 4), monthName });
+
+/**
+ * A synthetic Bill due (docs/document-system.md "Bill due"), printed with
+ * the bill template: 800.00 carried in, a 1 November bill of 1,300.00, a
+ * 200.00 discount and an 800.00 payment on 10 November, printed through
+ * 24 November, so 1,100.00 is due.
+ */
+export const SAMPLE_BILL_DUE_CONTEXT = {
+  ...SAMPLE_DOCUMENT_CONTEXT,
+  bill: {
+    id: null,
+    number: null,
+    issueDate: "2026-11-24",
+    periodKey: "monthly:2026-11",
+    period: { cadence: "monthly", start: sampleDate("2026-11-01", "November"), end: sampleDate("2026-11-30", "November") },
+    total: "1300.00",
+    totalMinor: "130000",
+  },
+  billDue: {
+    date: sampleDate("2026-11-24", "November"),
+    period: { cadence: "monthly", start: sampleDate("2026-11-01", "November"), end: sampleDate("2026-11-30", "November") },
+  },
+  lines: [
+    { kind: "bill_line", slug: "tuition", name: "Tuition fee", note: null, billNumber: "BILL/2026-27/000112", reference: "BILL/2026-27/000112", issueDate: sampleDate("2026-11-01", "November"), amount: "1000.00", amountMinor: "100000", pricingSource: "session" },
+    { kind: "bill_line", slug: "transport", name: "Transport fee", note: null, billNumber: "BILL/2026-27/000112", reference: "BILL/2026-27/000112", issueDate: sampleDate("2026-11-01", "November"), amount: "300.00", amountMinor: "30000", pricingSource: "class" },
+  ],
+  credits: [
+    { kind: "discount", label: "Discount", date: sampleDate("2026-11-10", "November"), reference: null, note: "Sibling discount", amount: "200.00", amountMinor: "20000" },
+    { kind: "payment", label: "Payment", date: sampleDate("2026-11-10", "November"), reference: "RCP/2026-27/000087", note: null, amount: "800.00", amountMinor: "80000" },
+  ],
+  balanceBefore: "800.00",
+  balanceBeforeMinor: "80000",
+  balanceAfter: "1100.00",
+  balanceAfterMinor: "110000",
+  paidThisPeriod: "800.00",
+  discountThisPeriod: "200.00",
+  waiverThisPeriod: null,
+  writeOffThisPeriod: null,
+  creditCorrectionThisPeriod: null,
+  otherCreditsThisPeriod: null,
+  refundThisPeriod: null,
+};
 
 /**
  * Synthetic notice data. A notice context holds school, session and notice
@@ -194,7 +274,9 @@ Exam-wide assessment: attendanceEnabled is the session configuration flag; atten
 Report printing flags: reportSections.{includeModeMarks,includeAttendance,includeCoScholastics,includeGradingScale}. Templates must honor these independent print choices; they do not change configuration, grading, or approval facts. Subjects may retain legacy per-subject attendance/coScholastics for older templates; these are not the exam-wide values.
 Admit cards: exam, timetable[] with date (ISO),displayDate,dayOfWeek,startTime,endTime (HH:mm),displayStartTime,displayEndTime,subjectSlug,subjectName,modeSlug,modeName; may be empty.
 Timetables: columns[] with classId,label; rows[] with date,displayDate,dayOfWeek,startTime,endTime,displayStartTime,displayEndTime. rows[].entries[] follows column order, each with classId,subjects[] of subjectSlug,subjectName,modeSlug,modeName. Unscheduled cells have an empty subjects array. For v1 template compatibility, rows[].cells[classId] is a resolved single subject, an array preserving all subjects/modes, or null. Calendar formatting never shifts dates through the host timezone.
-Finance documents: admission.{name,number,fatherName,motherName,classLabel,sectionLabel,rollNumber}; currency.{code,exponent}. Bills expose bill.{id,number,issueDate,periodKey,total,totalMinor}, lines[].{slug,name,amount,amountMinor,pricingSource}, balanceBefore and balanceAfter. Receipts expose transaction.{kind,isRefund,id,documentNumber}, payment.{id,receiptNumber,receivedAt,amount,amountMinor,method,externalReference,payerName,note}, previousBalance and remainingBalance. Payments are admission-account credits and receipts never expose bill allocations. Refund contexts set transaction.isRefund and the payment fields describe returned funds. Statements expose statement.{periodStartDate,throughDate,asOfSequence,openingBalance,openingBalanceMinor,closingBalance,closingBalanceMinor} and period entries[].{sequence,effectiveAt,reference,description,debit,credit,balance}. Bill and receipt balances are pinned to the source fact's effective-date ledger position; statement balances are pinned to the reviewed cutoff. They never use current projections.
+Finance documents: admission.{name,number,fatherName,motherName,classLabel,sectionLabel,rollNumber}; currency.{code,exponent}. Dates written as "date parts" are objects {iso,day,month,year,monthName} (day and month two digits, year four, monthName in English), never preformatted: print them as you like, for example {{billDue.date.day}}/{{billDue.date.month}}/{{billDue.date.year}}. A billing period is {cadence,start,end}: cadence is monthly, quarterly or yearly, start and end are date parts of its first and last day.
+Bills: one template prints ordinary bills and bills due. bill.{id,number,issueDate,periodKey,period,total,totalMinor}: issueDate is ISO; period is the billing period the bill's run recorded, or null when it has none (manual bills, migrated bills whose cadence is unknown); never print periodKey, a raw key such as monthly:2026-11. billDue is null on an ordinary bill. lines[].{kind,slug,name,note,billNumber,reference,issueDate,amount,amountMinor,pricingSource}: kind is bill_line, debit_correction, refund or reversal; issueDate is date parts; bill.total is the sum of lines. credits[].{kind,label,date,reference,note,amount,amountMinor}: kind is payment, discount, waiver, write_off, credit_correction or reversal, label is the name to print (Payment, Discount, Waiver, Write-off, Credit correction, or "<what> reversal"), date is date parts; empty on an ordinary bill. balanceBefore is the balance before the bill (null when zero, so {{#if balanceBefore}} hides it); balanceAfter is the amount due and is always present, even 0.00. paidThisPeriod, discountThisPeriod, waiverThisPeriod, writeOffThisPeriod, creditCorrectionThisPeriod and refundThisPeriod total the period's credits and refunds by kind; otherCreditsThisPeriod totals every credit that is neither a payment nor a discount (so a design printing only paid and discount totals still adds up); each is null when zero and always null on an ordinary bill.
+Bills due (a bill for one student as of a chosen date, printed with the bill template): bill.number and bill.id are null (print a number such as DUE/{{billDue.date.day}}/{{billDue.date.month}}/{{billDue.date.year}} instead, for example {{#if bill.number}}{{bill.number}}{{else}}DUE/...{{/if}}); bill.issueDate is the chosen date (ISO); billDue.{date,period}: date is the chosen date (date parts) and period the billing period containing it; bill.period is that period too. lines[] holds every line of every bill effective in the period, one row per bill line (each with its billNumber), plus a row for each debit correction (with its note), refund and reversal of an earlier credit; credits[] one row per payment, discount, waiver, write-off, credit correction or reversal of an earlier charge in the period. A reversal and the entry it reverses both disappear when both are in the period. balanceBefore is the balance at the period start and balanceAfter the amount due at the end of the chosen date: balanceBefore + bill.total - credits = balanceAfter. Show "Statement through" rows inside {{#if billDue}}. Receipts expose transaction.{kind,isRefund,id,documentNumber}, payment.{id,receiptNumber,receivedAt,amount,amountMinor,method,externalReference,payerName,note}, previousBalance and remainingBalance. Payments are admission-account credits and receipts never expose bill allocations. Refund contexts set transaction.isRefund and the payment fields describe returned funds. Statements expose statement.{periodStartDate,throughDate,asOfSequence,openingBalance,openingBalanceMinor,closingBalance,closingBalanceMinor} and period entries[].{sequence,effectiveAt,reference,description,debit,credit,balance}. Bill and receipt balances are pinned to the source fact's effective-date ledger position; statement balances are pinned to the reviewed cutoff. They never use current projections.
 Notices: only school, session, generatedAt, print.size and notice.{title,issuedOn,issuedOnDisplay,paragraphs[]} exist; there is no student, exam or finance data. issuedOn is an ISO date (the publication date; today for a draft) and issuedOnDisplay the same date in words. paragraphs[] holds the plain text of the notice split at blank lines, each a string that may contain line breaks: render each with {{this}} inside an element styled white-space:pre-wrap. print.size is the paper each notice chooses: "full" (portrait A4 pages, 16mm margin) or "half" (210mm x 148.5mm pages, 10mm margin, printed two copies per A4 sheet). One Notice design serves both sizes, so adapt to it with a class, for example <div class="notice notice--{{print.size}}"> with a .notice--half rule for a compact letterhead and smaller type. Notices flow over as many pages as they need: do not set a fixed height, overflow:hidden or outer page padding.
 Question papers: school.{name,location,registrationNo,logoUrl}, session.{startYear,endYear}, generatedAt, exam.{name,slug,order}, questionPaper.{className,subjectName,subjectSlug,modeName,modeSlug,maxMarks,totalMarks,timeAllowed,language,script,direction,versionNo,bodyHtml}. maxMarks may be null; totalMarks, timeAllowed, language and script are always null (the paper is free HTML and nothing is read out of it) and direction is always ltr. The questions are NOT part of the template: put {{{questionPaper.bodyHtml}}} exactly once, in element content, where the questions belong (triple braces; it is a fixed placeholder that the system replaces with the printed questions after sanitising). Question papers flow over as many full A4 pages as needed: do not set a fixed height, overflow:hidden or outer page padding. Put the school heading in normal flow above the body and a footer in an element with position:fixed; bottom:0 (left:0; right:0; at most 12mm tall) so it repeats on every page; never use a negative bottom, which drops the footer from the first page. The system sets @page to A4 with margins 14mm 14mm 10mm and keeps a 14mm band free at the bottom of every page for the footer. The dir and lang attributes are not kept by the sanitiser: set direction with style="direction:{{questionPaper.direction}}" on the root element. Fonts: the question text carries its own script fonts; set font-family in the template only for the header and footer (Noto Sans and Noto Sans Devanagari/Bengali/Tamil/Telugu/Kannada/Malayalam/Gujarati/Gurmukhi/Oriya are installed).
 Use standard Handlebars each/if/unless/with/lookup helpers and the finite-numeric add helper (for example add columns.length 2). Images use provided data URIs. No scripts, forms, links, external URLs/fonts or network assets. Self-contained CSS is allowed. ID cards fit 86mm by 54mm; timetables use landscape A4; report cards use full portrait A4. Admit cards, bills, receipts, and statements use the selected template revision's explicit full-A4 or half-A4 footprint; half-A4 revisions are imposed two per portrait A4 sheet.`;

@@ -1,5 +1,5 @@
 import { db } from '@campuspilot/db';
-import { artifactTable } from '@campuspilot/db/schema/artifact';
+import { artifactTable, schoolDocumentTemplateTable } from '@campuspilot/db/schema/artifact';
 import { documentGenerationJobTable } from '@campuspilot/db/schema/document-generation-job';
 import { eq } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
@@ -60,4 +60,18 @@ export async function generateDocumentNow(client: ReturnType<typeof createTestCl
   const job = await readDocumentJob(jobId);
   if (outcome.status !== 'succeeded') throw Object.assign(new Error(job.errorMessage ?? 'The job did not succeed.'), { code: job.errorCode });
   return { artifact: await readJobArtifact(job.artifactId), warnings: job.warnings, jobId };
+}
+
+/**
+ * The design selected for each document type of a school, by marketplace
+ * slug (docs/document-system.md "Default templates"); an empty object for a
+ * school with no selection.
+ */
+export async function selectedTemplateSlugs(schoolId: string): Promise<Record<string, string | null>> {
+  const rows = await db
+    .select({ documentType: schoolDocumentTemplateTable.documentType, slug: artifactTable.marketplaceSlug, pageSize: artifactTable.pageSize })
+    .from(schoolDocumentTemplateTable)
+    .innerJoin(artifactTable, eq(artifactTable.id, schoolDocumentTemplateTable.artifactId))
+    .where(eq(schoolDocumentTemplateTable.schoolId, schoolId));
+  return Object.fromEntries(rows.map((row) => [row.documentType, row.slug]));
 }

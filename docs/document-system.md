@@ -90,7 +90,16 @@ only Create document and Document history.
    not cancel the job; History lists it while it runs and, with its message,
    if it fails.
 
-The bill dialog searches and pages posted billing runs, displays the run period,
+The Bills dialog has two tabs. **By date** (the default) creates a Bill due
+(see "Bill due" below): a bill date (today by default, never after today in the
+browser, inside the session), who it is for (the whole session, one class, or
+chosen students of a class, with the same class select and student picker as the
+academic generators), then the shared preview and create panel
+(`FinancePreviewPanel`) with the job's progress. Creating always previews first
+and sends the preview's review hash. **Billing cycles** is the run picker below,
+unchanged; it is the tab that needs `READ_BILLING_RUNS`.
+
+The bill dialog's Billing cycles tab searches and pages posted billing runs, displays the run period,
 billing date, bill count, amount, and state, and rejects empty or non-posted runs.
 Fully reversed runs remain selectable because bill documents reproduce immutable
 original postings; the reversal state remains visible. A run source always
@@ -102,6 +111,11 @@ global receipt source carries an explicit payment-only eligibility policy; previ
 and generation both recheck in the database transaction that every selected
 payment still has no reversal, so a stale browser selection cannot create a
 valid-looking receipt after reversal.
+
+The admission ledger's actions read **Payment** (the Record payment dialog,
+renamed on this page only) and **Bill** (a download icon): a small dialog with
+the date (today by default) that creates the Bill due for that admission and
+offers the download when it is ready.
 
 Removing Billing's duplicate Documents section intentionally removes its old bulk
 statement picker. Statements are account-cutoff documents and remain available
@@ -248,6 +262,16 @@ like the question paper studio (`TemplateEditor` in `template-workspace.tsx`):
   Notice design the strip offers *Preview as* (a full-A4 or half-A4 notice; a Notice
   design has no footprint, each notice chooses its size, and the choice is never
   saved; the marketplace offers the same choice for its Notice designs).
+
+**Saving a template.** *Save* opens one dialog that asks for the name
+and, for admit cards, bills, receipts and statements, the paper footprint
+before the revision is stored (the one Save dialog, `SaveAction` in `template-workspace.tsx`). When the HTML about to be
+saved differs from the loaded revision (a pasted design, an assistant draft, a
+restored revision, edits) the footprint starts **unselected** and must be
+chosen; unchanged HTML keeps the editor's footprint (`initialSaveFootprint`,
+`template-save-model.ts`). This replaced a Save that silently kept the loaded
+design's name and footprint: a school that chose a half-A4 marketplace bill and
+pasted its own full design over it saved the paste as half A4 (or the reverse).
 
 Draft name and source remain local until Save. Typing re-renders the preview after a
 900 ms pause (each preview is one Gotenberg conversion), and the strip offers *Refresh
@@ -590,6 +614,9 @@ callbacks and must not call APIs.
 | `PreviewDialogContent` (components) | API-free preview dialog shell: `tall` (the chat's draft and version previews) or `full` (the marketplace) |
 | `ScrollableTabsList` (components) | A tab row that scrolls sideways instead of squeezing (marketplace, examination workspace) |
 | `DocumentKindCards` | API-free accessible visual card group for the Documents workspace |
+| `BillDueGenerator`, `BillDueDialog` (`bill-due.tsx`) | The Bills dialog's By date tab and the admission ledger's Bill dialog |
+| `FinancePreviewPanel` (`finance-preview-panel.tsx`) | The finance generators' shared preview and create panel |
+| `initialSaveFootprint` (`template-save-model.ts`) | The footprint the Save dialog starts with (unselected when the HTML differs from the loaded revision) |
 | `DocumentPreview` | Restrictive empty-sandbox iframe for already sanitized HTML |
 
 All user input and submission state uses TanStack Form with Zod validators. Do not
@@ -680,8 +707,13 @@ the object and row; storage failure leaves a visible record that can be retried.
 ## Document source rules
 
 The supported `DocumentType` values are `report_card`, `id_card`, `admit_card`,
-`timetable`, `bill`, `receipt`, `statement`, `notice`, and `question_paper`. The
-first seven have source DTOs in a strict discriminated union. `notice` is a
+`timetable`, `bill`, `receipt`, `statement`, `notice`, `question_paper` and
+`bill_due`. All but `notice` and `question_paper` have source DTOs in a strict
+discriminated union. `bill_due` is printed with another type's template
+(`BORROWED_TEMPLATE_DOCUMENT_TYPES`, `DOCUMENT_TEMPLATE_TYPE`: the school's
+selected `bill` revision); it has its own history, jobs and permissions but no
+template, marketplace design or Settings page, and every template procedure
+refuses it (`templateDocumentTypeSchema`). `notice` is a
 **template-only** type (`TEMPLATE_ONLY_DOCUMENT_TYPES`): it has a school template,
 marketplace design and settings page, but no generator source, no card in the
 Documents workspace and no PDF artifacts or history; notices are written, rendered
@@ -711,6 +743,10 @@ fields to a common base merely because two types happen to use the same value to
   configuration, validates the session/future boundaries, and records one
   high-water sequence per admission/currency. Generation must present the hash of
   the reviewed cutoff so intervening postings cannot silently change the PDF.
+
+- Bills due accept a session, a local `throughDate` and their recipients
+  (`{ kind: "session" }`, `{ kind: "class", classId }` or
+  `{ kind: "admissions", admissionIds }`, at most 1,500). See "Bill due".
 
 Finance rendering must not join current admission, enrollment, or classroom
 records. Identity comes from the posting-time ledger/payment/bill snapshot bounded
@@ -884,6 +920,38 @@ Important shapes and semantics:
   PDF (see "Images as conversion assets"). Templates must guard them with
   `{{#if ...}}` and must never build or fetch a URL from them.
 
+### Bill and Bill due context
+
+One bill template prints ordinary bills and Bills due, so both have one shape
+(`DOCUMENT_CONTEXT_HELP` is the executable reference):
+
+- Dates are **parts**, never preformatted: `{ iso, day, month, year, monthName }`
+  (`day` and `month` two digits). A template writes the format it wants, for
+  example `DUE/{{billDue.date.day}}/{{billDue.date.month}}/{{billDue.date.year}}`.
+  There is no date helper.
+- `bill.period` is `{ cadence, start, end }` (first and last day as parts) from
+  the period the bill's run recorded; null for a bill without one (manual bills,
+  migrated bills whose cadence is unknown). A cadence is never read from a period
+  key's shape, and templates no longer print raw keys such as `monthly:2026-11`.
+- `billDue` is null on an ordinary bill and `{ date, period }` on a Bill due.
+- `lines[]` items carry `kind` (`bill_line`, `debit_correction`, `refund`,
+  `reversal`), `name`, `note`, `billNumber`, `reference`, `issueDate` (parts) and
+  amounts. `credits[]` items carry `kind`, the server's `label` (Payment,
+  Discount, Waiver, Write-off, Credit correction, "<what> reversal"), `date`
+  (parts), `reference`, `note` and amounts; empty on an ordinary bill.
+- **Zero hiding**: `balanceBefore` and every period total (`paidThisPeriod`,
+  `discountThisPeriod`, `waiverThisPeriod`, `writeOffThisPeriod`,
+  `creditCorrectionThisPeriod`, `otherCreditsThisPeriod`, `refundThisPeriod`) are null when zero, so
+  `{{#if}}` hides their rows; `balanceAfter` (the amount due) is always a value,
+  even `0.00`. The totals are always null on an ordinary bill.
+- The legacy marketplace bill designs are adapted (`adaptLegacyBillRows`,
+  `adaptLegacyCreditRows`): Frequency prints `bill.period.cadence`, Period the
+  period's days, "Statement Through" and the `DUE/<date>` number only on a Bill
+  due, and one row per `credits[]` entry replaces the payment and discount totals.
+  Renames stay whole-path only (the `bill.periodKeyKey` class of bug).
+- `SAMPLE_BILL_DUE_CONTEXT` is the synthetic Bill due (the worked example below);
+  the editor's preview keeps showing an ordinary bill.
+
 ### Add a marketplace design
 
 1. Add an explicit per-type entry in `document.catalog.marketplace.ts`.
@@ -932,6 +1000,125 @@ Adding a document type is cross-cutting. At minimum update:
 
 Do not make a type available in the card selector until its Settings route,
 marketplace designs, backend context, and permissions are complete.
+
+## Default templates
+
+Every school created from 2026-11-24 on starts with a template selected for
+every type it can generate (`DEFAULT_DOCUMENT_TEMPLATE_SLUGS`): the
+**CampusPilot Standard** set (`document.catalog.standard.ts`, slugs
+`standard-report-card`, `standard-id-card`, `standard-admit-card`,
+`standard-timetable`, `standard-bill`, `standard-receipt`,
+`standard-question-paper`) and, for statements, the existing
+`statement-default-full`. The Standard set is a frozen copy of the templates a
+customer school had selected in production on that date; later edits by that
+school never change it. Admit card, bill and receipt are half A4, the rest full
+A4. Changes in the copy, recorded at the top of the file: the bill is half A4
+and carries the bill contract and Bill due rows; the timetable loses the school's
+own lines (its state affiliation, arrival and departure times, and a dated fee
+reminder) and its logos get alt text; the report card reads its mode-mark print
+flag through `@root` inside the subject loop and loses a script (scripts are
+sanitised away and never ran). The set is also listed in the marketplace.
+
+- **Who gets them**: self-service creation (`createOwnSchool`), platform
+  administrators (`systemAdmin.addSchool`) and schools set up from an onboarding
+  submission (the `school` step of `runSchoolSetupStep`), through
+  `selectDefaultDocumentTemplates` in the creating transaction. Demo schools
+  select the same slugs (plus `notice-default`) through their seed. Personal
+  spaces get none. Existing schools are untouched.
+- **How**: exactly a marketplace import per type (a new school-owned object
+  under `schools/{schoolId}/document-templates/`, a `template` artifact with the
+  design's name, footprint and slug, created by whoever created the school, and
+  the selection pointer). The objects are written inside the transaction and
+  `withDefaultDocumentTemplates` deletes them when it fails (S3 and PostgreSQL
+  share no transaction).
+- **Deleting a school**: `systemAdmin.deleteSchool` removes the school's
+  template selections and template revisions with it (their objects are deleted
+  after the transaction commits), so a newly created school stays deletable. Its
+  other refusals are unchanged: a school with generated documents or any other
+  data still cannot be deleted.
+
+## Bill due
+
+A **Bill due** (`bill_due`) is a bill for one admission as of a chosen date,
+printed with the school's selected bill template revision. It is its own type in
+history, generation jobs and permissions, with exactly the permissions and
+feature gate of account statements (the finance generate and read actions,
+`studentManagement`), and is generated through the job pipeline ("Generation
+jobs"). No WhatsApp or Cadet Portal delivery.
+
+- **Source**: `sessionId`, `throughDate` (a local date) and `recipients`: the
+  whole session or one class (every student enrolled in it, registered or not)
+  or chosen admissions of the school (up to 1,500). The API does not refuse a
+  future date; the date must fall within the session. The client offers dates up
+  to today and defaults to today.
+- **Period**: the billing period containing `throughDate`, from the session's
+  `recurring` cadence and `cycleStartMonth` (`calculateBillingPeriod`; a monthly
+  school printing on 24 November gets 1 to 30 November, an April-anchored
+  quarterly one October to December). Facts count by ledger effective date, up to
+  the end of `throughDate` in the session's time zone (the statement rule).
+- **Account**: the whole admission account in the session's currency (every
+  session), as the ledger page and ordinary bills' balances read it.
+  `balanceBefore` is the balance at the period start, `balanceAfter` the amount
+  due at the end of the date, and `balanceBefore + bill.total - credits =
+  balanceAfter` always holds (checked when building).
+- **Rows**: `lines[]` holds every line of every bill effective in the period
+  (billing-run and manual alike, one row per bill line, no merging), plus a row
+  per debit correction ("Debit correction", with its note), refund ("Refund") and
+  reversal of a credit from before the period. `credits[]` holds one row per
+  payment, discount, waiver, write-off, credit correction, and reversal of a debit
+  from before the period. A reversal and the fact it reverses both disappear when
+  both are in the period. `bill.total` is the sum of `lines[]`; `bill.number` and
+  `bill.id` are null, `bill.issueDate` is the chosen date.
+- **Everyone in scope is printed**, including a student who owes nothing or has
+  no ledger fact through the date (zeros and nulls as the facts give).
+- **Identity** is its own fact (`PrintedIdentity.source`): the posting-time
+  snapshot of the account's newest fact through the date that carries one; when
+  there is none (no fact yet, or facts from before snapshots existed), the
+  admission's current name, number and parents and its current enrollment's
+  class, section and roll number in the session. The session years are the
+  requested session's. Decision: an account printed from current records takes
+  that identity when the job prepares its documents, not at preview. Its amounts
+  are pinned by the review (no ledger fact through the date, read up to sequence
+  0), but the identity is not part of the review hash, so a name or class
+  corrected between preview and generation prints corrected; a posting-time
+  snapshot never changes.
+- **Order**: by the snapshot's class, section, roll number, name and admission
+  number.
+- **Review**: like statements, each account's high-water ledger sequence through
+  the date (`null` for an account with no fact: no cutoff; a job pins it as `0`,
+  so it reads nothing posted since) is hashed (with the session, currency, time zone, date, period key and
+  recipients); generation must present the preview's hash, and the job reads each
+  account only up to its pinned sequence. The screens therefore always preview
+  before creating.
+- **Bulk reads**: per chunk of accounts, one grouped query for the opening
+  balance, amount due and high water, one for the period's facts only, and one
+  for the newest identity snapshots (`DISTINCT ON`), with a job's pinned
+  sequences applied in SQL; then one query per kind of document behind the
+  printed facts. Never queries per admission, never the account's whole history.
+- **Reversals** never take effect before what they reverse (refused when posted,
+  naming the target's time in the session's time zone;
+  `packages/api/src/routers/school/billing/README.md`), so a reversal is never in
+  an earlier period than its target. The reversal dialogs choose minutes, start
+  at the later of now and the target's minute (a run's latest bill,
+  `latestBillEffectiveAt`), refuse an earlier minute, and send the target's exact
+  instant for its own minute (`reversalTimeChoice`), so a fact posted with
+  seconds can be reversed in the same minute.
+- **Partial designs**: `otherCreditsThisPeriod` totals every credit row that is
+  neither a payment nor a discount (waivers, write-offs, credit corrections,
+  reversals of earlier charges; null when zero), so a design that prints only the
+  paid and discount totals can add up; the default and marketplace bill designs
+  list `credits[]` rows instead.
+- **Worked example** (tested): 800 carried in from October, a 1 November bill of
+  1,300, a 200 discount and an 800 payment on 10 November, printed on 24 November:
+  `balanceBefore` 800.00, `bill.total` 1,300.00, credits Discount 200.00 and
+  Payment 800.00, `balanceAfter` 1,100.00.
+- **Templates**: the Standard bill and the adapted marketplace bills print
+  `DUE/<date>` without a bill number, "Statement Through" only on a Bill due, the
+  credit rows and the period. Older custom templates keep working: a migrated
+  production custom bill template (a test fixture, `legacy-custom-bill.hbs`)
+  prints a Bill due from `lines`,
+  `bill.total`, `balanceBefore`, `paidThisPeriod`, `discountThisPeriod` and
+  `balanceAfter`.
 
 ## Notices
 
@@ -1065,7 +1252,8 @@ by the template. What this document system owns for the type:
   `{{#if}}` blocks print nothing). `maxMarks` is the exam plan's maximum for the mode (null only
   for samples). No student, staff, finance or result data. `SAMPLE_QUESTION_PAPER_CONTEXT`
   (`sampleDocumentContext('question_paper')`) is its synthetic twin.
-- **Designs.** `question-paper-classic` and `question-paper-compact` (slugs use
+- **Designs.** `question-paper-classic`, `question-paper-compact` and the default
+  `standard-question-paper` (a heading without a footer; slugs use
   hyphens, unlike the type). The catalog test asserts the slot appears exactly once
   in every `question_paper` design.
 - **Generic history.** Question paper PDFs are not part of Document history: the
@@ -1109,7 +1297,7 @@ by the template. What this document system owns for the type:
   (`question-paper.math.ts`: HTML output only, `trust: false`, no macros, 2 s wall
   budget; the stylesheet with `data:font/woff2` fonts is built once per process from
   the pinned `katex` package and added only to papers that contain math).
-- **Demo schools.** The demo seed selects the `question-paper-classic` design for a
+- **Demo schools.** The demo seed selects the `standard-question-paper` design (the default, "Default templates") for a
   demo school (`seedTemplates`) although the demo has the `assistant` feature off:
   the procedures refuse the type without the feature, so the seed saves the
   catalogue design with the same `saveTemplate` function after the same
@@ -1268,8 +1456,8 @@ generate action, the source's read actions and the type's feature.
 
 **Known cost.** A statement export still reads each admission's ledger with
 several queries per admission, which is slow for a whole school at once (the
-UI offers single-admission statements only). Bulk reads are designed in phase 3
-(bill due); until then this is accepted.
+UI offers single-admission statements only). Bills due read set-based ("Bill
+due"); moving statements to the same reads is not done yet.
 
 **Data.** `document_generation_job` (migration `0085`) is school-owned and is
 deleted by `purge_demo_school`; its temporary objects are under the school's

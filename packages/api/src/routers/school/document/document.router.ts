@@ -327,7 +327,8 @@ async function previewSelection(
 ) {
   const template = await getTemplate(
     db,
-    { schoolId: input.schoolId, documentType: input.source.documentType },
+    // A Bill due is printed with the school's bill template.
+    { schoolId: input.schoolId, documentType: dto.templateTypeOf(input.source.documentType) },
     input.templateRevisionId,
   );
   const data = await resolveDocumentSource(db, input.schoolId, input.source, { images: "reference" });
@@ -992,10 +993,10 @@ export const schoolDocumentRouter = {
           f.documentType
             ? eq(artifactTable.documentType, f.documentType)
             : f.documentDomain === "finance"
-              ? inArray(artifactTable.documentType, ["bill", "receipt", "statement"])
+              ? inArray(artifactTable.documentType, [...dto.FINANCE_DOCUMENT_TYPE_LIST])
               : f.documentDomain === "all"
                 ? undefined
-                : notInArray(artifactTable.documentType, ["bill", "receipt", "statement"]),
+                : notInArray(artifactTable.documentType, [...dto.FINANCE_DOCUMENT_TYPE_LIST]),
           f.sessionId ? eq(artifactTable.sessionId, f.sessionId) : undefined,
           f.classId ? eq(artifactTable.classId, f.classId) : undefined,
           f.examSlug ? eq(artifactTable.examSlug, f.examSlug) : undefined,

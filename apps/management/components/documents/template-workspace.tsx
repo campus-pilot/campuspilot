@@ -18,7 +18,7 @@ import {
   type TemplateDraft,
 } from '@campuspilot/components/documents/template-draft-model';
 import type { TemplateDraftCardStatus } from '@campuspilot/components/documents/template-draft-card';
-import { DocumentButton, DocumentErrors, DocumentField } from '@campuspilot/components/documents/document-controls';
+import { DocumentButton, DocumentErrors, DocumentField, DocumentSelect } from '@campuspilot/components/documents/document-controls';
 import { OptionSelect } from '@campuspilot/components/option-select';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup, useResizablePanelRef } from '@campuspilot/ui/components/resizable';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@campuspilot/ui/components/tabs';
@@ -40,6 +40,7 @@ import { TemplatePdfPreview } from './template-pdf-preview';
 import { TemplatePromptEditor } from './template-prompt-editor';
 import { AllRevisionsButton, RevisionHistoryDialog, RevisionPicker, RevisionPreview, useRevisionParam, useTemplateRevision } from './template-revisions';
 import { ConfirmationDialog } from '@campuspilot/components/confirmation-dialog';
+import { initialSaveFootprint } from './template-save-model';
 
 
 const TemplateCodeEditor = dynamic(() => import('./template-code-editor').then((module) => module.TemplateCodeEditor), {
@@ -54,12 +55,18 @@ type EditTool = 'ai' | 'code';
 type MobileSection = 'preview' | 'code';
 type PanelRef = ReturnType<typeof useResizablePanelRef>;
 
-const halfPageDocumentTypes = new Set<DocumentTemplateScope['documentType']>(HALF_PAGE_DOCUMENT_TYPES);
+const halfPageDocumentTypes: ReadonlySet<string> = new Set(HALF_PAGE_DOCUMENT_TYPES);
 /** The paper footprints, each with a title (what the closed select shows) and what it means. */
 const PAGE_SIZE_OPTIONS: { value: PageSize; title: string; description: string }[] = [
   { value: 'half', title: 'Half A4', description: 'Two documents per sheet' },
   { value: 'full', title: 'Full A4', description: 'One document per sheet' },
 ];
+/** The Save dialog's footprint choice; empty until chosen (`initialSaveFootprint`). */
+const SAVE_FOOTPRINT_OPTIONS = [
+  { value: '', label: 'Choose the paper footprint' },
+  { value: 'half', label: 'Half A4 · two documents per sheet' },
+  { value: 'full', label: 'Full A4 · one document per sheet' },
+] as const;
 /** From md up the editor and the preview sit side by side (the question paper studio's breakpoint). */
 const SIDE_BY_SIDE_QUERY = '(min-width: 768px)';
 /** How long typing pauses before the PDF preview is converted again (one Gotenberg conversion per preview). */
@@ -108,6 +115,13 @@ function useTemplateEditor(scope: DocumentTemplateScope, template: ActiveTemplat
       previewContent: template.content,
       /** Notice designs only: the notice print size the preview renders at (not saved). */
       printSize: 'full' as PageSize,
+      /**
+       * The footprint chosen in the Save dialog, for types printed two-up:
+       * empty (not chosen yet) when the dialog opened over HTML that differs
+       * from the loaded revision (`initialSaveFootprint`). It becomes
+       * `pageSize` when the person saves.
+       */
+      saveFootprint: '' as PageSize | '',
       error: '',
     },
     validators: {
@@ -120,6 +134,7 @@ function useTemplateEditor(scope: DocumentTemplateScope, template: ActiveTemplat
         editedSinceSend: z.boolean(),
         previewContent: z.string(),
         printSize: noticePreviewPrintSizeSchema,
+        saveFootprint: z.enum(['', 'full', 'half']),
         error: z.string(),
       }),
     },
@@ -345,17 +360,34 @@ function WorkspaceHeader({ title, editor, parts, compact }: { title: string; edi
  * the form refuses keeps the dialog open with the errors; a save the server
  * refuses closes it onto the header's error (`SaveError`, which offers the
  * reload). Going back to a saved revision is the revision select's job.
+ *
+ * For a type printed two-up (admit cards and finance documents) the same
+ * dialog confirms the paper footprint: it starts as the editor's when the
+ * HTML is the loaded revision's, and unselected when it differs
+ * (`initialSaveFootprint`), so a design pasted over another never keeps that
+ * design's footprint by accident; Save waits until one is chosen.
  */
-function SaveAction({ editor }: { editor: TemplateEditorState }) {
+function SaveAction({ editor, template }: { editor: TemplateEditorState; template: ActiveTemplate }) {
   const [open, setOpen] = useState(false);
+  const choosable = halfPageDocumentTypes.has(template.artifact.documentType);
+  const openDialog = () => {
+    const footprint = initialSaveFootprint({ choosable, content: editor.source.content, loadedContent: template.content, pageSize: editor.values.pageSize });
+    editor.form.setFieldValue('saveFootprint', footprint ?? '');
+    setOpen(true);
+  };
   const confirm = async () => {
+    const footprint = editor.form.getFieldValue('saveFootprint');
+    if (choosable) {
+      if (!footprint) return;
+      editor.form.setFieldValue('pageSize', footprint);
+    }
     if ((await editor.save()) === 'done') setOpen(false);
   };
   return (
     <editor.form.Subscribe selector={(state) => state.isSubmitting}>
       {(submitting) => (
         <Dialog open={open} onOpenChange={(next) => setOpen(submitting ? true : next)}>
-          <DocumentButton disabled={submitting || !editor.dirty} onClick={() => setOpen(true)}>
+          <DocumentButton disabled={submitting || !editor.dirty} onClick={openDialog}>
             <Save />
             {submitting ? 'Saving…' : 'Save'}
           </DocumentButton>
@@ -372,14 +404,23 @@ function SaveAction({ editor }: { editor: TemplateEditorState }) {
               }}
             >
               <editor.form.Field name="name">{(field) => <DocumentField field={field} label="Template name" />}</editor.form.Field>
+              {choosable ? (
+                <editor.form.Field name="saveFootprint">
+                  {(field) => <DocumentSelect field={field} label="Paper footprint" options={SAVE_FOOTPRINT_OPTIONS} />}
+                </editor.form.Field>
+              ) : null}
               <editor.form.Subscribe selector={(state) => state.errors}>{(errors) => <DocumentErrors errors={errors} />}</editor.form.Subscribe>
               <DialogFooter>
                 <DocumentButton variant="outline" disabled={submitting} onClick={() => setOpen(false)}>
                   Cancel
                 </DocumentButton>
-                <DocumentButton type="submit" disabled={submitting}>
-                  {submitting ? 'Saving…' : 'Save'}
-                </DocumentButton>
+                <editor.form.Subscribe selector={(state) => state.values.saveFootprint}>
+                  {(footprint) => (
+                    <DocumentButton type="submit" disabled={submitting || (choosable && !footprint)}>
+                      {submitting ? 'Saving…' : 'Save'}
+                    </DocumentButton>
+                  )}
+                </editor.form.Subscribe>
               </DialogFooter>
             </form>
           </DialogContent>
@@ -892,7 +933,7 @@ export function TemplateEditor({
           ),
           ai: <AiAction gate={gate} scope={scope} editor={editor} contextHelp={contextHelp} />,
           section: sideBySide ? null : <MobileSectionSelect value={mobilePreview ? 'preview' : 'code'} onChange={(section) => setMobilePreview(section === 'preview')} />,
-          save: <SaveAction editor={editor} />,
+          save: <SaveAction editor={editor} template={template} />,
         }}
       />
       <SaveError editor={editor} />

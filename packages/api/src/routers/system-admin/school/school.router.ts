@@ -26,6 +26,12 @@ import {
 import { readSchoolDto, schoolRowToDto, selectSchoolsWithActivePeriod } from "./school.read";
 import { lockSchool, parseTrialEnd, startTrialPeriod } from "../../../billing/billing.service";
 import { readSchoolKind } from "../../../school-access/school-kind.service";
+import { selectDefaultDocumentTemplates, withDefaultDocumentTemplates } from "../../school/document/document.default-templates";
+import { artifactTable, schoolDocumentTemplateTable } from "@campuspilot/db/schema/artifact";
+import { createLogger } from "@campuspilot/logger";
+import { deleteDocumentObject } from "../../school/document/document.storage";
+
+const log = createLogger({ pkg: "system-admin-school" });
 
 /** The school as the admin DTO after a change; NOT_FOUND when it does not exist. */
 async function requireSchoolDto(db: Parameters<typeof readSchoolDto>[0], schoolId: string) {
@@ -177,22 +183,27 @@ export const schoolRouter = {
         const { trial, tier, ...identity } = input;
         // Checked before anything is written, so a refused end creates no school.
         const trialEndsAt = trial ? parseTrialEnd(trial.endsAt) : null;
-        return await context.db.transaction(async (transaction) => {
-          const [school] = await transaction
-            .insert(schoolTable)
-            .values({ ...identity, tier: tier ?? null })
-            .returning({ id: schoolTable.id });
-          if (!school) throw rpcError.internal();
-          if (trial && trialEndsAt) {
-            await startTrialPeriod(transaction, {
-              schoolId: school.id,
-              tier: trial.tier,
-              endsAt: trialEndsAt,
-              createdBy: context.session.user.id,
-            });
-          }
-          return await requireSchoolDto(transaction, school.id);
-        });
+        // Every new school starts with the default document templates; their
+        // objects are removed when the transaction fails.
+        return await withDefaultDocumentTemplates((uploads) =>
+          context.db.transaction(async (transaction) => {
+            const [school] = await transaction
+              .insert(schoolTable)
+              .values({ ...identity, tier: tier ?? null })
+              .returning({ id: schoolTable.id });
+            if (!school) throw rpcError.internal();
+            if (trial && trialEndsAt) {
+              await startTrialPeriod(transaction, {
+                schoolId: school.id,
+                tier: trial.tier,
+                endsAt: trialEndsAt,
+                createdBy: context.session.user.id,
+              });
+            }
+            await selectDefaultDocumentTemplates(transaction, uploads, { schoolId: school.id, createdBy: context.session.user.id });
+            return await requireSchoolDto(transaction, school.id);
+          }),
+        );
       } catch (error) {
         throw toRpcError(error);
       }
@@ -395,12 +406,28 @@ export const schoolRouter = {
     .output(schoolDtoSchema)
     .handler(async ({ context, input }) => {
       try {
-        return await context.db.transaction(async (transaction) => {
+        const { school, templateKeys } = await context.db.transaction(async (transaction) => {
           // Read before the delete: its trials go with it.
           const school = await requireSchoolDto(transaction, input.id);
+          // Every new school starts with default template revisions
+          // (docs/document-system.md "Default templates"); they go with it.
+          // A revision still used by anything else (a generated PDF, a job,
+          // a notice, a question paper version) keeps refusing the delete,
+          // as the school's own data always did.
+          await transaction.delete(schoolDocumentTemplateTable).where(eq(schoolDocumentTemplateTable.schoolId, input.id));
+          const templates = await transaction
+            .delete(artifactTable)
+            .where(and(eq(artifactTable.schoolId, input.id), eq(artifactTable.kind, "template")))
+            .returning({ s3Key: artifactTable.s3Key });
           await transaction.delete(schoolTable).where(eq(schoolTable.id, input.id));
-          return school;
+          return { school, templateKeys: templates.map((template) => template.s3Key) };
         });
+        // Objects are removed only once the rows are gone for good. A failure
+        // leaves an unreferenced object under the deleted school's prefix.
+        const removals = await Promise.allSettled(templateKeys.map((key) => deleteDocumentObject(key)));
+        for (const [index, removal] of removals.entries())
+          if (removal.status === "rejected") log.warn({ err: removal.reason, schoolId: input.id, key: templateKeys[index] }, "school.delete.template-object-failed");
+        return school;
       } catch (error) {
         throw toRpcError(error);
       }

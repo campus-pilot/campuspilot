@@ -21,13 +21,15 @@ import type { QuestionPaperContext } from "../question-paper/question-paper.cont
 import { DOCUMENT_CONTEXT_HELP, sampleDocumentContext } from "./document.catalog";
 import { contextImageChars } from "./document.images";
 import { rpcError } from "../../../errors";
-import type { DocumentTemplatePageSize, DocumentType } from "./document.dto";
+import type { DocumentTemplatePageSize, TemplateDocumentType as DocumentType } from "./document.dto";
 import { combineDocuments, convertDocumentPdf, isConversionTimeout, renderDocument } from "./document.render";
 
 /**
  * The document types the shared template-editing contract names are exactly
- * the API's: the contract package cannot import the API, so this fails the
- * build when one list gains a type the other lacks.
+ * the API's template types (every type with templates; a Bill due is printed
+ * with the bill template, so it has none): the contract package cannot import
+ * the API, so this fails the build when one list gains a type the other lacks.
+ * `DocumentType` in this file is the API's `TemplateDocumentType`.
  */
 const sameTypes: [DocumentType, TemplateDocumentType] extends [TemplateDocumentType, DocumentType] ? true : never = true;
 void sameTypes;

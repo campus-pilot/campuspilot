@@ -16,6 +16,12 @@ type PickerProps = {
   selected: string[];
   onChange: (ids: string[]) => void;
   errors: readonly unknown[];
+  /**
+   * Which id a chosen student stands for: the session enrollment (`student`,
+   * academic documents) or the admission account (`admission`, finance
+   * documents such as a Bill due). Its own fact, never read from the other.
+   */
+  selectBy?: "student" | "admission";
 };
 export function StudentPicker(props: PickerProps) {
   const form = useForm({
@@ -93,7 +99,8 @@ function StudentOptions(
       enabled: props.search.length <= 200,
     }),
   );
-  const options = students.data?.items.map(toRecipient) ?? [];
+  const selectBy = props.selectBy ?? "student";
+  const options = students.data?.items.map((student) => toRecipient(student, selectBy)) ?? [];
   const known = new Map(
     [...Object.values(props.known), ...options].map((value) => [
       value.id,
@@ -102,7 +109,9 @@ function StudentOptions(
   );
   // Deep links may select a student outside the current page. Load that exact
   // identity; never guess a label or clear the selection during a search.
-  const missing = props.selected.filter((id) => !known.has(id));
+  // Only enrollment ids can be looked up this way; admission selections are
+  // always made from a listed page, so their labels are already known.
+  const missing = selectBy === "student" ? props.selected.filter((id) => !known.has(id)) : [];
   const identities = useQueries({
     queries: missing.map((studentId) =>
       orpc.school.getStudent.queryOptions({
@@ -111,7 +120,7 @@ function StudentOptions(
     ),
   });
   for (const identity of identities)
-    if (identity.data) known.set(identity.data.id, toRecipient(identity.data));
+    if (identity.data) known.set(identity.data.id, toRecipient(identity.data, "student"));
   const selected = props.selected.map(
     (id) =>
       known.get(id) ?? {
@@ -152,12 +161,16 @@ function StudentOptions(
     />
   );
 }
-function toRecipient(student: {
-  id: string;
-  admission: { name: string; admissionNo: string };
-}): StudentRecipient {
+function toRecipient(
+  student: {
+    id: string;
+    admissionId: string;
+    admission: { name: string; admissionNo: string };
+  },
+  selectBy: "student" | "admission",
+): StudentRecipient {
   return {
-    id: student.id,
+    id: selectBy === "admission" ? student.admissionId : student.id,
     name: student.admission.name,
     admissionNo: student.admission.admissionNo,
   };

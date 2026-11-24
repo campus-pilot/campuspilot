@@ -1,0 +1,158 @@
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    .legacy-template { 
+      font-family: Arial, Helvetica, sans-serif; 
+      font-size: 12px; 
+      font-weight: 800; 
+      color: #000; 
+      padding: 16px 20px; 
+      overflow: hidden; 
+      -webkit-font-smoothing: antialiased;
+    }
+    .bill { width: 100%; }
+    
+    /* Header */
+    .header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 8px; border-bottom: 2.5px solid #000; margin-bottom: 10px; }
+    .header .logo { width: 48px; height: 48px; display: flex; justify-content: center; align-items: center; }
+    .header .logo img { max-width: 100%; max-height: 100%; object-fit: contain; }
+    .header .header-content { flex: 1; text-align: center; padding: 0 8px; }
+    .header .header-content h1 { font-size: 17px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.5px; color: #000; }
+    .header .header-content p { font-size: 11px; font-weight: 800; color: #000; margin-top: 2px; }
+    
+    .title { text-align: center; font-size: 14px; font-weight: 900; text-transform: uppercase; margin: 8px 0; letter-spacing: 1px; border-bottom: 1.5px solid #000; padding-bottom: 6px; color: #000; }
+    
+    /* Details Grid */
+    .details { width: 100%; border-collapse: collapse; margin-bottom: 10px; font-size: 11.5px; }
+    .details td { padding: 3px 6px; vertical-align: top; font-weight: 800; color: #000; }
+    .details .label { font-weight: 900; color: #000; width: 115px; }
+    
+    /* 10-char date truncation */
+    .date-cut {
+      display: inline-block;
+      font-family: monospace, Arial, sans-serif;
+      font-weight: 800;
+      width: 10ch;
+      overflow: hidden;
+      white-space: nowrap;
+      vertical-align: bottom;
+    }
+
+    /* Fee Table */
+    .fee-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+    .fee-table th, .fee-table td { border: 1.5px solid #000; padding: 5px 8px; font-size: 11.5px; font-weight: 800; color: #000; }
+    .fee-table th { background: #e0e0e0; font-weight: 900; text-align: left; font-size: 11px; text-transform: uppercase; color: #000; }
+    .fee-table td.amount { text-align: right; font-variant-numeric: tabular-nums; }
+    .fee-table .total-row td { border-top: 2.5px solid #000; font-weight: 900; font-size: 12.5px; }
+    
+    /* Footer */
+    .footer { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 12px; }
+    .footer .note { font-size: 9.5px; font-weight: 800; color: #000; }
+    .footer .stamp { text-align: center; font-size: 11px; font-weight: 900; color: #000; border-top: 1.5px solid #000; padding-top: 4px; min-width: 150px; }
+    .meta { font-size: 9.5px; font-weight: 800; color: #000; text-align: right; margin-top: 6px; }
+  
+.legacy-template{box-sizing:border-box;width:100%;height:100%;overflow:hidden;}.legacy-school-logo{display:block;width:14mm;height:14mm;object-fit:contain;margin:0 auto 3mm}</style><div class="legacy-template">
+  <div class="bill">
+    <div class="header">
+      <div class="logo">
+        {{#if school.logoUrl}}<img src="{{school.logoUrl}}" alt="School logo">{{/if}}
+      </div>
+      <div class="header-content">
+        <h1>{{school.name}}</h1>
+        <p>{{school.location}}</p>
+        {{#if school.registrationNo}}<p>Reg. No: {{school.registrationNo}}</p>{{/if}}
+      </div>
+      <div class="logo">
+        {{#if school.logoUrl}}<img src="{{school.logoUrl}}" alt="School logo">{{/if}}
+      </div>
+    </div>
+
+    <div class="title">Fee Bill</div><div style="text-align:center;margin-bottom:6px;">Bill No: {{bill.number}}</div>
+
+    <table class="details">
+      <tr>
+        <td class="label">Student Name</td>
+        <td>{{admission.name}}</td>
+        <td class="label">Session</td>
+        <td>{{session.startYear}} – {{session.endYear}}</td>
+      </tr>
+      <tr>
+        <td class="label">Admission No.</td>
+        <td>{{admission.number}}</td>
+        <td class="label">Bill Date</td>
+        <td><span class="date-cut">{{bill.issueDate}}</span></td>
+      </tr>
+      <tr>
+        <td class="label">Father's Name</td>
+        <td>{{admission.fatherName}}</td>
+        <td class="label">Frequency</td>
+        <td>{{bill.periodKeyKey}}</td>
+      </tr>
+      <tr>
+        <td class="label">Class / Section</td>
+        <td>{{admission.classLabel}} – {{admission.sectionLabel}}</td>
+        {{#if bill.periodKey}}<td class="label">Period</td><td>{{bill.periodKey}}</td>{{/if}}
+      </tr>
+      {{#if bill.issueDate}}
+      <tr>
+        <td class="label">Statement Through</td>
+        <td colspan="3"><span class="date-cut">{{bill.issueDate}}</span></td>
+      </tr>
+      {{/if}}
+    </table>
+
+    <table class="fee-table">
+      <thead>
+        <tr>
+          <th style="width:35px;">#</th>
+          <th>Fee Component</th>
+          <th style="width:100px; text-align:right;">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{#each lines}}
+        <tr>
+          <td>{{add @index 1}}</td>
+          <td>{{this.name}}</td>
+          <td class="amount">{{../currency.code}} {{this.amount}}</td>
+        </tr>
+        {{/each}}
+        <tr class="total-row">
+          <td colspan="2" style="text-align:right;">Current Period Charges</td>
+          <td class="amount">{{currency.code}} {{bill.total}}</td>
+        </tr>
+        {{#if balanceBefore}}
+        <tr>
+          <td colspan="2" style="text-align:right;">Opening Balance Before This Period</td>
+          <td class="amount">{{currency.code}} {{balanceBefore}}</td>
+        </tr>
+        {{/if}}
+        {{#if paidThisPeriod}}
+        <tr>
+          <td colspan="2" style="text-align:right;">Payments This Period</td>
+          <td class="amount">-{{currency.code}} {{paidThisPeriod}}</td>
+        </tr>
+        {{/if}}
+        {{#if discountThisPeriod}}
+        <tr>
+          <td colspan="2" style="text-align:right;">Discounts This Period</td>
+          <td class="amount">-{{currency.code}} {{discountThisPeriod}}</td>
+        </tr>
+        {{/if}}
+        <tr class="total-row" style="background-color: #ededed; border-top: 2px solid #000;">
+          <td colspan="2" style="text-align:right;">Net Payable</td>
+          <td class="amount">{{currency.code}} {{balanceAfter}}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="footer">
+      <div class="note">
+        <p>This is a computer-generated bill.</p>
+        <p>Please retain for your records.</p>
+      </div>
+      <div class="stamp">Authorized Signatory</div>
+    </div>
+
+    <div class="meta">Generated: <span class="date-cut">{{generatedAt}}</span></div>
+  </div>
+</div>

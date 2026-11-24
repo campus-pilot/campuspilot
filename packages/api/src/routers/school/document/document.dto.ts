@@ -23,8 +23,39 @@ export const documentTypeSchema = z.enum([
   "statement",
   "notice",
   "question_paper",
+  "bill_due",
 ]);
 export type DocumentType = z.infer<typeof documentTypeSchema>;
+
+/**
+ * Document types printed with another type's template: a Bill due is a bill
+ * for one admission as of a chosen date, printed with the school's selected
+ * `bill` template revision. Such a type has its own history, jobs and
+ * permissions, but no template, marketplace designs or Settings page of its
+ * own, so every template procedure refuses it (`templateDocumentTypeSchema`).
+ */
+export const BORROWED_TEMPLATE_DOCUMENT_TYPES = ["bill_due"] as const satisfies readonly DocumentType[];
+/** The types that have school templates (every type but those in {@link BORROWED_TEMPLATE_DOCUMENT_TYPES}). */
+export const templateDocumentTypeSchema = documentTypeSchema.exclude(BORROWED_TEMPLATE_DOCUMENT_TYPES);
+export type TemplateDocumentType = z.infer<typeof templateDocumentTypeSchema>;
+/**
+ * Which template type a document of each type is printed with: its own,
+ * except a Bill due, which uses the selected `bill` revision. Exhaustive, so a
+ * new type decides explicitly.
+ */
+export const DOCUMENT_TEMPLATE_TYPE = {
+  report_card: "report_card",
+  id_card: "id_card",
+  admit_card: "admit_card",
+  timetable: "timetable",
+  bill: "bill",
+  receipt: "receipt",
+  statement: "statement",
+  notice: "notice",
+  question_paper: "question_paper",
+  bill_due: "bill",
+} as const satisfies Record<DocumentType, TemplateDocumentType>;
+export const templateTypeOf = (type: DocumentType): TemplateDocumentType => DOCUMENT_TEMPLATE_TYPE[type];
 
 /**
  * The school feature each document type belongs to (docs/feature-flags.md).
@@ -39,17 +70,20 @@ export const DOCUMENT_TYPE_FEATURE = {
   bill: "studentManagement",
   receipt: "studentManagement",
   statement: "studentManagement",
+  bill_due: "studentManagement",
   notice: "notices",
   // The question paper template belongs to the AI assistant's feature (D26).
   question_paper: "assistant",
 } as const satisfies Record<DocumentType, SchoolFeatureKey>;
 
 /** Document types whose content is finance data; each has its own permissions. */
-export const FINANCE_DOCUMENT_TYPES: ReadonlySet<DocumentType> = new Set<DocumentType>([
+export const FINANCE_DOCUMENT_TYPE_LIST = [
   "bill",
   "receipt",
   "statement",
-]);
+  "bill_due",
+] as const satisfies readonly DocumentType[];
+export const FINANCE_DOCUMENT_TYPES: ReadonlySet<DocumentType> = new Set<DocumentType>(FINANCE_DOCUMENT_TYPE_LIST);
 
 export const isFinanceDocumentType = (type: DocumentType) =>
   FINANCE_DOCUMENT_TYPES.has(type);
@@ -63,7 +97,7 @@ export const isFinanceDocumentType = (type: DocumentType) =>
  */
 export const TEMPLATE_ONLY_DOCUMENT_TYPES = ["notice", "question_paper"] as const satisfies readonly DocumentType[];
 export type TemplateOnlyDocumentType = (typeof TEMPLATE_ONLY_DOCUMENT_TYPES)[number];
-export type AcademicDocumentType = Exclude<DocumentType, "bill" | "receipt" | "statement" | TemplateOnlyDocumentType>;
+export type AcademicDocumentType = Exclude<DocumentType, (typeof FINANCE_DOCUMENT_TYPE_LIST)[number] | TemplateOnlyDocumentType>;
 /**
  * The feature every document **generated** through `previewDocument` /
  * `generateDocument` belongs to. Those procedures accept the generator types
@@ -104,7 +138,7 @@ const halfPageDocumentTypes = new Set<DocumentType>(
  * layout.
  */
 function validateTemplatePageSize(
-  value: { documentType: DocumentType; pageSize: DocumentTemplatePageSize },
+  value: { documentType: TemplateDocumentType; pageSize: DocumentTemplatePageSize },
   context: z.RefinementCtx,
 ) {
   if (value.pageSize === "half" && value.documentType === "notice") {
@@ -141,11 +175,13 @@ export const DOCUMENT_LABELS: Record<DocumentType, string> = {
   statement: "Account statements",
   notice: "Notices",
   question_paper: "Question papers",
+  bill_due: "Bills due",
 };
 const id = z.string().trim().min(1).max(100);
 export const schoolScopeSchema = z.object({ schoolId: id });
+/** Template procedures name a type that has templates; a Bill due is printed with the bill template. */
 export const templateScopeSchema = schoolScopeSchema.extend({
-  documentType: documentTypeSchema,
+  documentType: templateDocumentTypeSchema,
 });
 export const templateContentSchema = z
   .string()
@@ -183,6 +219,15 @@ export const artifactDtoSchema = z.object({
     z.object({ kind: z.literal("bill"), admissionIds: z.array(z.string()), billIds: z.array(z.string()), billRunId: z.string().nullable() }),
     z.object({ kind: z.literal("receipt"), admissionIds: z.array(z.string()), transactions: z.array(z.object({ kind: z.enum(["payment", "refund"]), id: z.string() })) }),
     z.object({ kind: z.literal("statement"), currency: z.string(), throughDate: z.string(), timeZone: z.string(), accounts: z.array(z.object({ admissionId: z.string(), highWaterSequence: z.string() })) }),
+    z.object({
+      kind: z.literal("bill_due"),
+      currency: z.string(),
+      throughDate: z.string(),
+      timeZone: z.string(),
+      period: z.object({ cadence: z.enum(["monthly", "quarterly", "yearly"]), startDate: z.string(), endDate: z.string() }),
+      /** `highWaterSequence` is null for an account with no ledger fact through the date. */
+      accounts: z.array(z.object({ admissionId: z.string(), highWaterSequence: z.string().nullable() })),
+    }),
   ]).nullable(),
   generationOptions: documentGenerationOptionsSchema,
   createdBy: z.string(),
@@ -227,7 +272,7 @@ export const selectTemplateSchema = templateScopeSchema.extend({
 });
 export const marketplaceItemSchema = z.object({
   slug: z.string(),
-  documentType: documentTypeSchema,
+  documentType: templateDocumentTypeSchema,
   name: z.string(),
   description: z.string(),
   pageSize: documentTemplatePageSizeSchema,
@@ -342,7 +387,7 @@ export const validateTemplateDraftOutputSchema = z.object({
   characters: z.number().int(),
 });
 export const templateEditingGuideOutputSchema = z.object({
-  documentType: documentTypeSchema,
+  documentType: templateDocumentTypeSchema,
   rules: z.string(),
   workflow: z.array(z.string()),
   contextHelp: z.string(),
@@ -398,7 +443,7 @@ export const previewOutputSchema = z.object({
   /** Documents rendered in `html` (the first ones, in print order). */
   sampleCount: z.number().int(),
   warnings: z.array(z.string()),
-  /** Statements only: the hash generation must present, over the whole selection. */
+  /** Statements and Bills due only: the hash generation must present, over the whole selection. */
   reviewHash: z.string().nullable(),
 });
 
@@ -416,6 +461,17 @@ const selection = {
   classId: id,
   studentIds: z.array(id).min(1).max(MAX_DOCUMENT_SOURCE_ITEMS).optional(),
 };
+/** The hash a previewed statement or Bill due returned; required by generation, omitted by preview. */
+const reviewHashSchema = z.string().regex(/^[a-f0-9]{64}$/).optional();
+/**
+ * Who a Bill due is for, each an explicit choice: every student enrolled in
+ * the session, every student of one class in it, or chosen admissions.
+ */
+export const billDueRecipientsSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("session") }).strict(),
+  z.object({ kind: z.literal("class"), classId: id }).strict(),
+  z.object({ kind: z.literal("admissions"), admissionIds: z.array(id).min(1).max(MAX_DOCUMENT_SOURCE_ITEMS) }).strict(),
+]);
 /** IDs remain independent inputs. The server verifies their school, session,
  * class and enrollment relationships instead of trusting a UI selection.
  */
@@ -481,7 +537,19 @@ export const documentSourceSchema = z.discriminatedUnion("documentType", [
     admissionIds: z.array(id).min(1).max(MAX_DOCUMENT_SOURCE_ITEMS),
     throughDate: z.string().date(),
     /** Required by generation after preview; preview omits it. */
-    expectedReviewHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+    expectedReviewHash: reviewHashSchema,
+  }).strict(),
+  /**
+   * A Bill due: one bill per admission as of `throughDate` (a local date in
+   * the session's finance time zone), for the billing period containing it.
+   * A future date is accepted; the date must fall in the session.
+   */
+  z.object({
+    documentType: z.literal("bill_due"),
+    sessionId: id,
+    throughDate: z.string().date(),
+    recipients: billDueRecipientsSchema,
+    expectedReviewHash: reviewHashSchema,
   }).strict(),
 ]).superRefine((source, context) => {
   const ids = source.documentType === "bill"
@@ -490,7 +558,9 @@ export const documentSourceSchema = z.discriminatedUnion("documentType", [
       ? source.transactions.map(({ kind, id: value }) => `${kind}:${value}`)
       : source.documentType === "statement"
         ? source.admissionIds
-        : "studentIds" in source ? source.studentIds ?? [] : [];
+        : source.documentType === "bill_due"
+          ? source.recipients.kind === "admissions" ? source.recipients.admissionIds : []
+          : "studentIds" in source ? source.studentIds ?? [] : [];
   if (new Set(ids).size !== ids.length) context.addIssue({ code: "custom", message: "Document source IDs must be unique." });
 });
 export type DocumentSource = z.infer<typeof documentSourceSchema>;
@@ -521,7 +591,7 @@ export const listArtifactsSchema = createListInputSchema({
         filters.documentDomain &&
         filters.documentDomain !== "all"
       ) {
-        const finance = ["bill", "receipt", "statement"].includes(filters.documentType);
+        const finance = FINANCE_DOCUMENT_TYPES.has(filters.documentType);
         if ((filters.documentDomain === "finance") !== finance) {
           context.addIssue({ code: "custom", message: "Document type does not belong to the selected domain.", path: ["documentType"] });
         }

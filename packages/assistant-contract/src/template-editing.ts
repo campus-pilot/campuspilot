@@ -12,8 +12,10 @@ import { z } from 'zod';
  *   `validateDocumentTemplateDraft`.
  *
  * One source, so the two never describe a different printing contract. The
- * document types are the API's `documentTypeSchema` (the API checks at build
- * time that both lists agree): this package cannot import the API.
+ * document types are the API's template types (`templateDocumentTypeSchema`:
+ * every document type but a Bill due, which is printed with the bill
+ * template; the API checks at build time that both lists agree): this
+ * package cannot import the API.
  */
 export const TEMPLATE_DOCUMENT_TYPES = [
   'report_card',
@@ -63,6 +65,19 @@ export function templatePaperRule(documentType: TemplateDocumentType, pageSize?:
 }
 
 /**
+ * What a type's template must handle beyond the shared rules, or null. A bill
+ * template prints two kinds of document (docs/document-system.md "Bill
+ * due"), and a template that assumes every bill has a number or no credits
+ * prints a broken Bill due.
+ */
+export function templateTypeRule(documentType: TemplateDocumentType): string | null {
+  if (documentType === 'bill') {
+    return 'This one template prints ordinary bills and bills due (a bill for one student as of a chosen date). On a bill due billDue is set, bill.number is null (print a number such as DUE/{{billDue.date.day}}/{{billDue.date.month}}/{{billDue.date.year}} in its place) and credits[] lists payments, discounts and other credits of the period; on an ordinary bill billDue is null and credits[] is empty. Show "Statement through" only inside {{#if billDue}}. Dates are parts ({iso,day,month,year,monthName}), never preformatted; print bill.period (cadence, start, end) instead of bill.periodKey. balanceBefore and the period totals are null when zero; balanceAfter (the amount due) is always present. A design that prints only paidThisPeriod and discountThisPeriod must also print otherCreditsThisPeriod (every other credit) to add up.';
+  }
+  return null;
+}
+
+/**
  * The rendering contract as bullet lines. `output` is what the AI hands back,
  * which differs per way of editing (pasted text for an external app, a tool
  * call for the in-app assistant); it is the third bullet, after the paper.
@@ -76,6 +91,7 @@ export function templateRenderingContract(input: {
     '- This is HTML with Handlebars bindings, rendered to PDF using Gotenberg/Chromium.',
     `- ${templatePaperRule(input.documentType, input.pageSize)}`,
     `- ${input.output}`,
+    ...[templateTypeRule(input.documentType)].flatMap((rule) => (rule ? [`- ${rule}`] : [])),
     '- Preserve existing bindings and conditional/loop structure unless the requested changes require otherwise. Do not replace variables with sample or invented student data.',
     '- Use self-contained CSS in style blocks or inline styles. No JavaScript, forms, external images, fonts, stylesheets, or network requests.',
     '- School logos and student photos are provided as data URIs; use the documented image variables with conditional checks for missing images.',

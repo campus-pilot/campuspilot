@@ -28,6 +28,8 @@ import { loadDemoJob, startDemoJob, type DemoJobSnapshot } from './job-store';
 import { buildDemoPlan } from './plan';
 import { DemoSeedError, createSeedContext, seedStaffMember } from './steps';
 import { runDemoSeedSteps } from './workflow';
+import { selectedTemplateSlugs } from '../../../test/documents';
+import { DEFAULT_DOCUMENT_TEMPLATE_SLUGS } from '../../routers/school/document/document.catalog';
 
 /** Mid-December: the first term is completed, the second active, the annual ready. */
 const AS_OF = '2026-12-20T06:30:00.000Z';
@@ -90,6 +92,8 @@ describe('demo school seed steps (2 classes, without Restate)', () => {
       'monthly:2026-09', 'monthly:2026-10', 'monthly:2026-11', 'monthly:2026-12',
     ]);
     expect(result.counts).toMatchObject({ staff: 5, classes: 2, students: plannedStudents, templates: 9 });
+    // A demo starts with the same templates as every new school, plus the built-in Notice design.
+    expect(await selectedTemplateSlugs(job.schoolId)).toEqual({ ...DEFAULT_DOCUMENT_TEMPLATE_SLUGS, notice: 'notice-default' });
     expect(result.counts.bills).toBeGreaterThan(plannedStudents * 8);
     expect(BigInt(result.amounts.collectedMinor)).toBeGreaterThan(0n);
 

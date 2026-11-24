@@ -302,7 +302,7 @@ export async function buildDocumentContexts(
   options: DocumentContextOptions = {},
 ) {
   const images = options.images ?? "embed";
-  if (source.documentType === "bill" || source.documentType === "receipt" || source.documentType === "statement") {
+  if (source.documentType === "bill" || source.documentType === "receipt" || source.documentType === "statement" || source.documentType === "bill_due") {
     throw rpcError.badRequest("Finance documents use the immutable finance context builder.");
   }
   const [school] = await db

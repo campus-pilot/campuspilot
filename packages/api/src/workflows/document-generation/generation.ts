@@ -10,6 +10,7 @@ import {
   documentSourceSchema,
   documentTypeSchema,
   MAX_DOCUMENT_SOURCE_ITEMS,
+  templateTypeOf,
   type DocumentSource,
   type DocumentTemplatePageSize,
   type DocumentType,
@@ -432,7 +433,8 @@ async function loadPinnedTemplate(db: Database, job: ClaimedJob) {
       and(
         eq(artifactTable.id, job.templateRevisionId),
         eq(artifactTable.schoolId, job.schoolId),
-        eq(artifactTable.documentType, job.documentType),
+        // A Bill due is printed with a bill template revision.
+        eq(artifactTable.documentType, templateTypeOf(job.documentType)),
         eq(artifactTable.kind, 'template'),
         eq(artifactTable.status, 'ready'),
       ),
@@ -488,8 +490,8 @@ async function prepareJob(deps: DocumentGenerationDeps, job: ClaimedJob): Promis
       ...(inputs.ledgerCutoff ? { ledgerCutoff: inputs.ledgerCutoff } : {}),
     }),
   ).catch(sourceFailure);
-  if (job.documentType === 'statement' && data.reviewHash !== inputs.reviewHash)
-    throw new DocumentJobFailure('source_changed', undefined, 'The statement review hash changed.');
+  if ((job.documentType === 'statement' || job.documentType === 'bill_due') && data.reviewHash !== inputs.reviewHash)
+    throw new DocumentJobFailure('source_changed', undefined, `The ${job.documentType} review hash changed.`);
   if (data.contexts.length === 0 || data.contexts.length > MAX_DOCUMENT_SOURCE_ITEMS)
     throw new DocumentJobFailure('invalid_source', undefined, `The source resolved to ${data.contexts.length} documents.`);
   const imageKeysByDocument = data.contexts.map(contextImageKeys);

@@ -101,7 +101,12 @@ still counts.
    for the default roles;
 5. adds the person as a member with the principal role;
 6. writes the `school_creation` row;
-7. offers the school its guided setup (a `school_onboarding` row, below).
+7. offers the school its guided setup (a `school_onboarding` row, below);
+8. selects the default document templates, the CampusPilot Standard set
+   (`selectDefaultDocumentTemplates`, [Document system: Default templates](document-system.md#default-templates)),
+   whose objects are removed when the transaction fails. Administrators' schools
+   (`systemAdmin.addSchool`) and schools set up from an onboarding submission get
+   them too; a personal space does not.
 
 After the trial the school has no plan and is read-only, exactly as described
 in [School billing](school-billing.md), until an administrator records a

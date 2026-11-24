@@ -49,7 +49,7 @@ import {
   isFinanceDocumentType,
   TEMPLATE_PREVIEW_IMAGE_MARKER,
   type DocumentSource,
-  type DocumentType,
+  type TemplateDocumentType as DocumentType,
   type TemplatePreviewPart,
   type TemplatePreviewPartSource,
 } from "./document.dto";

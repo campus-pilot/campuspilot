@@ -313,6 +313,13 @@ describe("immutable finance document contexts", () => {
     const detail = await scenario.actors.accountant.client.school.getBillingRun({ schoolId: scenario.school.id, sessionId: scenario.activeSession.id, billRunId: run.id, page: 1, limit: 20 });
     expect(detail.bills.items).toHaveLength(1);
     const bill = detail.bills.items[0]!;
+    // A billing-run bill carries the period its run recorded, as date parts; an ordinary bill is no Bill due.
+    const runContext = await buildFinanceDocumentContexts(db, scenario.school.id, { documentType: "bill", sessionId: scenario.activeSession.id, billRunId: run.id });
+    expect(runContext.contexts[0]).toMatchObject({
+      bill: { period: { cadence: "monthly", start: { iso: "2026-10-01" }, end: { iso: "2026-10-31" } } },
+      billDue: null,
+      credits: [],
+    });
     const selected = await scenario.actors.accountant.client.school.selectMarketplaceTemplate({ schoolId: scenario.school.id, documentType: "bill", slug: "bill-default", expectedRevisionId: null });
     expect(selected.artifact.pageSize).toBe("half");
     const input = { schoolId: scenario.school.id, source: { documentType: "bill" as const, sessionId: scenario.activeSession.id, billRunId: run.id }, templateRevisionId: selected.artifact.id };

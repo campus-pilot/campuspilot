@@ -25,7 +25,10 @@ for the management implementation.
 | --- | --- |
 | `document-workspace.tsx` | Create/history navigation, visual type selection, missing-template shell alert |
 | `document-generator.tsx` | Type-specific source form, live preview, PDF creation |
-| `finance-document-generator.tsx` | Posted billing-run and payment selection, finance preview, PDF creation |
+| `finance-document-generator.tsx` | The Bills creator's tabs (By date, Billing cycles), posted billing-run and payment selection, finance preview, PDF creation |
+| `bill-due.tsx` | Bill due: the By date tab (date, whole session / class / chosen students) and the admission ledger's Bill dialog; always previews before creating (review hash) |
+| `finance-preview-panel.tsx` | The finance generators' shared preview and create panel with job progress and download |
+| `template-save-model.ts` | `initialSaveFootprint`: the Save dialog (in `template-workspace.tsx`) asks for the name and, for two-up types, the footprint, which starts unselected when the HTML differs from the loaded revision |
 | `document-history.tsx` | Unified session history, downloads, deletion |
 | `document-templates.tsx` | Settings empty state, read-only PDF preview, and the editor's entry (keyed by revision) |
 | `template-workspace.tsx` | The template builder: header row, resizable AI/Code pane, PDF preview, working copy, assistant drafts, revision restore |
@@ -103,7 +106,10 @@ document HTML is shown: an iframe with an **empty** `sandbox`. Its options:
   history.
 - Create document initially shows only the available type cards. It combines the
   four academic types with Bills and Receipts; account statements remain in the
-  admission ledger. Activating a card opens its complete settings, preview,
+  admission ledger. The Bills dialog has two tabs, **By date** (default: Bills
+  due) and **Billing cycles** (the run picker); a Bill due has no card of its own.
+  The admission ledger offers a single admission's Bill due (**Bill**) next to
+  **Payment**. Activating a card opens its complete settings, preview,
   create, download, and history workflow in a wide responsive dialog. Contextual
   query parameters open that dialog with applicable source values preselected.
 - The removed Billing Documents page is not a second home for bulk statements.

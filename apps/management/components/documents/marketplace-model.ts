@@ -1,6 +1,6 @@
 import {
-  documentTypeSchema,
-  type DocumentType,
+  templateDocumentTypeSchema as documentTypeSchema,
+  type TemplateDocumentType as DocumentType,
 } from '@campuspilot/api/routers/school/document/document.dto';
 
 /**
