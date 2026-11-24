@@ -39,6 +39,8 @@ import { TemplatePdfPreview } from './template-pdf-preview';
 import { TemplatePromptEditor } from './template-prompt-editor';
 import { RevisionHistoryDialog, RevisionPicker, RevisionPreview, useRevisionParam, useTemplateRevision } from './template-revisions';
 import { ConfirmationDialog } from '@campuspilot/components/confirmation-dialog';
+import { TemplateSaveDialog, type ConfirmedSave } from './template-save-dialog';
+import { initialSaveFootprint } from './template-save-model';
 
 
 const TemplateCodeEditor = dynamic(() => import('./template-code-editor').then((module) => module.TemplateCodeEditor), {
@@ -53,7 +55,7 @@ type EditTool = 'ai' | 'code';
 type MobileSection = 'preview' | EditTool;
 type PanelRef = ReturnType<typeof useResizablePanelRef>;
 
-const halfPageDocumentTypes = new Set<DocumentTemplateScope['documentType']>(HALF_PAGE_DOCUMENT_TYPES);
+const halfPageDocumentTypes: ReadonlySet<string> = new Set(HALF_PAGE_DOCUMENT_TYPES);
 const pageSizeOptions = [
   { value: 'half', label: 'Half A4 · two per sheet' },
   { value: 'full', label: 'Full A4 · one per sheet' },
@@ -214,9 +216,12 @@ function useTemplateEditor(scope: DocumentTemplateScope, template: ActiveTemplat
     form.setFieldValue('error', '');
     await onReload();
   };
-  const save = () => {
+  /** Saves what is on screen with the name and footprint the person confirmed in the Save dialog. */
+  const save = (confirmed: ConfirmedSave) => {
     // What is on screen is what is saved: a draft shown from the chat becomes the working copy first.
     choose(source.content);
+    form.setFieldValue('name', confirmed.name);
+    form.setFieldValue('pageSize', confirmed.pageSize);
     void form.handleSubmit();
   };
   /** The timer is the one outside thing; the root's ref callback clears it when the editor leaves. */
@@ -302,7 +307,14 @@ function WorkspaceHeader({ title, editor, actions }: { title: string; editor: Te
   );
 }
 
-function SaveActions({ editor }: { editor: TemplateEditorState }) {
+/**
+ * Reload saved and Save template. Save opens the Save dialog, which confirms
+ * the name and the paper footprint (`initialSaveFootprint`: unselected when
+ * the HTML differs from the loaded revision) before the revision is stored.
+ */
+function SaveActions({ editor, template }: { editor: TemplateEditorState; template: ActiveTemplate }) {
+  const [confirming, setConfirming] = useState(false);
+  const choosable = halfPageDocumentTypes.has(template.artifact.documentType);
   return (
     <editor.form.Subscribe selector={(state) => ({ submitting: state.isSubmitting, canSubmit: state.canSubmit })}>
       {({ submitting, canSubmit }) => (
@@ -310,10 +322,26 @@ function SaveActions({ editor }: { editor: TemplateEditorState }) {
           <DocumentButton variant="ghost" disabled={submitting} onClick={() => void editor.reload()}>
             Reload saved
           </DocumentButton>
-          <DocumentButton disabled={submitting || !canSubmit || !editor.dirty} onClick={editor.save}>
+          <DocumentButton disabled={submitting || !canSubmit || !editor.dirty} onClick={() => setConfirming(true)}>
             <Save />
             {submitting ? 'Saving…' : 'Save template'}
           </DocumentButton>
+          <TemplateSaveDialog
+            open={confirming}
+            name={editor.values.name}
+            choosableFootprint={choosable}
+            initialFootprint={initialSaveFootprint({
+              choosable,
+              content: editor.source.content,
+              loadedContent: template.content,
+              pageSize: editor.values.pageSize,
+            })}
+            onOpenChange={setConfirming}
+            onConfirm={(confirmed) => {
+              setConfirming(false);
+              editor.save(confirmed);
+            }}
+          />
         </>
       )}
     </editor.form.Subscribe>
@@ -700,7 +728,7 @@ export function TemplateEditor({
                 Marketplace
               </Link>
             </DocumentButton>
-            <SaveActions editor={editor} />
+            <SaveActions editor={editor} template={template} />
           </>
         }
       />
