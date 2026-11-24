@@ -37,6 +37,18 @@ export const SETTINGS_TEMPLATES: readonly SettingsTemplate[] = [
 ];
 
 /**
+ * The settings template of a document type. Every type has exactly one
+ * (`settings-templates.test.ts` checks the list is exhaustive); its slug is a
+ * human-facing name that predates the API enum, so it is looked up here, never
+ * derived from the type.
+ */
+export function settingsTemplateOf(documentType: DocumentType): SettingsTemplate {
+  const found = SETTINGS_TEMPLATES.find((candidate) => candidate.documentType === documentType);
+  if (!found) throw new Error(`No settings template for document type ${documentType}`);
+  return found;
+}
+
+/**
  * The first template the school has, or null when it has none. The Templates
  * entry of the settings sidebar and the Templates command of the search both
  * open it, so neither points at a template of a feature the school lacks

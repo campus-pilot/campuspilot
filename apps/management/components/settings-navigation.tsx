@@ -24,10 +24,10 @@ import {
 import { RequireFeature } from './require-feature';
 import { RequirePermissions } from './require-permissions';
 import { schoolHref, schoolSessionHref } from './school-route';
-import { firstSettingsTemplate, SETTINGS_TEMPLATES } from './settings-templates';
+import { firstSettingsTemplate, SETTINGS_TEMPLATES, type SettingsTemplate } from './settings-templates';
 
-/** The sidebar icon of each settings template. */
-const TEMPLATE_ICONS: Record<DocumentType, AppShellIcon> = {
+/** The sidebar icon of each document type's template, shared by the settings and marketplace sidebars. */
+export const TEMPLATE_ICONS: Record<DocumentType, AppShellIcon> = {
   report_card: ClipboardCheck,
   id_card: FileBadge,
   admit_card: GraduationCap,
@@ -38,6 +38,19 @@ const TEMPLATE_ICONS: Record<DocumentType, AppShellIcon> = {
   notice: BookOpenCheck,
   question_paper: FileQuestionMark,
 };
+
+/**
+ * Gates a navigation entry on the permission that reads a template: finance
+ * templates (bills, receipts, statements) have their own read permission,
+ * the others the academic one. The settings and marketplace sidebars use the
+ * same gate for the same type.
+ */
+export function templateReadGate(schoolId: string, template: Pick<SettingsTemplate, 'finance'>) {
+  const action = template.finance ? SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES : SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES;
+  return (children: ReactNode) => (
+    <RequirePermissions permissions={{ action, resource: { kind: 'school', schoolId } }}>{children}</RequirePermissions>
+  );
+}
 
 export type SettingsNavigationInput = {
   schoolId: string;
@@ -75,21 +88,7 @@ export function settingsNavigation({
   selectedSessionId,
 }: SettingsNavigationInput): AppShellNavigationEntry[] {
   const firstTemplate = firstSettingsTemplate(has);
-  const withTemplatePermission = (children: ReactNode) => (
-    <RequirePermissions
-      permissions={{
-        action: SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES,
-        resource: { kind: 'school', schoolId },
-      }}
-    >
-      {children}
-    </RequirePermissions>
-  );
-  const withFinanceTemplatePermission = (children: ReactNode) => (
-    <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES, resource: { kind: 'school', schoolId } }}>
-      {children}
-    </RequirePermissions>
-  );
+  const withTemplatePermission = templateReadGate(schoolId, { finance: false });
   return [
     {
       type: 'item',
@@ -189,7 +188,7 @@ export function settingsNavigation({
               // A feature and a permission are separate gates; a template needs both.
               wrap: (children: ReactNode) => (
                 <RequireFeature schoolId={schoolId} feature={template.feature}>
-                  {(template.finance ? withFinanceTemplatePermission : withTemplatePermission)(children)}
+                  {templateReadGate(schoolId, template)(children)}
                 </RequireFeature>
               ),
             })),
