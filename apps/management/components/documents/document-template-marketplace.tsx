@@ -113,21 +113,13 @@ function RedirectTo({ href }: { href: string }): never {
   redirect(href);
 }
 
-/** The marketplace page's column under a compact header naming the type browsed. */
-function MarketplaceFrame({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-5 pb-12">
-      <header className="flex flex-col gap-1 border-b pb-4">
-        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Template marketplace</p>
-        <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
-        <p className="max-w-2xl text-sm text-muted-foreground">
-          Look a design over with your school’s data (samples fill in what is missing), then import it into your school. Your current template stays active
-          until you choose another one.
-        </p>
-      </header>
-      {children}
-    </div>
-  );
+/**
+ * The marketplace page's column. It has no page header of its own: the
+ * breadcrumbs and the sidebar name the type, and the design's name heads the
+ * design page.
+ */
+function MarketplaceFrame({ children }: { children: ReactNode }) {
+  return <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-5 pb-12">{children}</div>;
 }
 
 /**
@@ -164,7 +156,7 @@ function MarketplaceTypeGate({ scope, children }: { scope: DocumentTemplateScope
           </DocumentPermission>
         ) : (
           <DocumentNotice>
-            This school has no {DOCUMENT_LABELS[scope.documentType].toLowerCase()} templates. Choose another document type from the
+            This school has no templates for {DOCUMENT_LABELS[scope.documentType]}. Choose another document type from the
             marketplace navigation.
           </DocumentNotice>
         )
@@ -220,7 +212,7 @@ function MarketplaceLandingRedirect({ schoolId, types }: { schoolId: string; typ
 /** `/marketplace/templates`: opens the first type the school has that the user may read. */
 export function MarketplaceLanding({ schoolId }: { schoolId: string }) {
   return (
-    <MarketplaceFrame title="Document templates">
+    <MarketplaceFrame>
       <MarketplaceTypes schoolId={schoolId}>{(types) => <MarketplaceLandingRedirect schoolId={schoolId} types={types} />}</MarketplaceTypes>
     </MarketplaceFrame>
   );
@@ -235,7 +227,7 @@ export function MarketplaceLanding({ schoolId }: { schoolId: string }) {
 export function MarketplaceTypeLanding({ schoolId, documentType }: { schoolId: string; documentType: DocumentType }) {
   const scope = { schoolId, documentType };
   return (
-    <MarketplaceFrame title={DOCUMENT_LABELS[documentType]}>
+    <MarketplaceFrame>
       <MarketplaceTypeGate scope={scope}>
         <MarketplaceCatalog scope={scope}>
           {({ items, active }) => {
@@ -257,7 +249,7 @@ export function MarketplaceTypeLanding({ schoolId, documentType }: { schoolId: s
 export function MarketplaceDesignPage({ schoolId, documentType, slug }: { schoolId: string; documentType: DocumentType; slug: string }) {
   const scope = { schoolId, documentType };
   return (
-    <MarketplaceFrame title={DOCUMENT_LABELS[documentType]}>
+    <MarketplaceFrame>
       <MarketplaceTypeGate scope={scope}>
         <MarketplaceCatalog scope={scope}>
           {({ items, active }) => {
@@ -325,7 +317,7 @@ function MarketplaceDesignView({ item, inUse, ...state }: DesignState & { item: 
 function DesignSummary({ item }: { item: MarketplaceItem }) {
   return (
     <div className="flex min-w-0 flex-col gap-1">
-      <h2 className="text-base font-semibold">{item.name}</h2>
+      <h1 className="text-xl font-semibold tracking-tight">{item.name}</h1>
       <p className="text-xs font-medium text-foreground/80">{footprintLabel(item)}</p>
       <p className="max-w-2xl text-xs leading-relaxed text-muted-foreground">{item.description}</p>
     </div>

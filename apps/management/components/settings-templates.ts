@@ -48,7 +48,7 @@ const template = (id: string, label: string, slug: string, documentType: Documen
 
 /** Every settings template, in the order the sidebar lists them. */
 export const SETTINGS_TEMPLATES: readonly SettingsTemplate[] = [
-  template('examination', 'Examination', 'examination', 'report_card'),
+  template('examination', 'Report card', 'examination', 'report_card'),
   template('id-card', 'ID card', 'id-card', 'id_card'),
   template('admit-card', 'Admit card', 'admit-card', 'admit_card'),
   template('timetable', 'Timetable', 'timetable', 'timetable'),

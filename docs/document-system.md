@@ -182,8 +182,9 @@ the generator.
    `redirect()` during render once the client knows the features and the catalog,
    never in an effect. A type the school does not have says so (with the sidebar to
    choose another); an address that is not a document type is not found.
-4. The design page shows a compact header naming the type, the design's name,
-   paper, description and actions, then **its PDF with the school's data** (see
+4. The design page has no page header of its own (the breadcrumbs and the sidebar
+   name the type): it shows the design's name as its heading, its paper, description
+   and actions, then **its PDF with the school's data** (see
    "Preview context"; `PdfPreview`, the builder's viewer) in a frame most of the screen tall. Only that design is
    converted, never a page of thumbnails; see "Marketplace PDF previews" below for
    the cost guard. A slug the catalog no longer lists says "This design is no longer

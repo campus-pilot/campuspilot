@@ -123,8 +123,8 @@ document HTML is shown: an iframe with an **empty** `sandbox`. Its options:
   cards launch workflows and a radiogroup when a selected `value` is supplied.
 - The marketplace is a section of its own, like Settings: its sidebar lists the
   school's document types (Back to settings first), and only the open type is
-  expanded with its designs. The page shows one design: a compact header, its
-  summary and actions, then its PDF in a frame most of the screen tall. Only that
+  expanded with its designs. The page shows one design with no page header of
+  its own (breadcrumbs and sidebar name the type): its name, summary and actions, then its PDF in a frame most of the screen tall. Only that
   design is converted. *Preview* opens it full screen (`PreviewDialogContent` size
   `full`) with Use template beside the title. The type, design and open preview are
   in the address, not local state. No tab rows.
