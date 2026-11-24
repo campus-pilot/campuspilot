@@ -1,7 +1,7 @@
 "use client";
 
 import { useForm } from "@tanstack/react-form";
-import { Sparkles } from "lucide-react";
+import { ClipboardCopy } from "lucide-react";
 import { z } from "zod";
 import { CopyTextButton } from "@campuspilot/components/documents/copy-text-button";
 import {
@@ -23,6 +23,8 @@ import {
 
 /** Opens the portable AI editing workflow without displacing the editor and
  * preview. The generated prompt remains vendor-neutral and never sends data.
+ * It is shown only to someone without the assistant, so the button offers a
+ * prompt ("Get edit prompt") rather than promising an edit made here.
  */
 export function TemplatePromptEditor({
   documentType,
@@ -57,8 +59,8 @@ export function TemplatePromptEditor({
             variant="outline"
             onClick={() => form.setFieldValue("open", true)}
           >
-            <Sparkles />
-            Edit with AI
+            <ClipboardCopy />
+            Get edit prompt
           </DocumentButton>
           <Dialog
             open={open}
@@ -66,10 +68,12 @@ export function TemplatePromptEditor({
           >
             <DialogContent className="sm:max-w-2xl">
               <DialogHeader>
-                <DialogTitle>Edit with your own AI app</DialogTitle>
+                <DialogTitle>Get an edit prompt</DialogTitle>
                 <DialogDescription>
-                  Describe the change, copy an editing brief, and paste it into
-                  your preferred AI app. Nothing is sent from CampusPilot.
+                  Describe the change and copy the prompt. Paste it into your
+                  own AI app, such as ChatGPT, Gemini or Claude, to make the
+                  change, then come back and paste the updated HTML into the
+                  Code tab and save. Nothing is sent from CampusPilot.
                 </DialogDescription>
               </DialogHeader>
               <div className="flex min-w-0 flex-col gap-4">

@@ -138,7 +138,7 @@ document HTML is shown: an iframe with an **empty** `sandbox`. Its options:
 - The preview is the printed PDF (`PdfPreview`): report cards portrait A4,
   timetables landscape A4, ID cards imposed on portrait A4, half-A4 admit/finance
   revisions in one of two vertical slots, exactly as generated.
-- *Edit with AI* (only for someone without the assistant) and Marketplace remain
+- *Get edit prompt* (only for someone without the assistant) and Marketplace remain
   peer header actions. Assistant users reach the chat through the *AI* tab, or on a
   phone the *Ask for a change* bar fixed to the bottom of the screen. The marketplace should not visually dominate source
   editing when a template is already selected.

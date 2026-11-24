@@ -250,7 +250,7 @@ like the question paper studio (`TemplateEditor` in `template-workspace.tsx`):
   revisions* (see "Revision history"), the AI action, *Marketplace* (an icon) and
   *Save*. There is no standing *Reload saved*: going back to a saved revision is the
   revision select's job. Reloading is offered inside a failed save's message, where a
-  template someone else saved meanwhile has to be re-read before saving. The AI action is the portable *Edit with AI* dialog, shown
+  template someone else saved meanwhile has to be re-read before saving. The AI action is the portable *Get edit prompt* dialog (the person copies the prompt into their own AI app, such as ChatGPT, Gemini or Claude, and pastes the updated HTML back into the *Code* tab), shown
   only to someone who may not use the assistant (the question paper's gate,
   `useAssistantGate`: the school's `assistant` feature and the user's assistant
   role; there is no other flag). Someone who may use it has no header button: the
@@ -1584,7 +1584,7 @@ template merely to prove that an import button is clickable.
 - Do not cache template previews across requests: they print the school's data
   as the caller may read it.
 - Do not add `classId` to timetable generation.
-- Do not silently call an AI provider from the portable Edit with AI dialog; the
+- Do not silently call an AI provider from the portable Get edit prompt dialog; the
   in-app assistant is the only AI path, behind its own gate.
 - Do not let the assistant save a template from the editor's chat, and do not store
   its drafts: the person saves through Save.

@@ -448,7 +448,7 @@ deliberate and must remain visible in future redesigns:
   Once selected, reveal that type's required fields and preview/generation flow.
 - Template editing is a split workspace on wide screens and a stacked workspace
   on small screens: collapsible Handlebars source first, sanitized sample preview
-  second. Edit with AI and Marketplace are peer actions in the page header.
+  second. Get edit prompt and Marketplace are peer actions in the page header.
 - The AI helper is a portable-prompt workflow. It must remain provider-neutral and
   local to the browser; it never calls an AI service or silently replaces template
   source.
