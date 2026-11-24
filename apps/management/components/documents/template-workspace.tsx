@@ -265,11 +265,22 @@ function useTemplateEditor(scope: DocumentTemplateScope, template: ActiveTemplat
 
 type TemplateEditorState = ReturnType<typeof useTemplateEditor>;
 
-/** How each draft in the chat stands for this editor (`TemplateDraftCard`); a draft of another template is only described. */
-function draftBinding(editor: TemplateEditorState, scope: DocumentTemplateScope, savedAt: Date): TemplateDraftBinding {
+/**
+ * How each draft in the chat stands for this editor (`TemplateDraftCard`); a
+ * draft of another template is only described. A card's Save shows its draft
+ * first, so the save dialog (`openSave`) stores that draft, since Save always
+ * stores what is on screen.
+ */
+function draftBinding(editor: TemplateEditorState, scope: DocumentTemplateScope, savedAt: Date, openSave: (content: string) => void): TemplateDraftBinding {
   return {
     statusOf: (draft): TemplateDraftCardStatus => templateDraftStatusOf(draft, { scope, source: editor.source, savedAt }),
     onShow: editor.showDraft,
+    onSave: (draft) => {
+      // Only a draft of this school's template of this type is ever loaded or saved here.
+      if (!draftBelongsTo(draft, scope)) return;
+      editor.showDraft(draft);
+      openSave(draft.content);
+    },
   };
 }
 
@@ -354,6 +365,25 @@ function WorkspaceHeader({ title, editor, parts, compact }: { title: string; edi
 }
 
 /**
+ * The save dialog's state, kept by the editor so the header's Save and a chat
+ * draft card's Save open the same dialog. `openFor` takes the source about to
+ * be saved instead of reading the screen: a card shows its draft in the same
+ * click, and the screen has not re-rendered with it yet.
+ */
+function useSaveDialog(editor: TemplateEditorState, template: ActiveTemplate) {
+  const [open, setOpen] = useState(false);
+  const choosable = halfPageDocumentTypes.has(template.artifact.documentType);
+  const openFor = (content: string) => {
+    const footprint = initialSaveFootprint({ choosable, content, loadedContent: template.content, pageSize: editor.values.pageSize });
+    editor.form.setFieldValue('saveFootprint', footprint ?? '');
+    setOpen(true);
+  };
+  return { open, setOpen, choosable, openFor };
+}
+
+type SaveDialogState = ReturnType<typeof useSaveDialog>;
+
+/**
  * Save: asks for the template's name in a dialog (prefilled with the current
  * one), then stores what is on screen as a new revision. The name is asked
  * only here, so the code pane keeps its room for the code. A name or source
@@ -366,15 +396,12 @@ function WorkspaceHeader({ title, editor, parts, compact }: { title: string; edi
  * HTML is the loaded revision's, and unselected when it differs
  * (`initialSaveFootprint`), so a design pasted over another never keeps that
  * design's footprint by accident; Save waits until one is chosen.
+ *
+ * The dialog's state is the editor's (`useSaveDialog`), so a chat draft
+ * card's Save opens the same dialog.
  */
-function SaveAction({ editor, template }: { editor: TemplateEditorState; template: ActiveTemplate }) {
-  const [open, setOpen] = useState(false);
-  const choosable = halfPageDocumentTypes.has(template.artifact.documentType);
-  const openDialog = () => {
-    const footprint = initialSaveFootprint({ choosable, content: editor.source.content, loadedContent: template.content, pageSize: editor.values.pageSize });
-    editor.form.setFieldValue('saveFootprint', footprint ?? '');
-    setOpen(true);
-  };
+function SaveAction({ editor, dialog }: { editor: TemplateEditorState; dialog: SaveDialogState }) {
+  const { open, setOpen, choosable } = dialog;
   const confirm = async () => {
     const footprint = editor.form.getFieldValue('saveFootprint');
     if (choosable) {
@@ -387,7 +414,7 @@ function SaveAction({ editor, template }: { editor: TemplateEditorState; templat
     <editor.form.Subscribe selector={(state) => state.isSubmitting}>
       {(submitting) => (
         <Dialog open={open} onOpenChange={(next) => setOpen(submitting ? true : next)}>
-          <DocumentButton disabled={submitting || !editor.dirty} onClick={openDialog}>
+          <DocumentButton disabled={submitting || !editor.dirty} onClick={() => dialog.openFor(editor.source.content)}>
             <Save />
             {submitting ? 'Saving…' : 'Save'}
           </DocumentButton>
@@ -890,14 +917,20 @@ export function TemplateEditor({
     chat.startNew();
   };
   const chatWithDrafts = { ...chat, startNew: startNewChat };
-  const drafts = draftBinding(editor, scope, savedAt);
-  /** On a phone, showing a draft closes the sheet on the preview, where the draft now is. */
+  const saveDialog = useSaveDialog(editor, template);
+  const drafts = draftBinding(editor, scope, savedAt, saveDialog.openFor);
+  /** On a phone, showing or saving a draft closes the sheet on the preview, where the draft now is. */
   const phoneDrafts: TemplateDraftBinding = {
     ...drafts,
     onShow: (draft) => {
       drafts.onShow(draft);
       setMobileChatOpen(false);
       setMobilePreview(true);
+    },
+    onSave: (draft) => {
+      setMobileChatOpen(false);
+      setMobilePreview(true);
+      drafts.onSave(draft);
     },
   };
   const assistant = withAssistant ? (
@@ -933,7 +966,7 @@ export function TemplateEditor({
           ),
           ai: <AiAction gate={gate} scope={scope} editor={editor} contextHelp={contextHelp} />,
           section: sideBySide ? null : <MobileSectionSelect value={mobilePreview ? 'preview' : 'code'} onChange={(section) => setMobilePreview(section === 'preview')} />,
-          save: <SaveAction editor={editor} template={template} />,
+          save: <SaveAction editor={editor} dialog={saveDialog} />,
         }}
       />
       <SaveError editor={editor} />

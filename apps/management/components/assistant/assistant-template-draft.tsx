@@ -6,13 +6,15 @@ import { templateDraftsOf, type TemplateDraft } from '@campuspilot/components/do
 
 /**
  * What the template editor tells its chat about the drafts in it: where each
- * stands for the editor (shown, available, from before the last save) and how
- * to show one again. A chat without it (the assistant's own page) only
- * describes the drafts.
+ * stands for the editor (shown, available, from before the last save), how
+ * to show one again and how to save one. A chat without it (the assistant's
+ * own page) only describes the drafts.
  */
 export type TemplateDraftBinding = {
   statusOf: (draft: TemplateDraft) => TemplateDraftCardStatus;
   onShow: (draft: TemplateDraft) => void;
+  /** Shows the draft in the editor and opens the editor's save dialog, where the person names and saves it. */
+  onSave: (draft: TemplateDraft) => void;
 };
 
 /** Shown when a proposal's stored verdict cannot be read: it is never loaded into the editor. */
@@ -40,6 +42,7 @@ export function AssistantTemplateDraftCard({
       problems={problems}
       status={binding ? binding.statusOf(draft) : 'elsewhere'}
       onShow={binding ? () => binding.onShow(draft) : undefined}
+      onSave={binding ? () => binding.onSave(draft) : undefined}
     />
   );
 }

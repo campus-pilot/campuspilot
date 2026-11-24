@@ -60,4 +60,25 @@ describe('template draft card', () => {
     expect(screen.getByText(/Shown in the editor/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Show in editor/ })).toBeNull();
   });
+
+  it('offers Save on a shown or earlier ready draft, as a question paper draft card does', () => {
+    const onSave = vi.fn();
+    render(<TemplateDraftCard ordinal={1} problems={null} status="shown" onShow={() => undefined} onSave={onSave} />);
+    expect((screen.getByRole('button', { name: /Shown in editor/ }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    cleanup();
+    render(<TemplateDraftCard ordinal={1} problems={null} status="available" onShow={() => undefined} onSave={onSave} />);
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
+    expect(onSave).toHaveBeenCalledTimes(2);
+  });
+
+  it('offers no Save on a held draft or one from before the last save', () => {
+    render(<TemplateDraftCard ordinal={1} problems={null} status="held" onShow={() => undefined} onSave={() => undefined} />);
+    expect(screen.getByRole('button', { name: /Replace my edits/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^Save$/ })).toBeNull();
+    cleanup();
+    render(<TemplateDraftCard ordinal={1} problems={null} status="saved-before" onShow={() => undefined} onSave={() => undefined} />);
+    expect(screen.queryByRole('button', { name: /^Save$/ })).toBeNull();
+  });
 });
