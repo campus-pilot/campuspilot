@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { DocumentType } from '@campuspilot/api/routers/school/document/document.dto';
+import type { TemplateDocumentType as DocumentType } from '@campuspilot/api/routers/school/document/document.dto';
 
 /** The print size a Notice design is previewed at (`print.size`); never saved with a revision. */
 export const noticePreviewPrintSizeSchema = z.enum(['full', 'half']);

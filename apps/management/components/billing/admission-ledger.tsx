@@ -46,6 +46,7 @@ import {
   SelectValue,
 } from "@campuspilot/ui/components/select";
 import {
+  Download,
   HandCoins,
   MoreHorizontal,
   Percent,
@@ -71,6 +72,7 @@ import {
   StatementDocumentDialog,
   type StatementSession,
 } from "./finance-document-action";
+import { BillDueDialog } from "@/components/documents/bill-due";
 
 type ActionDialog =
   | "manual"
@@ -79,6 +81,7 @@ type ActionDialog =
   | "refund"
   | "reversal"
   | "statement"
+  | "bill"
   | null;
 type LedgerEntry = {
   id: string;
@@ -486,7 +489,21 @@ function AdmissionFinanceActions({
             onClick={() => onDialogChange("payment")}
           >
             <HandCoins aria-hidden />
-            Record payment
+            Payment
+          </Button>
+        </RequirePermissions>
+        {/* A Bill due for this admission as of a date (docs/document-system.md "Bill due"). */}
+        <RequirePermissions
+          permissions={[
+            { action: SCHOOL_ACTIONS.GENERATE_FINANCE_DOCUMENTS, resource: { kind: "school", schoolId } },
+            { action: SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES, resource: { kind: "school", schoolId } },
+            { action: SCHOOL_ACTIONS.READ_SESSION_FINANCE, resource: { kind: "school", schoolId } },
+            { action: SCHOOL_ACTIONS.READ_ADMISSION_LEDGER, resource: { kind: "school", schoolId } },
+          ]}
+        >
+          <Button type="button" variant="outline" disabled={statementSessions.length === 0} onClick={() => onDialogChange("bill")}>
+            <Download aria-hidden />
+            Bill
           </Button>
         </RequirePermissions>
         <DropdownMenu>
@@ -578,6 +595,8 @@ function AdmissionFinanceActions({
         <RefundDialog {...baseProps} />
       ) : dialog === "reversal" && selectedEntry ? (
         <ReversalDialog {...baseProps} />
+      ) : dialog === "bill" ? (
+        <BillDueDialog schoolId={schoolId} admissionId={admissionId} session={defaultStatementSession} onClose={() => onDialogChange(null)} />
       ) : dialog === "statement" ? (
         <StatementDocumentDialog key={statementDialogRevision} schoolId={schoolId} admissionIds={[admissionId]} sessions={statementSessions} defaultSessionId={statementSessionDefault} onClose={() => onDialogChange(null)} />
       ) : null}

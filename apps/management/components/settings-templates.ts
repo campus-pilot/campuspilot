@@ -1,4 +1,4 @@
-import { DOCUMENT_TYPE_FEATURE, type DocumentType } from '@campuspilot/api/routers/school/document/document.dto';
+import { DOCUMENT_TYPE_FEATURE, type TemplateDocumentType as DocumentType } from '@campuspilot/api/routers/school/document/document.dto';
 import type { SchoolFeatureKey } from '@campuspilot/api/routers/school/feature-flags/feature-flags.dto';
 
 /** One template page under Settings › Templates. */

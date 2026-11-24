@@ -1,5 +1,5 @@
 'use client';
-import type { DocumentType } from '@campuspilot/api/routers/school/document/document.dto';
+import type { TemplateDocumentType as DocumentType } from '@campuspilot/api/routers/school/document/document.dto';
 import { DocumentNotice } from '@campuspilot/components/documents/document-controls';
 import { DocumentTemplates } from './document-templates';
 import { DocumentPermission, templateReadAction } from './document-common';

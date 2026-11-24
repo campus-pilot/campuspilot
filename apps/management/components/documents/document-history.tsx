@@ -22,6 +22,7 @@ import {
   DocumentPermission,
   DocumentReadError,
   SCHOOL_ACTIONS,
+  isFinanceDocumentType,
   useDocumentCache,
   type DocumentScope,
 } from './document-common';
@@ -227,10 +228,7 @@ function JobRow({ job }: { job: DocumentGenerationJobDto }) {
   );
 }
 function ArtifactRow({ artifact }: { artifact: DocumentArtifact }) {
-  const finance =
-    artifact.documentType === 'bill' ||
-    artifact.documentType === 'receipt' ||
-    artifact.documentType === 'statement';
+  const finance = isFinanceDocumentType(artifact.documentType);
   const readAction = finance
     ? SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS
     : SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS;

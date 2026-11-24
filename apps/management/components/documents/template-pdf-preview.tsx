@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { ORPCError } from '@orpc/client';
 import { keepPreviousData, skipToken, useQuery, type UseQueryResult } from '@tanstack/react-query';
-import type { DocumentType } from '@campuspilot/api/routers/school/document/document.dto';
+import type { TemplateDocumentType as DocumentType } from '@campuspilot/api/routers/school/document/document.dto';
 import { loadPdf, type LoadedPdf } from '@campuspilot/components/documents/pdf-pages';
 import { PdfPreview } from '@campuspilot/components/documents/pdf-preview';
 

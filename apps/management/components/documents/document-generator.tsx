@@ -596,7 +596,8 @@ function ClassSelector({
     </form.Subscribe>
   );
 }
-function SchoolClassSelect({
+/** Every class of the school; also the Bill due's class choice (`bill-due.tsx`). */
+export function SchoolClassSelect({
   scope,
   field,
   onValueChange,

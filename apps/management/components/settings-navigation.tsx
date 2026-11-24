@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
-import type { DocumentType } from '@campuspilot/api/routers/school/document/document.dto';
+import type { TemplateDocumentType as DocumentType } from '@campuspilot/api/routers/school/document/document.dto';
 import type { SchoolFeatureKey } from '@campuspilot/api/routers/school/feature-flags/feature-flags.dto';
 import type { AppShellIcon, AppShellNavigationEntry } from '@campuspilot/components/app-shell';
 import {

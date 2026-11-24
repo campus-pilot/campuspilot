@@ -57,14 +57,15 @@ const sections = [
 ] as const;
 
 /**
- * Types the Documents workspace can create. Statements stay contextual to an
- * admission ledger, a notice is written and published in Notices, and a
+ * Types the Documents workspace offers as cards. Statements stay contextual to
+ * an admission ledger, a notice is written and published in Notices, and a
  * question paper is generated in an examination's Question paper tab: those
- * only share the template system.
+ * only share the template system. A Bill due has no card of its own: it is
+ * the Bills card's "By date" tab (`FinanceDocumentGenerator`).
  */
 type WorkspaceDocumentType = Exclude<
   DocumentType,
-  "statement" | "notice" | "question_paper"
+  "statement" | "notice" | "question_paper" | "bill_due"
 >;
 
 /** Settings slugs are existing product vocabulary, not a transformation of the

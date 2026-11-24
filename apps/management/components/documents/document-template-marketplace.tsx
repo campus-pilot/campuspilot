@@ -9,7 +9,7 @@ import { Check, LayoutTemplate, Maximize2 } from 'lucide-react';
 import { z } from 'zod';
 import {
   DOCUMENT_LABELS,
-  type DocumentType,
+  type TemplateDocumentType as DocumentType,
 } from '@campuspilot/api/routers/school/document/document.dto';
 import {
   DocumentButton,
