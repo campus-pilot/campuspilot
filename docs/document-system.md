@@ -577,7 +577,11 @@ tool policy). What the template editor adds:
   succeeded call is a card in the chat (`ASSISTANT_CARD_TOOLS`,
   `document_template_draft`): the problems when it would not save, else where it
   stands for the editor (*Shown in the editor*, *Show in editor* for an earlier one,
-  or *Proposed before the template was last saved*).
+  or *Proposed before the template was last saved*). Like a question paper's draft
+  card, a ready card that is shown or can be shown also offers *Save*: it shows that
+  draft and opens the editor's own save dialog (the name and, for a two-up type, the footprint), so
+  nothing saves without the person confirming there. A held draft offers only
+  *Replace my edits*, since saving it would discard their edits.
 - **The working copy.** The template on screen is derived (`editorSourceOf`) from the
   person's own working copy and the newest ready draft of this school's template of
   this type proposed after the template was last saved (`latestTemplateDraftOf`,

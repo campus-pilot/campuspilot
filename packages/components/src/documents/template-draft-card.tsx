@@ -1,5 +1,5 @@
 import { Button } from '@campuspilot/ui/components/button';
-import { Eye, Replace } from 'lucide-react';
+import { Check, Eye, Replace, Save } from 'lucide-react';
 
 import { AssistantViewFrame } from '../assistant/views/view-frame';
 
@@ -25,15 +25,14 @@ const STATUS_TEXT: Record<TemplateDraftCardStatus, string> = {
   elsewhere: 'Ready. Open the template editor to see and save it.',
 };
 
-/** What a ready draft card offers: show an available draft, or replace the person's edits with a held one; nothing otherwise. */
-function DraftCardAction({ status, onShow }: { status: TemplateDraftCardStatus; onShow: () => void }) {
-  if (status === 'available') {
-    return (
-      <Button type="button" variant="ghost" size="sm" className="self-start" onClick={onShow}>
-        <Eye data-icon="inline-start" aria-hidden /> Show in editor
-      </Button>
-    );
-  }
+/**
+ * What a ready draft card offers, as a question paper's draft card does: the
+ * draft in the editor (Show in editor, or "Shown in editor" once it is there)
+ * and Save. A held draft offers only "Replace my edits", since saving it would
+ * throw the person's edits away; a draft from before the last save, or one
+ * away from its editor, offers nothing.
+ */
+function DraftCardActions({ status, onShow, onSave }: { status: TemplateDraftCardStatus; onShow: () => void; onSave?: () => void }) {
   if (status === 'held') {
     return (
       <Button type="button" variant="outline" size="sm" className="self-start" onClick={onShow}>
@@ -41,13 +40,30 @@ function DraftCardAction({ status, onShow }: { status: TemplateDraftCardStatus; 
       </Button>
     );
   }
-  return null;
+  if (status !== 'shown' && status !== 'available') return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {status === 'shown' ? (
+        <Button type="button" variant="ghost" size="sm" disabled>
+          <Check data-icon="inline-start" aria-hidden /> Shown in editor
+        </Button>
+      ) : (
+        <Button type="button" variant="ghost" size="sm" onClick={onShow}>
+          <Eye data-icon="inline-start" aria-hidden /> Show in editor
+        </Button>
+      )}
+      <Button type="button" variant="ghost" size="sm" onClick={onSave} disabled={!onSave}>
+        <Save data-icon="inline-start" aria-hidden /> Save
+      </Button>
+    </div>
+  );
 }
 
 /**
  * A template the assistant proposed in the template editor's chat
  * (docs/document-system.md, "Edit with the assistant"). Presentational: the
- * chat reads the call and decides the status; "Show in editor" is a callback.
+ * chat reads the call and decides the status; "Show in editor" and Save are
+ * callbacks (Save opens the editor's own save dialog on this draft).
  * A proposal that cannot be saved lists the reasons the check gave, which the
  * assistant is told to fix before it answers.
  */
@@ -56,6 +72,7 @@ export function TemplateDraftCard({
   problems,
   status,
   onShow,
+  onSave,
 }: {
   /** "Draft 2": its place among the conversation's template drafts. */
   ordinal: number;
@@ -64,6 +81,8 @@ export function TemplateDraftCard({
   status: TemplateDraftCardStatus;
   /** Loads this draft into the editor; offered only while it is `available` or `held`. */
   onShow?: () => void;
+  /** Shows this draft in the editor and opens its save dialog; offered only while it is `shown` or `available`. */
+  onSave?: () => void;
 }) {
   return (
     <AssistantViewFrame title={`Draft ${ordinal}`}>
@@ -80,7 +99,7 @@ export function TemplateDraftCard({
         ) : (
           <p>{STATUS_TEXT[status]}</p>
         )}
-        {!problems && onShow ? <DraftCardAction status={status} onShow={onShow} /> : null}
+        {!problems && onShow ? <DraftCardActions status={status} onShow={onShow} onSave={onSave} /> : null}
       </div>
     </AssistantViewFrame>
   );
