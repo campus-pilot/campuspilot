@@ -26,7 +26,7 @@ the backend contract for data, persistence, rendering, and authorization.
 | `finance-document.context.ts` | Immutable bill, payment/refund receipt, and cutoff statement contexts |
 | `bill-due.context.ts` | Bill due contexts: the billing period containing a date, set-based reads for up to 1,500 accounts, review hash |
 | `finance-document.values.ts`, `finance-document.ledger.ts` | Money, date parts, billing periods as templates see them; shared ledger helpers (chunks, cutoff) |
-| `document.catalog.standard.ts` | The CampusPilot Standard designs: a frozen copy of Prem Chandra's templates (2026-11-24) |
+| `document.catalog.standard.ts` | The CampusPilot Standard designs: a frozen copy of a customer school's production templates (2026-11-24) |
 | `document.default-templates.ts` | Selects the default designs for a new school, with S3 compensation |
 | `finance-document.integration.test.ts` | Finance history, authorization, cutoff, and historical-regeneration coverage |
 | `../notice/notice.render.ts` | Notice context, template choice and pinning, flowing layout use, and the cached notice PDF (the `notice` type has a template but no generator source) |

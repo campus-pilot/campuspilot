@@ -156,10 +156,14 @@ describe('document template marketplace', () => {
       expect(half.sort()).toEqual(['standard-admit-card', 'standard-bill', 'standard-receipt']);
     });
 
-    it('leave out the school-specific affiliation line of the timetable', () => {
+    it('leave out the school-specific lines of the timetable and the report card script', () => {
       const { content } = template('standard-timetable');
       expect(content).not.toContain('Bihar');
       expect(content).not.toContain('Affiliated');
+      expect(content).not.toContain('Arrival Time');
+      expect(content).not.toContain('Departure Time');
+      expect(content).not.toContain('KINDLY CLEAR YOUR SCHOOL FEE');
+      expect(template('standard-report-card').content).not.toMatch(/<script/i);
       expect(renderDocument(content, SAMPLE_DOCUMENT_CONTEXT)).toContain('Greenwood Public School');
     });
 
@@ -179,8 +183,8 @@ describe('document template marketplace', () => {
     });
   });
 
-  it("keeps printing a Bill due with Prem Chandra's production bill template, unchanged", () => {
-    const production = readFileSync(new URL('./__fixtures__/prem-production-bill.hbs', import.meta.url), 'utf8');
+  it("keeps printing a Bill due with a migrated production custom bill template, unchanged", () => {
+    const production = readFileSync(new URL('./__fixtures__/legacy-custom-bill.hbs', import.meta.url), 'utf8');
     const html = renderDocument(production, SAMPLE_BILL_DUE_CONTEXT);
     expect(html).toContain('Tuition fee');
     expect(html).toContain('Transport fee');

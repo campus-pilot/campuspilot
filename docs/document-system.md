@@ -836,7 +836,7 @@ One bill template prints ordinary bills and Bills due, so both have one shape
   (parts), `reference`, `note` and amounts; empty on an ordinary bill.
 - **Zero hiding**: `balanceBefore` and every period total (`paidThisPeriod`,
   `discountThisPeriod`, `waiverThisPeriod`, `writeOffThisPeriod`,
-  `creditCorrectionThisPeriod`, `refundThisPeriod`) are null when zero, so
+  `creditCorrectionThisPeriod`, `otherCreditsThisPeriod`, `refundThisPeriod`) are null when zero, so
   `{{#if}}` hides their rows; `balanceAfter` (the amount due) is always a value,
   even `0.00`. The totals are always null on an ordinary bill.
 - The legacy marketplace bill designs are adapted (`adaptLegacyBillRows`,
@@ -902,14 +902,15 @@ every type it can generate (`DEFAULT_DOCUMENT_TEMPLATE_SLUGS`): the
 `standard-report-card`, `standard-id-card`, `standard-admit-card`,
 `standard-timetable`, `standard-bill`, `standard-receipt`,
 `standard-question-paper`) and, for statements, the existing
-`statement-default-full`. The Standard set is a frozen copy of the templates
-Prem Chandra Public School had selected in production on that date; later edits
-by that school never change it. Admit card, bill and receipt are half A4, the
-rest full A4. Changes in the copy, recorded at the top of the file: the bill is
-half A4 and carries the bill contract and Bill due rows, the timetable loses the
-school's "Affiliated to Bihar Govt." line (and its logos get alt text), and the
-report card reads its mode-mark print flag through `@root` inside the subject
-loop. The set is also listed in the marketplace.
+`statement-default-full`. The Standard set is a frozen copy of the templates a
+customer school had selected in production on that date; later edits by that
+school never change it. Admit card, bill and receipt are half A4, the rest full
+A4. Changes in the copy, recorded at the top of the file: the bill is half A4
+and carries the bill contract and Bill due rows; the timetable loses the school's
+own lines (its state affiliation, arrival and departure times, and a dated fee
+reminder) and its logos get alt text; the report card reads its mode-mark print
+flag through `@root` inside the subject loop and loses a script (scripts are
+sanitised away and never ran). The set is also listed in the marketplace.
 
 - **Who gets them**: self-service creation (`createOwnSchool`), platform
   administrators (`systemAdmin.addSchool`) and schools set up from an onboarding
@@ -923,10 +924,11 @@ loop. The set is also listed in the marketplace.
   the selection pointer). The objects are written inside the transaction and
   `withDefaultDocumentTemplates` deletes them when it fails (S3 and PostgreSQL
   share no transaction).
-- **Known limit**: `systemAdmin.deleteSchool` deletes only the school row, and
-  `artifact` / `school_document_template` reference the school without a
-  cascade, so a newly created school now has rows that block that delete (as any
-  school with a template already did).
+- **Deleting a school**: `systemAdmin.deleteSchool` removes the school's
+  template selections and template revisions with it (their objects are deleted
+  after the transaction commits), so a newly created school stays deletable. Its
+  other refusals are unchanged: a school with generated documents or any other
+  data still cannot be deleted.
 
 ## Bill due
 
@@ -960,28 +962,44 @@ jobs"). No WhatsApp or Cadet Portal delivery.
   from before the period. A reversal and the fact it reverses both disappear when
   both are in the period. `bill.total` is the sum of `lines[]`; `bill.number` and
   `bill.id` are null, `bill.issueDate` is the chosen date.
-- **Identity**: the posting-time snapshot of the account's newest fact through
-  the date that carries one. An account with no fact through the date has nothing
-  to print and is left out with a warning; when nobody is left the request is
-  refused. The session years are the requested session's.
+- **Everyone in scope is printed**, including a student who owes nothing or has
+  no ledger fact through the date (zeros and nulls as the facts give).
+- **Identity** is its own fact (`PrintedIdentity.source`): the posting-time
+  snapshot of the account's newest fact through the date that carries one; when
+  there is none (no fact yet, or facts from before snapshots existed), the
+  admission's current name, number and parents and its current enrollment's
+  class, section and roll number in the session. The session years are the
+  requested session's.
 - **Order**: by the snapshot's class, section, roll number, name and admission
   number.
 - **Review**: like statements, each account's high-water ledger sequence through
-  the date is hashed (with the session, currency, time zone, date, period key and
+  the date (`null` for an account with no fact: no cutoff; a job pins it as `0`,
+  so it reads nothing posted since) is hashed (with the session, currency, time zone, date, period key and
   recipients); generation must present the preview's hash, and the job reads each
   account only up to its pinned sequence. The screens therefore always preview
   before creating.
-- **Bulk reads**: `bill-due.context.ts` reads with one set-based query per chunk
-  of accounts or facts (ledger facts, identity snapshots, bills, bill lines,
-  payments, refunds, adjustments), never queries per admission.
+- **Bulk reads**: per chunk of accounts, one grouped query for the opening
+  balance, amount due and high water, one for the period's facts only, and one
+  for the newest identity snapshots (`DISTINCT ON`), with a job's pinned
+  sequences applied in SQL; then one query per kind of document behind the
+  printed facts. Never queries per admission, never the account's whole history.
+- **Reversals** never take effect before what they reverse (refused when posted,
+  `packages/api/src/routers/school/billing/README.md`), so a reversal is never in
+  an earlier period than its target.
+- **Partial designs**: `otherCreditsThisPeriod` totals every credit row that is
+  neither a payment nor a discount (waivers, write-offs, credit corrections,
+  reversals of earlier charges; null when zero), so a design that prints only the
+  paid and discount totals can add up; the default and marketplace bill designs
+  list `credits[]` rows instead.
 - **Worked example** (tested): 800 carried in from October, a 1 November bill of
   1,300, a 200 discount and an 800 payment on 10 November, printed on 24 November:
   `balanceBefore` 800.00, `bill.total` 1,300.00, credits Discount 200.00 and
   Payment 800.00, `balanceAfter` 1,100.00.
 - **Templates**: the Standard bill and the adapted marketplace bills print
   `DUE/<date>` without a bill number, "Statement Through" only on a Bill due, the
-  credit rows and the period. Older custom templates keep working: Prem Chandra's
-  production template (a test fixture) prints a Bill due from `lines`,
+  credit rows and the period. Older custom templates keep working: a migrated
+  production custom bill template (a test fixture, `legacy-custom-bill.hbs`)
+  prints a Bill due from `lines`,
   `bill.total`, `balanceBefore`, `paidThisPeriod`, `discountThisPeriod` and
   `balanceAfter`.
 
