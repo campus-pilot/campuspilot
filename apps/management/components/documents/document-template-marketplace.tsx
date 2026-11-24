@@ -166,7 +166,7 @@ export function DocumentTemplateMarketplace({ schoolId }: { schoolId: string }) 
         <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Marketplace</p>
         <h1 className="text-2xl font-semibold tracking-tight">Document templates</h1>
         <p className="max-w-2xl text-sm text-muted-foreground">
-          Look a design over with sample data, then import it into your school. Your current template stays active
+          Look a design over with your school’s data (samples fill in what is missing), then import it into your school. Your current template stays active
           until you choose another one.
         </p>
       </header>
@@ -435,7 +435,7 @@ function MarketplaceDesign({
           scope={state.scope}
           slug={item.slug}
           printSize={printSize}
-          label={`${item.name} preview with sample data`}
+          label={`${item.name} preview with your school’s data`}
         />
       </div>
     </div>
@@ -466,7 +466,7 @@ function MarketplacePreviewDialog({
     <PreviewDialogContent
       size="full"
       title={item.name}
-      description={`${DOCUMENT_LABELS[item.documentType]} · ${footprintLabel(item)} · Sample data. Nothing is imported until you choose Use template.`}
+      description={`${DOCUMENT_LABELS[item.documentType]} · ${footprintLabel(item)} · Your school’s data, samples where missing. Nothing is imported until you choose Use template.`}
       actions={
         <>
           {printSizeControl}
@@ -474,7 +474,7 @@ function MarketplacePreviewDialog({
         </>
       }
     >
-      <MarketplaceTemplatePdfPreview scope={state.scope} slug={item.slug} printSize={printSize} label={`${item.name} preview with sample data`} />
+      <MarketplaceTemplatePdfPreview scope={state.scope} slug={item.slug} printSize={printSize} label={`${item.name} preview with your school’s data`} />
     </PreviewDialogContent>
   );
 }

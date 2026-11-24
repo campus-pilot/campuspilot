@@ -30,7 +30,7 @@ for the management implementation.
 | `document-templates.tsx` | Settings empty state, read-only PDF preview, and the editor's entry (keyed by revision) |
 | `template-workspace.tsx` | The template builder: header row, resizable AI/Code pane, PDF preview, working copy, assistant drafts, revision restore |
 | `template-assistant.tsx` | The builder's chat (`?chat=`), its seed, suggestions and drafts |
-| `template-pdf-preview.tsx` | A template source as its PDF (`previewDocumentTemplatePdf`, manage only), cached per source; a saved revision by id (`previewDocumentTemplateRevisionPdf`); a marketplace design by slug (`previewMarketplaceTemplatePdf`) |
+| `template-pdf-preview.tsx` | A template source as its PDF (`previewDocumentTemplatePdf`, manage only), cached per source; a saved revision by id (`previewDocumentTemplateRevisionPdf`); a marketplace design by slug (`previewMarketplaceTemplatePdf`); each sends the sidebar's selected session (`sessionId`), whose data the server previews with (docs/document-system.md "Preview context") |
 | `template-revisions.tsx` | Revision select (`?revision=`), All revisions dialog, read-only revision with Restore |
 | `template-code-editor.tsx` | Dynamically loaded Monaco source editor and format action |
 | `document-template-settings.tsx` | Settings permission boundary and scope adapter |

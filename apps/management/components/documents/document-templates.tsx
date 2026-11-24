@@ -194,7 +194,7 @@ function NoTemplateSelected({ scope }: { scope: DocumentTemplateScope }) {
 
 /**
  * The selected template for someone who may read but not change it: the same
- * PDF preview as the editor's, with sample data, asked for by the selected
+ * PDF preview as the editor's, with the school's data, asked for by the selected
  * revision's id (`previewDocumentTemplateRevisionPdf`: converting source of
  * one's own needs the manage permission). A Notice design is previewed at
  * either print size (a view choice, never saved).

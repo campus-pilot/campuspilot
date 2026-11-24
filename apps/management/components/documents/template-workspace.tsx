@@ -586,7 +586,7 @@ function PreviewToolbar({
       <FileText className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
       <span className="text-xs font-medium">Preview</span>
       <span className="flex-1 text-xs text-muted-foreground" aria-live="polite">
-        {waiting ? 'Waiting for you to stop typing…' : 'Sample data'}
+        {waiting ? 'Waiting for you to stop typing…' : 'Your school’s data, samples where missing'}
       </span>
       {scope.documentType === 'notice' ? (
         <editor.form.Field name="printSize">
@@ -608,7 +608,8 @@ function PreviewToolbar({
 }
 
 /**
- * The template as it prints, with sample data, as PDF pages: the working
+ * The template as it prints, with the school's data (samples where missing
+ * or not readable), as PDF pages: the working
  * copy, or an earlier revision read-only (`revision`, which brings its own
  * notice and preview).
  */
@@ -801,7 +802,7 @@ export type TemplateWorkspaceView = ReturnType<typeof useTemplateWorkspaceView>;
  * row, then the editing pane beside the template as it prints. The editing
  * pane holds the assistant ("AI", for those who may use it) and the code
  * ("Code", the source and its settings); the preview is the PDF the template
- * prints as, with sample data. From md up it fills the window under the app's
+ * prints as, with the school's data where available. From md up it fills the window under the app's
  * header and the two panes scroll inside themselves; on a phone it is an
  * ordinary page with one section at a time.
  *

@@ -1,14 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { PDFDocument } from 'pdf-lib';
 
 import { QUESTION_PAPER_LIMITS } from '@campuspilot/question-paper/limits';
 
-import { DOCUMENT_MARKETPLACE } from './document.catalog';
+import { DOCUMENT_MARKETPLACE, SAMPLE_DOCUMENT_CONTEXT, SAMPLE_NOTICE_CONTEXT } from './document.catalog';
 import {
-  clearMarketplacePreviewCache,
   PREVIEW_TIMEOUT_MESSAGE,
-  previewMarketplaceTemplatePdf,
   previewTemplateHtml,
   previewTemplatePdf,
   TEMPLATE_PREVIEW_LIMITS,
@@ -101,36 +99,30 @@ describe('template preview limits (docs/document-system.md, "Preview limits")', 
   });
 });
 
-describe('marketplace preview cache', () => {
-  const design = DOCUMENT_MARKETPLACE.find((item) => item.documentType === 'id_card')!;
+describe('a preview context with real images', () => {
+  // A school logo of about 2 MB as a data URI: alone more than the 2,000,000 render budget.
+  const bigLogo = `data:image/png;base64,${'A'.repeat(2_100_000)}`;
+  const withLogo = { ...SAMPLE_DOCUMENT_CONTEXT, school: { ...SAMPLE_DOCUMENT_CONTEXT.school, logoUrl: bigLogo } };
 
-  beforeEach(() => {
-    clearMarketplacePreviewCache();
+  it('renders the context it is given, not the sample', () => {
+    const context = { ...SAMPLE_DOCUMENT_CONTEXT, school: { ...SAMPLE_DOCUMENT_CONTEXT.school, name: 'Riverside High' } };
+    const html = previewTemplateHtml('<p>{{school.name}}</p>', 'id_card', 'full', undefined, context);
+    expect(html).toContain('Riverside High');
+    expect(html).not.toContain(SAMPLE_DOCUMENT_CONTEXT.school.name);
   });
 
-  it('converts a design once, shares a conversion in flight and keeps the encoded result', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(await pdfWithPages(1), { status: 200 }));
-    const [first, second] = await Promise.all([previewMarketplaceTemplatePdf(design, undefined), previewMarketplaceTemplatePdf(design, undefined)]);
-    expect(second).toBe(first);
-    expect(await previewMarketplaceTemplatePdf(design, undefined)).toBe(first);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect((await PDFDocument.load(Buffer.from(first, 'base64'))).getPageCount()).toBe(1);
+  it('lets a large logo print up to the image allowance, beyond the plain render budget', () => {
+    const uses = TEMPLATE_PREVIEW_LIMITS.imageUses;
+    const content = '<img src="{{school.logoUrl}}" alt="Logo">'.repeat(uses);
+    expect(previewTemplateHtml(content, 'report_card', 'full', undefined, withLogo).split(bigLogo).length - 1).toBe(uses);
+    expect(() => previewTemplateHtml(`${content}${'<img src="{{school.logoUrl}}" alt="Logo">'}`, 'report_card', 'full', undefined, withLogo)).toThrowError(
+      expect.objectContaining({ code: 'BAD_REQUEST' }),
+    );
   });
 
-  it('forgets a failed conversion, so the next preview tries again', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('unavailable', { status: 503 }));
-    await expect(previewMarketplaceTemplatePdf(design, undefined)).rejects.toThrow('PDF conversion failed (503).');
-    fetchMock.mockResolvedValueOnce(new Response(await pdfWithPages(1), { status: 200 }));
-    await expect(previewMarketplaceTemplatePdf(design, undefined)).resolves.toEqual(expect.any(String));
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
-
-  it('keeps a Notice design’s print sizes apart', async () => {
-    const notice = DOCUMENT_MARKETPLACE.find((item) => item.documentType === 'notice')!;
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(await pdfWithPages(2), { status: 200 }));
-    await previewMarketplaceTemplatePdf(notice, undefined);
-    await previewMarketplaceTemplatePdf(notice, 'full');
-    await previewMarketplaceTemplatePdf(notice, 'half');
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+  it('renders a Notice design as a notice, with the school logo placed after the budget', () => {
+    const notice = { ...SAMPLE_NOTICE_CONTEXT, school: { ...SAMPLE_NOTICE_CONTEXT.school, logoUrl: bigLogo } };
+    const html = previewTemplateHtml('<img src="{{school.logoUrl}}" alt="Logo"><p>{{notice.title}}</p>', 'notice', 'full', undefined, notice);
+    expect(html.split(bigLogo).length - 1).toBe(1);
   });
 });
