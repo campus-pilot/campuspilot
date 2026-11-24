@@ -2,6 +2,7 @@ import type { DatabaseExecutor } from "@campuspilot/db";
 import { currencyMinorUnitDigits, currencyCodeSchema } from "@campuspilot/db/schema/jsonb/currencies";
 import {
   financeBillLineTable,
+  financeBillRunTable,
   financeBillTable,
   financeAdjustmentTable,
   financeLedgerEntryTable,
@@ -18,45 +19,21 @@ import { rpcError } from "../../../errors";
 import type { DocumentSource } from "./document.dto";
 import { schoolDocumentContextFor, type DocumentContextOptions } from "./document.context";
 import { isValidLocalDate, localDateToInstant } from "../billing/period";
+import { buildBillDueContexts } from "./bill-due.context";
+import {
+  documentBillingPeriod,
+  documentDateParts,
+  formatDocumentMoney,
+  optionalDocumentMoney,
+} from "./finance-document.values";
 
-type FinanceSource = Extract<DocumentSource, { documentType: "bill" | "receipt" | "statement" }>;
-const SOURCE_QUERY_CHUNK = 500;
+import { cutoffMap, ledgerAccountKey, loadInChunks, signed, type CutoffMap } from "./finance-document.ledger";
 
-function chunks<T>(values: T[], size = SOURCE_QUERY_CHUNK) {
-  const groups: T[][] = [];
-  for (let index = 0; index < values.length; index += size) groups.push(values.slice(index, index + size));
-  return groups;
-}
+export { formatDocumentMoney } from "./finance-document.values";
 
-/** Keeps large document selections within PostgreSQL parameter limits without
- * opening an unbounded number of concurrent database queries. */
-async function loadInChunks<TValue, TRow>(
-  values: TValue[],
-  load: (group: TValue[]) => Promise<TRow[]>,
-) {
-  const rows: TRow[] = [];
-  for (const group of chunks(values)) rows.push(...await load(group));
-  return rows;
-}
-
-export function formatDocumentMoney(value: bigint, currency: string) {
-  const digits = currencyMinorUnitDigits(currencyCodeSchema.parse(currency));
-  const sign = value < BigInt(0) ? "-" : "";
-  const absolute = value < BigInt(0) ? -value : value;
-  if (digits === 0) return `${sign}${absolute}`;
-  const scale = BigInt(10) ** BigInt(digits);
-  const whole = absolute / scale;
-  const fraction = (absolute % scale).toString().padStart(digits, "0");
-  return `${sign}${whole}.${fraction}`;
-}
-
+type FinanceSource = Extract<DocumentSource, { documentType: "bill" | "receipt" | "statement" | "bill_due" }>;
 const amount = formatDocumentMoney;
 
-const signed = (entry: { direction: "debit" | "credit"; amountMinor: bigint }) =>
-  entry.direction === "debit" ? entry.amountMinor : -entry.amountMinor;
-
-const ledgerAccountKey = (admissionId: string, currency: string) =>
-  `${admissionId}\u0000${currency}`;
 
 /** Options of the finance builder: the shared ones plus a pinned ledger cutoff. */
 export type FinanceDocumentContextOptions = DocumentContextOptions & {
@@ -70,13 +47,6 @@ export type FinanceDocumentContextOptions = DocumentContextOptions & {
   ledgerCutoff?: readonly DocumentLedgerCutoff[];
 };
 
-/** The pinned cutoff, by account; null when the builder reads the ledger as it is now. */
-type CutoffMap = Map<string, bigint> | null;
-
-function cutoffMap(cutoff: readonly DocumentLedgerCutoff[] | undefined): CutoffMap {
-  if (!cutoff) return null;
-  return new Map(cutoff.map((account) => [ledgerAccountKey(account.admissionId, account.currency), BigInt(account.highWaterSequence)]));
-}
 
 /** The ledger condition of one account under the cutoff (none without a cutoff). */
 function cutoffCondition(cutoff: CutoffMap, admissionId: string, currency: string): SQL | undefined {
@@ -249,10 +219,18 @@ export async function buildFinanceDocumentContexts(
     if (!bills.length || (source.billIds && bills.length !== new Set(source.billIds).size)) throw rpcError.notFound("Posted bill");
     if (source.billRunId && bills.some((bill) => bill.billRunId !== source.billRunId)) throw rpcError.notFound("Posted billing run");
     const billIds = bills.map((bill) => bill.id);
-    const [lines, balanceByLedgerId] = await Promise.all([
+    const runIds = [...new Set(bills.flatMap((bill) => (bill.billRunId ? [bill.billRunId] : [])))];
+    const [lines, balanceByLedgerId, runs] = await Promise.all([
       loadInChunks(billIds, (ids) => db.select().from(financeBillLineTable).where(and(eq(financeBillLineTable.schoolId, schoolId), inArray(financeBillLineTable.billId, ids))).orderBy(asc(financeBillLineTable.billId), asc(financeBillLineTable.lineOrder))),
       billBalancesBefore(db, schoolId, bills, cutoff),
+      loadInChunks(runIds, (ids) => db.select({
+        id: financeBillRunTable.id,
+        cadence: financeBillRunTable.cadence,
+        periodStartDate: financeBillRunTable.periodStartDate,
+        periodEndDate: financeBillRunTable.periodEndDate,
+      }).from(financeBillRunTable).where(and(eq(financeBillRunTable.schoolId, schoolId), inArray(financeBillRunTable.id, ids)))),
     ]);
+    const runById = new Map(runs.map((run) => [run.id, run]));
     const linesByBillId = new Map<string, typeof lines>();
     for (const line of lines) {
       const billLines = linesByBillId.get(line.billId) ?? [];
@@ -263,21 +241,56 @@ export async function buildFinanceDocumentContexts(
       const beforeMinor = balanceByLedgerId.get(bill.ledgerEntryId);
       if (beforeMinor === undefined) throw rpcError.notFound("Bill ledger fact");
       const afterMinor = beforeMinor + bill.totalAmountMinor;
+      // The period the bill's run recorded (its cadence and dates). A bill
+      // without a run (a manual bill) has none; neither has a bill whose run is
+      // unknown. Never read from the period key's shape.
+      const run = bill.billRunId ? runById.get(bill.billRunId) : undefined;
+      const issueDate = documentDateParts(bill.issueDate);
       return {
         school,
         session: { startYear: bill.sessionStartYearSnapshot, endYear: bill.sessionEndYearSnapshot },
         admission: { name: bill.admissionNameSnapshot, number: bill.admissionNumberSnapshot, fatherName: null, motherName: null, classLabel: bill.classLabelSnapshot, sectionLabel: bill.sectionLabelSnapshot, rollNumber: bill.rollNumberSnapshot?.toString() ?? null },
         currency: { code: bill.currency, exponent: currencyMinorUnitDigits(currencyCodeSchema.parse(bill.currency)) },
-        bill: { id: bill.id, number: bill.billNumber, issueDate: bill.issueDate, periodKey: bill.periodKey, total: amount(bill.totalAmountMinor, bill.currency), totalMinor: bill.totalAmountMinor.toString() },
-        lines: (linesByBillId.get(bill.id) ?? []).map((line) => ({ slug: line.feeElementSlug, name: line.feeElementName, amount: amount(line.amountMinor, line.currency), amountMinor: line.amountMinor.toString(), pricingSource: line.pricingSourceKind })),
-        balanceBefore: amount(beforeMinor, bill.currency),
+        bill: {
+          id: bill.id,
+          number: bill.billNumber,
+          issueDate: bill.issueDate,
+          periodKey: bill.periodKey,
+          period: run ? documentBillingPeriod(run.cadence, run.periodStartDate, run.periodEndDate) : null,
+          total: amount(bill.totalAmountMinor, bill.currency),
+          totalMinor: bill.totalAmountMinor.toString(),
+        },
+        // An ordinary bill is not a Bill due: no Bill due facts, no credits and no period totals.
+        billDue: null,
+        lines: (linesByBillId.get(bill.id) ?? []).map((line) => ({
+          kind: "bill_line" as const,
+          slug: line.feeElementSlug,
+          name: line.feeElementName,
+          note: null,
+          billNumber: bill.billNumber,
+          reference: bill.billNumber,
+          issueDate,
+          amount: amount(line.amountMinor, line.currency),
+          amountMinor: line.amountMinor.toString(),
+          pricingSource: line.pricingSourceKind,
+        })),
+        credits: [],
+        balanceBefore: optionalDocumentMoney(beforeMinor, bill.currency),
         balanceAfter: amount(afterMinor, bill.currency),
+        paidThisPeriod: null,
+        discountThisPeriod: null,
+        waiverThisPeriod: null,
+        writeOffThisPeriod: null,
+        creditCorrectionThisPeriod: null,
+        refundThisPeriod: null,
         generatedAt,
       };
     });
     const ledgerCutoff = options.ledgerCutoff ? [...options.ledgerCutoff] : await accountHighWaters(db, schoolId, bills);
     return { contexts, name: bills.length === 1 ? `Bill ${bills[0]!.billNumber}` : `${bills.length} bills`, financeSource: { kind: "bill" as const, admissionIds: [...new Set(bills.map((bill) => bill.admissionId))], billIds, billRunId: source.billRunId ?? null }, reviewHash: null, ledgerCutoff };
   }
+
+  if (source.documentType === "bill_due") return buildBillDueContexts(db, schoolId, source, { school, generatedAt, cutoff });
 
   if (source.documentType === "receipt") {
     const paymentIds = source.transactions.filter((item) => item.kind === "payment").map((item) => item.id);

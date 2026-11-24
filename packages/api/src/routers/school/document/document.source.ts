@@ -11,7 +11,7 @@ import {
 } from "./document.context";
 import { buildFinanceDocumentContexts } from "./finance-document.context";
 
-type FinanceSource = Extract<DocumentSource, { documentType: "bill" | "receipt" | "statement" }>;
+type FinanceSource = Extract<DocumentSource, { documentType: "bill" | "receipt" | "statement" | "bill_due" }>;
 type AcademicSource = Exclude<DocumentSource, FinanceSource>;
 
 /** What a document source resolves to, the same shape for academic and finance documents. */
@@ -23,7 +23,7 @@ export type ResolvedDocumentSource = {
   studentIds: string[];
   warnings: string[];
   financeSource: (typeof artifactTable.$inferSelect)["financeSource"];
-  /** Statements only. */
+  /** Statements and Bills due only. */
   reviewHash: string | null;
   /** Finance documents only: the per-account high-water sequences read (or the pinned ones). */
   ledgerCutoff: DocumentLedgerCutoff[] | null;
@@ -51,7 +51,8 @@ export async function resolveDocumentSource(
       contexts: data.contexts,
       name: data.name,
       studentIds: [],
-      warnings: [],
+      // A Bill due names the students it leaves out; the other finance documents have no warnings.
+      warnings: "warnings" in data ? data.warnings : [],
       financeSource: data.financeSource,
       reviewHash: data.reviewHash,
       ledgerCutoff: data.ledgerCutoff,

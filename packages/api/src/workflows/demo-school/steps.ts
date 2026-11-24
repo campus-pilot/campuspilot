@@ -36,8 +36,12 @@ import { assertPermission } from '../../permissions/authorization';
 import { appRouter } from '../../routers';
 import { ADMISSION_PHOTO_FIELD_NAME } from '../../routers/school/admission/admission.constants';
 import { handleAdmissionPhotoUpload } from '../../routers/school/admission/admission.http';
-import { DOCUMENT_MARKETPLACE } from '../../routers/school/document/document.catalog';
-import type { DocumentType } from '../../routers/school/document/document.dto';
+import {
+  DEFAULT_DOCUMENT_TEMPLATE_SLUGS,
+  DOCUMENT_MARKETPLACE,
+  NOTICE_DEFAULT_TEMPLATE_SLUG,
+} from '../../routers/school/document/document.catalog';
+import type { TemplateDocumentType } from '../../routers/school/document/document.dto';
 import { saveTemplate } from '../../routers/school/document/document.router';
 import { findPaper, findPaperOf, pagesOf } from '../../routers/school/question-paper/question-paper.records';
 import { selectedQuestionPaperTemplate } from '../../routers/school/question-paper/question-paper.render';
@@ -742,10 +746,15 @@ export async function seedUnregistrations(ctx: SeedContext): Promise<{ unregiste
 // ---------------------------------------------------------------------------
 // §6.8 Templates
 
-const DOCUMENT_TYPES: DocumentType[] = ['report_card', 'id_card', 'admit_card', 'timetable', 'bill', 'receipt', 'statement', 'notice', 'question_paper'];
+const DOCUMENT_TYPES: TemplateDocumentType[] = ['report_card', 'id_card', 'admit_card', 'timetable', 'bill', 'receipt', 'statement', 'notice', 'question_paper'];
 
-/** The marketplace design a demo school starts with, per type: `<type>-default` unless the catalogue names it otherwise. */
-const DEMO_TEMPLATE_SLUGS: Partial<Record<DocumentType, string>> = { question_paper: 'question-paper-classic' };
+/**
+ * The marketplace design a demo school starts with, per type: the defaults
+ * every new school starts with (`DEFAULT_DOCUMENT_TEMPLATE_SLUGS`, the
+ * CampusPilot Standard set), and the built-in Notice design, which has no
+ * default selection elsewhere.
+ */
+const DEMO_TEMPLATE_SLUGS: Record<TemplateDocumentType, string> = { ...DEFAULT_DOCUMENT_TEMPLATE_SLUGS, notice: NOTICE_DEFAULT_TEMPLATE_SLUG };
 
 /**
  * Selects each type's marketplace design unless one is active (see
@@ -760,7 +769,7 @@ const DEMO_TEMPLATE_SLUGS: Partial<Record<DocumentType, string>> = { question_pa
  */
 export async function seedTemplates(ctx: SeedContext): Promise<{ templates: number }> {
   for (const documentType of DOCUMENT_TYPES) {
-    const slug = DEMO_TEMPLATE_SLUGS[documentType] ?? `${documentType}-default`;
+    const slug = DEMO_TEMPLATE_SLUGS[documentType];
     const artifactId = documentType === 'question_paper' ? await seedQuestionPaperTemplate(ctx, slug) : await seedProcedureTemplate(ctx, documentType, slug);
     if (!artifactId) continue;
     const [artifact] = await db.select({ s3Key: artifactTable.s3Key }).from(artifactTable).where(eq(artifactTable.id, artifactId)).limit(1);
@@ -770,7 +779,7 @@ export async function seedTemplates(ctx: SeedContext): Promise<{ templates: numb
 }
 
 /** Selects the catalogue design through the procedure; returns the new artifact, or null when one was already active. */
-async function seedProcedureTemplate(ctx: SeedContext, documentType: DocumentType, slug: string): Promise<string | null> {
+async function seedProcedureTemplate(ctx: SeedContext, documentType: TemplateDocumentType, slug: string): Promise<string | null> {
   const active = await ctx.rpc.school.getActiveDocumentTemplate({ schoolId: ctx.schoolId, documentType });
   if (active) return null;
   const selected = await ctx.rpc.school.selectMarketplaceTemplate({ schoolId: ctx.schoolId, documentType, slug, expectedRevisionId: null });

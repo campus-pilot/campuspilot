@@ -11,6 +11,10 @@ import { and, count, desc, eq, sql } from 'drizzle-orm';
 
 import { rpcError } from '../errors';
 import { provisionSelfServiceSchool } from './school-provisioning';
+import {
+  selectDefaultDocumentTemplates,
+  type DefaultTemplateUploads,
+} from '../routers/school/document/document.default-templates';
 import { slugifySchoolName } from '../workflows/demo-school/slug';
 import { offerSchoolOnboarding } from '../school-onboarding/school-onboarding.service';
 import {
@@ -128,9 +132,17 @@ export type CreateOwnSchoolInput = {
  * 5. makes the person a member with the principal role;
  * 6. records the creation in the ledger;
  * 7. offers the school its guided setup (`school_onboarding`), which opens
- *    as the owner's next screen.
+ *    as the owner's next screen;
+ * 8. selects the default document templates (the CampusPilot Standard set,
+ *    `selectDefaultDocumentTemplates`), whose uploads `uploads` records so
+ *    the caller's {@link withDefaultDocumentTemplates} removes them when the
+ *    transaction fails. A personal space never gets them.
  */
-export async function createOwnSchool(db: DatabaseExecutor, input: CreateOwnSchoolInput): Promise<{ schoolId: string }> {
+export async function createOwnSchool(
+  db: DatabaseExecutor,
+  input: CreateOwnSchoolInput,
+  uploads: DefaultTemplateUploads,
+): Promise<{ schoolId: string }> {
   await lockUser(db, input.userId);
   const status = await readSchoolCreationStatus(db, input.userId);
   if (status.refusal) throw schoolCreationRefusedError(status.refusal);
@@ -150,6 +162,7 @@ export async function createOwnSchool(db: DatabaseExecutor, input: CreateOwnScho
   // Only a school someone creates counts against their allowance and is offered the guided setup.
   await db.insert(schoolCreationTable).values({ userId: input.userId, schoolId });
   await offerSchoolOnboarding(db, schoolId);
+  await selectDefaultDocumentTemplates(db, uploads, { schoolId, createdBy: input.userId });
   return { schoolId };
 }
 

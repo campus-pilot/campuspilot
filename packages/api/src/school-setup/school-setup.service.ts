@@ -33,6 +33,7 @@ import {
   type SchoolSetupDraft,
   type SchoolSetupRunStep,
 } from './school-setup.contract';
+import { selectDefaultDocumentTemplates, withDefaultDocumentTemplates, type DefaultTemplateUploads } from '../routers/school/document/document.default-templates';
 
 /**
  * The work of the `SchoolSetup` workflow, one function per step. Each step
@@ -101,7 +102,12 @@ async function copyRequestLogo(requestId: string, schoolId: string, transaction:
   return key;
 }
 
-async function stepSchool(transaction: DatabaseTransaction, setup: SetupRow, draft: SchoolSetupDraft) {
+/**
+ * Creates the school. Like every new school it starts with the default
+ * document templates selected; their objects are recorded in `uploads`, which
+ * the step's runner removes when the step's transaction fails.
+ */
+async function stepSchool(transaction: DatabaseTransaction, setup: SetupRow, draft: SchoolSetupDraft, uploads: DefaultTemplateUploads) {
   const [taken] = await transaction.select({ id: schoolTable.id }).from(schoolTable).where(eq(schoolTable.slug, draft.school.slug)).limit(1);
   if (taken) throw new SchoolSetupStepError(`Another school already uses the address "${draft.school.slug}". Change it on the School step.`);
   const [school] = await transaction
@@ -119,6 +125,7 @@ async function stepSchool(transaction: DatabaseTransaction, setup: SetupRow, dra
   // left unreferenced under the (never committed) school's prefix.
   const logoS3Key = draft.school.useRequestLogo ? await copyRequestLogo(setup.requestId, school.id, transaction) : null;
   if (logoS3Key) await transaction.update(schoolTable).set({ logoS3Key }).where(eq(schoolTable.id, school.id));
+  await selectDefaultDocumentTemplates(transaction, uploads, { schoolId: school.id, createdBy: requireRequester(setup) });
   await transaction.update(schoolSetupTable).set({ schoolId: school.id }).where(eq(schoolSetupTable.id, setup.id));
 }
 
@@ -241,11 +248,11 @@ async function stepPeople(transaction: DatabaseTransaction, setup: SetupRow, dra
  * already completed, by this attempt or an earlier one, does nothing.
  */
 export async function runSchoolSetupStep(setupId: string, attempt: number, step: SchoolSetupRunStep, now: Date, db = defaultDb): Promise<void> {
-  await db.transaction(async (transaction) => {
+  await withDefaultDocumentTemplates((uploads) => db.transaction(async (transaction) => {
     const setup = await lockRunningSetup(transaction, setupId, attempt);
     if (setup.completedSteps.includes(step)) return;
     const draft = draftOf(setup);
-    if (step === 'school') await stepSchool(transaction, setup, draft);
+    if (step === 'school') await stepSchool(transaction, setup, draft, uploads);
     if (step === 'plan') await stepPlan(transaction, setup, draft, now);
     if (step === 'session') await stepSession(transaction, setup, draft);
     if (step === 'classes') await stepClasses(transaction, setup, draft);
@@ -255,7 +262,7 @@ export async function runSchoolSetupStep(setupId: string, attempt: number, step:
       .update(schoolSetupTable)
       .set({ currentStep: step, completedSteps: sql`${schoolSetupTable.completedSteps} || ${JSON.stringify([step])}::jsonb` })
       .where(eq(schoolSetupTable.id, setupId));
-  });
+  }));
 }
 
 /** The setup row the workflow starts from, or null when it is gone. */

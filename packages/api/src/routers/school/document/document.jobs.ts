@@ -57,18 +57,21 @@ export async function startDocumentGeneration(
   input: { schoolId: string; requestedBy: string; source: dto.DocumentSource; templateRevisionId: string },
   options: { dispatch?: (jobId: string) => void } = {},
 ) {
+  // A Bill due is printed with the school's bill template (`templateTypeOf`).
   const template = await selectedDocumentTemplateRevision(
     db,
-    { schoolId: input.schoolId, documentType: input.source.documentType },
+    { schoolId: input.schoolId, documentType: dto.templateTypeOf(input.source.documentType) },
     input.templateRevisionId,
   );
   const generatedAt = new Date();
   const data = await resolveDocumentSource(db, input.schoolId, input.source, { images: "reference", generatedAt });
-  if (input.source.documentType === "statement") {
+  // Statements and Bills due are bound to the reviewed ledger: generation presents the preview's hash.
+  if (input.source.documentType === "statement" || input.source.documentType === "bill_due") {
+    const what = input.source.documentType === "statement" ? "statement" : "bill";
     if (!input.source.expectedReviewHash)
-      throw rpcError.badRequest("Preview the statement before generating it.");
+      throw rpcError.badRequest(`Preview the ${what} before generating it.`);
     if (input.source.expectedReviewHash !== data.reviewHash)
-      throw rpcError.conflict("The statement changed after preview. Preview it again before generating.");
+      throw rpcError.conflict(`The ${what} changed after preview. Preview it again before generating.`);
   }
   if (data.contexts.length > dto.MAX_DOCUMENT_SOURCE_ITEMS)
     throw rpcError.badRequest(
@@ -113,7 +116,7 @@ export async function startDocumentGeneration(
       documentCount: data.contexts.length,
       warnings: data.warnings,
       generatedAt,
-      reviewHash: input.source.documentType === "statement" ? data.reviewHash : null,
+      reviewHash: input.source.documentType === "statement" || input.source.documentType === "bill_due" ? data.reviewHash : null,
       ledgerCutoff: data.ledgerCutoff,
     })
     .returning();

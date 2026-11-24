@@ -226,7 +226,9 @@ const HIDDEN_TOOLS = [
  */
 // 38,500 since getDocumentGenerationJob joined core (37 tools; packages/api/AGENTS.md):
 // tightening the generation descriptions could not bring the listing back under 38,000.
-const CORE_LISTING_BUDGET_CHARS = 38_500;
+// 39,400 since generateDocument's source gained the Bill due branch (about 900
+// characters: its recipients are an explicit session / class / admissions choice).
+const CORE_LISTING_BUDGET_CHARS = 39_400;
 
 let appRouter: AnyRouter;
 let catalog: McpCatalog;

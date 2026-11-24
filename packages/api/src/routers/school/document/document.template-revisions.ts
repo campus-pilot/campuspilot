@@ -8,7 +8,7 @@ import { createNextPageCursor, createPaginatedResult, resolvePaginationInput } f
 import type * as dto from "./document.dto";
 import { readDocumentTemplate } from "./document.storage";
 
-type TemplateScope = { schoolId: string; documentType: dto.DocumentType };
+type TemplateScope = { schoolId: string; documentType: dto.TemplateDocumentType };
 
 /** The type's template revisions: every ready `template` artifact of the school and type. */
 const revisionsOf = (scope: TemplateScope) =>

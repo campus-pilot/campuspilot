@@ -26,6 +26,7 @@ import {
 import { readSchoolDto, schoolRowToDto, selectSchoolsWithActivePeriod } from "./school.read";
 import { lockSchool, parseTrialEnd, startTrialPeriod } from "../../../billing/billing.service";
 import { readSchoolKind } from "../../../school-access/school-kind.service";
+import { selectDefaultDocumentTemplates, withDefaultDocumentTemplates } from "../../school/document/document.default-templates";
 
 /** The school as the admin DTO after a change; NOT_FOUND when it does not exist. */
 async function requireSchoolDto(db: Parameters<typeof readSchoolDto>[0], schoolId: string) {
@@ -177,22 +178,27 @@ export const schoolRouter = {
         const { trial, tier, ...identity } = input;
         // Checked before anything is written, so a refused end creates no school.
         const trialEndsAt = trial ? parseTrialEnd(trial.endsAt) : null;
-        return await context.db.transaction(async (transaction) => {
-          const [school] = await transaction
-            .insert(schoolTable)
-            .values({ ...identity, tier: tier ?? null })
-            .returning({ id: schoolTable.id });
-          if (!school) throw rpcError.internal();
-          if (trial && trialEndsAt) {
-            await startTrialPeriod(transaction, {
-              schoolId: school.id,
-              tier: trial.tier,
-              endsAt: trialEndsAt,
-              createdBy: context.session.user.id,
-            });
-          }
-          return await requireSchoolDto(transaction, school.id);
-        });
+        // Every new school starts with the default document templates; their
+        // objects are removed when the transaction fails.
+        return await withDefaultDocumentTemplates((uploads) =>
+          context.db.transaction(async (transaction) => {
+            const [school] = await transaction
+              .insert(schoolTable)
+              .values({ ...identity, tier: tier ?? null })
+              .returning({ id: schoolTable.id });
+            if (!school) throw rpcError.internal();
+            if (trial && trialEndsAt) {
+              await startTrialPeriod(transaction, {
+                schoolId: school.id,
+                tier: trial.tier,
+                endsAt: trialEndsAt,
+                createdBy: context.session.user.id,
+              });
+            }
+            await selectDefaultDocumentTemplates(transaction, uploads, { schoolId: school.id, createdBy: context.session.user.id });
+            return await requireSchoolDto(transaction, school.id);
+          }),
+        );
       } catch (error) {
         throw toRpcError(error);
       }
