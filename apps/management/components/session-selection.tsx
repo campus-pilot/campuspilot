@@ -2,6 +2,7 @@
 
 import { useCallback, useSyncExternalStore, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import type { SchoolSessionDto } from '@campuspilot/api/routers/school/session/session.dto';
 import { client, orpc } from '@/lib/orpc';
 
@@ -86,6 +87,35 @@ export function useSchoolSessions(schoolId: string, enabled = true) {
       return sessions;
     },
   });
+}
+
+/**
+ * The sessions a school-wide shell (Settings, the template marketplace) shows
+ * in its session switcher and command context, read only when the user may
+ * list them. Two separate facts are kept apart although they often coincide:
+ * - `activeSessionId`: the school's active session;
+ * - `selectedSessionId`: the session the user is working in (their stored
+ *   choice, else the active one).
+ */
+export function useSchoolShellSessions(schoolId: string) {
+  const permissionQuery = useQuery(
+    orpc.authorization.checkPermissions.queryOptions({
+      input: { permissions: [{ action: SCHOOL_ACTIONS.LIST_SESSIONS, resource: { kind: 'school', schoolId } }] },
+    }),
+  );
+  const canListSessions = permissionQuery.data?.results[0] === true;
+  const storedSessionId = useStoredSchoolSessionId(schoolId);
+  const sessionsQuery = useSchoolSessions(schoolId, canListSessions);
+  const sessions = sessionsQuery.data ?? [];
+  const activeSessionId = sessions.find((session) => session.isActive)?.id;
+  return {
+    canListSessions,
+    sessions,
+    /** The sessions were read and there are none (not merely unread). */
+    hasNoSessions: sessionsQuery.isSuccess && sessions.length === 0,
+    activeSessionId,
+    selectedSessionId: storedSessionId ?? activeSessionId,
+  };
 }
 
 export function PersistSchoolSessionSelection({

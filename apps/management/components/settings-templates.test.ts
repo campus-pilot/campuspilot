@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { templateDocumentTypeSchema } from '@campuspilot/api/routers/school/document/document.dto';
 import type { SchoolFeatureKey } from '@campuspilot/api/routers/school/feature-flags/feature-flags.dto';
-import { firstSettingsTemplate, SETTINGS_TEMPLATES } from './settings-templates';
+import { firstSettingsTemplate, SETTINGS_TEMPLATES, settingsTemplateOf } from './settings-templates';
 
 const having = (...features: SchoolFeatureKey[]) => (feature: SchoolFeatureKey) => features.includes(feature);
 
@@ -35,5 +36,13 @@ describe('settings templates', () => {
   it('has nothing to open for a school with none of the features', () => {
     assert.equal(firstSettingsTemplate(having()), null);
     assert.equal(firstSettingsTemplate(having('cadet')), null);
+  });
+
+  it('has exactly one template per document type, at its explicitly mapped address', () => {
+    const types = SETTINGS_TEMPLATES.map(({ documentType }) => documentType);
+    assert.deepEqual([...types].sort(), [...templateDocumentTypeSchema.options].sort());
+    assert.equal(settingsTemplateOf('report_card').path, '/settings/templates/examination');
+    assert.equal(settingsTemplateOf('id_card').path, '/settings/templates/id-card');
+    assert.equal(settingsTemplateOf('question_paper').path, '/settings/templates/question-paper');
   });
 });

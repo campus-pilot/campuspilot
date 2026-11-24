@@ -23,16 +23,7 @@ export type DocumentTemplateScope = {
 };
 /** The school's selected template revision, as `getActiveDocumentTemplate` returns it. */
 export type ActiveTemplate = z.infer<typeof activeTemplateSchema>;
-export const isFinanceDocumentType = (type: DocumentType) =>
-  type === 'bill' || type === 'receipt' || type === 'statement' || type === 'bill_due';
-export const templateReadAction = (type: DocumentType) =>
-  isFinanceDocumentType(type)
-    ? SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES
-    : SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES;
-export const templateManageAction = (type: DocumentType) =>
-  isFinanceDocumentType(type)
-    ? SCHOOL_ACTIONS.MANAGE_FINANCE_DOCUMENT_TEMPLATES
-    : SCHOOL_ACTIONS.MANAGE_DOCUMENT_TEMPLATES;
+export { templateManageAction, templateReadAction } from './template-permissions';
 type SchoolDocumentAction = Extract<
   PermissionCheck,
   { resource: { kind: 'school' } }

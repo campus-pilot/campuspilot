@@ -12,6 +12,7 @@ import {
 } from '@campuspilot/components/documents/document-controls';
 import {
   DOCUMENT_LABELS,
+  isFinanceDocumentType,
   type DocumentArtifact,
   type DocumentGenerationJobDto,
 } from '@campuspilot/api/routers/school/document/document.dto';
@@ -22,7 +23,6 @@ import {
   DocumentPermission,
   DocumentReadError,
   SCHOOL_ACTIONS,
-  isFinanceDocumentType,
   useDocumentCache,
   type DocumentScope,
 } from './document-common';

@@ -1,65 +1,103 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import type { SchoolFeatureKey } from '@campuspilot/api/routers/school/feature-flags/feature-flags.dto';
 
 import {
+  defaultDesignOf,
   footprintLabel,
+  landingTypeOf,
+  legacyMarketplaceRedirect,
+  legacyMarketplaceRequestOf,
   marketplaceHref,
-  marketplaceRequestOf,
-  selectedDesignOf,
-  selectedTypeOf,
+  marketplaceTypesOf,
+  offeredTypeOf,
 } from './marketplace-model';
 
 const search = (query: string) => new URLSearchParams(query);
+const ready = (...features: SchoolFeatureKey[]) => (feature: SchoolFeatureKey) =>
+  ({ enabled: features.includes(feature), status: 'ready' as const });
 
-test('reads the type, design and preview the address asks for, refusing what is not one', () => {
-  assert.deepEqual(marketplaceRequestOf(search('type=id_card&template=id_card-modern&preview=1')), {
+test('names a type, a design and its preview as path segments, a design only with its type and the preview only with its design', () => {
+  assert.equal(marketplaceHref('s 1'), '/school/s%201/marketplace/templates');
+  assert.equal(marketplaceHref('s', { type: 'notice' }), '/school/s/marketplace/templates/notice');
+  assert.equal(marketplaceHref('s', { type: 'notice', template: 'notice-compact' }), '/school/s/marketplace/templates/notice/notice-compact');
+  assert.equal(
+    marketplaceHref('s', { type: 'notice', template: 'notice-compact', preview: true }),
+    '/school/s/marketplace/templates/notice/notice-compact?preview=1',
+  );
+  assert.equal(marketplaceHref('s', { type: 'notice', preview: true }), '/school/s/marketplace/templates/notice');
+  assert.equal(marketplaceHref('s', { template: 'notice-compact', preview: true }), '/school/s/marketplace/templates');
+  // A slug is one path segment, whatever it holds.
+  assert.equal(marketplaceHref('s', { type: 'bill', template: '../secret' }), '/school/s/marketplace/templates/bill/..%2Fsecret');
+});
+
+test('reads the former query address, refusing what is not a type or a slug', () => {
+  assert.deepEqual(legacyMarketplaceRequestOf(search('type=id_card&template=id_card-modern&preview=1')), {
     type: 'id_card',
     template: 'id_card-modern',
     preview: true,
   });
-  assert.deepEqual(marketplaceRequestOf(search('type=nope&preview=yes')), {
-    type: null,
-    template: null,
-    preview: false,
-  });
-  // Any slug the API would accept is a request (only ever compared with the listed slugs), so an old link that
-  // names a design no longer listed is told apart from no request; a longer value is none.
-  assert.equal(marketplaceRequestOf(search('type=bill&template=..%2Fsecret')).template, '../secret');
-  assert.equal(marketplaceRequestOf(search(`type=bill&template=${'a'.repeat(100)}`)).template, 'a'.repeat(100));
-  assert.equal(marketplaceRequestOf(search(`type=bill&template=${'a'.repeat(101)}`)).template, null);
-  assert.deepEqual(marketplaceRequestOf(search('')), { type: null, template: null, preview: false });
+  assert.deepEqual(legacyMarketplaceRequestOf(search('type=nope&preview=yes')), { type: null, template: null, preview: false });
+  assert.equal(legacyMarketplaceRequestOf(search(`type=bill&template=${'a'.repeat(100)}`)).template, 'a'.repeat(100));
+  assert.equal(legacyMarketplaceRequestOf(search(`type=bill&template=${'a'.repeat(101)}`)).template, null);
+  assert.deepEqual(legacyMarketplaceRequestOf(search('')), { type: null, template: null, preview: false });
 });
 
-test('names a design only with its type and the preview only with its design', () => {
-  assert.equal(marketplaceHref('s 1'), '/school/s%201/marketplace/templates');
-  assert.equal(marketplaceHref('s', { type: 'notice' }), '/school/s/marketplace/templates?type=notice');
+test('redirects an old query link to the matching new address, and never the root to itself', () => {
   assert.equal(
-    marketplaceHref('s', { type: 'notice', template: 'notice-compact', preview: true }),
-    '/school/s/marketplace/templates?type=notice&template=notice-compact&preview=1',
+    legacyMarketplaceRedirect('s', search('type=bill&template=bill-classic&preview=1')),
+    '/school/s/marketplace/templates/bill/bill-classic?preview=1',
   );
-  assert.equal(marketplaceHref('s', { type: 'notice', preview: true }), '/school/s/marketplace/templates?type=notice');
-  assert.equal(marketplaceHref('s', { template: 'notice-compact', preview: true }), '/school/s/marketplace/templates');
-  // What the address reads back is what was asked for.
-  const href = marketplaceHref('s', { type: 'bill', template: 'bill-classic', preview: true });
-  assert.deepEqual(marketplaceRequestOf(new URL(href, 'http://x').searchParams), { type: 'bill', template: 'bill-classic', preview: true });
+  assert.equal(legacyMarketplaceRedirect('s', search('type=bill&template=bill-classic')), '/school/s/marketplace/templates/bill/bill-classic');
+  assert.equal(legacyMarketplaceRedirect('s', search('type=bill&preview=1')), '/school/s/marketplace/templates/bill');
+  assert.equal(legacyMarketplaceRedirect('s', search('type=question_paper')), '/school/s/marketplace/templates/question_paper');
+  assert.equal(legacyMarketplaceRedirect('s', search('template=bill-classic&preview=1')), null);
+  assert.equal(legacyMarketplaceRedirect('s', search('type=nope')), null);
+  assert.equal(legacyMarketplaceRedirect('s', search('')), null);
 });
 
-test('opens the requested type when the school has it, else its first type', () => {
-  assert.equal(selectedTypeOf('notice', ['report_card', 'notice']), 'notice');
-  assert.equal(selectedTypeOf('notice', ['report_card', 'id_card']), 'report_card');
-  assert.equal(selectedTypeOf(null, ['bill']), 'bill');
-  assert.equal(selectedTypeOf('bill', []), null);
+test('offers the types of the features the school has, in the settings order', () => {
+  assert.deepEqual(marketplaceTypesOf(ready('studentManagement', 'notices', 'assistant')), {
+    types: ['report_card', 'id_card', 'admit_card', 'timetable', 'bill', 'receipt', 'statement', 'notice', 'question_paper'],
+    status: 'ready',
+  });
+  // Each type is decided from its own feature, not from which features happen to go together today.
+  assert.deepEqual(marketplaceTypesOf(ready('assistant')), { types: ['question_paper'], status: 'ready' });
+  assert.deepEqual(marketplaceTypesOf(ready('notices')), { types: ['notice'], status: 'ready' });
+  assert.deepEqual(marketplaceTypesOf(ready()), { types: [], status: 'ready' });
 });
 
-test('shows the requested design, else the one in use, else the first, and says when a request is not listed', () => {
+test('waits while a feature is read and says when one could not be read, never "no templates"', () => {
+  const pending = (feature: SchoolFeatureKey) =>
+    feature === 'notices' ? { enabled: false, status: 'pending' as const } : { enabled: true, status: 'ready' as const };
+  assert.equal(marketplaceTypesOf(pending).status, 'pending');
+  const unknown = () => ({ enabled: false, status: 'unknown' as const });
+  assert.deepEqual(marketplaceTypesOf(unknown), { types: [], status: 'unknown' });
+});
+
+test('opens the first type the user may read, and none when they may read none', () => {
+  const types = ['report_card', 'id_card', 'bill', 'receipt'] as const;
+  assert.equal(landingTypeOf(types, () => true), 'report_card');
+  // A role that reads finance templates only lands on Bills, not on a refused Report cards.
+  const financeOnly = (type: string) => type === 'bill' || type === 'receipt';
+  assert.equal(landingTypeOf(types, financeOnly), 'bill');
+  assert.equal(landingTypeOf(types, () => false), null);
+  assert.equal(landingTypeOf([], () => true), null);
+});
+
+test('names the requested type only when the school has it, with no fallback', () => {
+  assert.equal(offeredTypeOf('notice', ['report_card', 'notice']), 'notice');
+  assert.equal(offeredTypeOf('notice', ['report_card', 'id_card']), null);
+  assert.equal(offeredTypeOf(null, ['bill']), null);
+});
+
+test("opens a type on the design in use when the catalog still lists it, else the first", () => {
   const listed = ['a', 'b', 'c'];
-  assert.deepEqual(selectedDesignOf('b', listed, 'c'), { slug: 'b', missing: false });
-  assert.deepEqual(selectedDesignOf(null, listed, 'c'), { slug: 'c', missing: false });
-  assert.deepEqual(selectedDesignOf(null, listed, null), { slug: 'a', missing: false });
-  // A design in use that the catalog no longer lists is not shown as if it were.
-  assert.deepEqual(selectedDesignOf(null, listed, 'gone'), { slug: 'a', missing: false });
-  assert.deepEqual(selectedDesignOf('gone', listed, 'c'), { slug: 'c', missing: true });
-  assert.deepEqual(selectedDesignOf('gone', [], null), { slug: null, missing: true });
+  assert.equal(defaultDesignOf(listed, 'c'), 'c');
+  assert.equal(defaultDesignOf(listed, null), 'a');
+  // A design in use that the catalog no longer lists is not opened as if it were.
+  assert.equal(defaultDesignOf(listed, 'gone'), 'a');
+  assert.equal(defaultDesignOf([], null), null);
 });
 
 test('says the paper a design prints on, and that a Notice design leaves it to each notice', () => {

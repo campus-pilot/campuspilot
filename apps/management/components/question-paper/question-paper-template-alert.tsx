@@ -7,13 +7,12 @@ import { AppShellAlert } from '@campuspilot/components/app-shell';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import { RequirePermissions } from '@/components/require-permissions';
 import { orpc } from '@/lib/orpc';
-import { schoolHref } from '@/components/school-route';
+import { marketplaceHref } from '@/components/documents/marketplace-model';
 
 const MESSAGE = 'Choose a question paper template before generating papers.';
 
-/** Where a school picks its question paper design (decision D17: no default design is shipped). */
-export const questionPaperTemplateHref = (schoolId: string) =>
-  `${schoolHref(schoolId, '/marketplace/templates')}?type=question_paper`;
+/** Where a school picks its question paper design (decision D17: no default design is shipped): the marketplace on that type. */
+export const questionPaperTemplateHref = (schoolId: string) => marketplaceHref(schoolId, { type: 'question_paper' });
 
 /**
  * The persistent warning shown while the school has no question paper

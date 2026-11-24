@@ -37,8 +37,11 @@ for the management implementation.
 | `template-revisions.tsx` | Revision select (`?revision=`), All revisions dialog, read-only revision with Restore |
 | `template-code-editor.tsx` | Dynamically loaded Monaco source editor and format action |
 | `document-template-settings.tsx` | Settings permission boundary and scope adapter |
-| `document-template-marketplace.tsx` | Type tabs, design tabs, the selected design's PDF, full-screen preview dialog, import mutation |
-| `marketplace-model.ts` | The marketplace's address (`?type=&template=&preview=1`) and which type and design it shows |
+| `document-template-marketplace.tsx` | The marketplace's pages: root and type redirects, a design's PDF, full-screen preview dialog, import mutation |
+| `marketplace-model.ts` | The marketplace's addresses (`/templates/:type/:slug?preview=1`), the former query address, which types the school has and which design a type opens |
+| `../marketplace-navigation.tsx` | The marketplace's own sidebar (Back to settings, types, the open type's designs) |
+| `marketplace-breadcrumbs.ts` | Which paths are the marketplace's and its trail (Template marketplace › type › design) |
+| `template-permissions.ts` | The one decision of which permission reads or manages a type's template (finance types have their own) |
 | `template-prompt-editor.tsx` | Provider-neutral portable-prompt dialog |
 | `document-export-link.tsx` | Contextual links from source-domain screens into Documents |
 | `student-recipient-picker.tsx` | Searchable, paginated explicit-recipient selection that retains choices across searches |
@@ -90,10 +93,11 @@ document HTML is shown: an iframe with an **empty** `sandbox`. Its options:
   arrives after the person changed the template since sending is held, not shown,
   and offered as *Replace my edits*.
 - View state in the address (`?chat=`, `?revision=`, the marketplace's
-  `?type=&template=`) is rewritten with `replaceSearchParam` / the History API,
+  `?preview=1`) is rewritten with `replaceSearchParam` / the History API,
   never `router.replace`, which would refetch the route's server payload. The
   marketplace's full-screen preview is pushed (`pushState`, marked in
-  `history.state`) so Back closes it.
+  `history.state`) so Back closes it. The marketplace's type and design are
+  path segments, reached through its sidebar like any other page.
 - Cache invalidation after selecting/saving a template must refresh both the active
   template and any consumers that show template availability.
 - A missing template is a persistent setup condition: register one domain-scoped
@@ -117,13 +121,13 @@ document HTML is shown: an iframe with an **empty** `sandbox`. Its options:
   ledger; do not add a global Statements card without a new product decision.
 - `DocumentKindCards` is the type chooser in Documents. It is a button group when
   cards launch workflows and a radiogroup when a selected `value` is supplied.
-- The marketplace is tabs, not cards: a scrollable line-tab row of document types
-  (`ScrollableTabsList`), a scrollable pill-tab row of the type's designs, then the
-  selected design's PDF in a frame most of the screen tall. Only the selected
+- The marketplace is a section of its own, like Settings: its sidebar lists the
+  school's document types (Back to settings first), and only the open type is
+  expanded with its designs. The page shows one design with no page header of
+  its own (breadcrumbs and sidebar name the type): its name, summary and actions, then its PDF in a frame most of the screen tall. Only that
   design is converted. *Preview* opens it full screen (`PreviewDialogContent` size
   `full`) with Use template beside the title. The type, design and open preview are
-  in the address, not local state. The design tabs activate on Enter or a click
-  (`activationMode="manual"`), so arrowing along them converts nothing.
+  in the address, not local state. No tab rows.
 - The builder follows the question paper studio: it fills the window from md up
   (`APP_SHELL_FILL_HEIGHT_MD_CLASS`), the editing pane (AI | Code tabs) and the
   preview share a resizable divider; *Hide editor* (or dragging it all the way) folds
@@ -134,7 +138,7 @@ document HTML is shown: an iframe with an **empty** `sandbox`. Its options:
 - The preview is the printed PDF (`PdfPreview`): report cards portrait A4,
   timetables landscape A4, ID cards imposed on portrait A4, half-A4 admit/finance
   revisions in one of two vertical slots, exactly as generated.
-- *Edit with AI* (only for someone without the assistant) and Marketplace remain
+- *Get edit prompt* (only for someone without the assistant) and Marketplace remain
   peer header actions. Assistant users reach the chat through the *AI* tab, or on a
   phone the *Ask for a change* bar fixed to the bottom of the screen. The marketplace should not visually dominate source
   editing when a template is already selected.
@@ -176,7 +180,7 @@ a `classId` that does not take part either way.
 ## Manual verification
 
 Check configured and missing-template states, all six document cards, unified
-history, Settings editor/read-only/empty states, AI dialog, marketplace tabs/full-screen preview,
+history, Settings editor/read-only/empty states, AI dialog, marketplace sidebar/full-screen preview,
 and permission-denied fallbacks. Inspect desktop, 390 px, and 320 px layouts. A
 type-check is not a substitute for opening the real authenticated UI and inspecting
 the rendered iframe.

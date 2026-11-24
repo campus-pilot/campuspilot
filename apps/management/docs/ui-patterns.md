@@ -434,9 +434,11 @@ deliberate and must remain visible in future redesigns:
   document and Document history. Do not reintroduce template selection or editing
   there.
 - School-level Settings owns the selected template and custom HTML. The template
-  marketplace owns discovery, contextual preview, and import. A marketplace card's
-  Preview navigates to a dedicated detail route; Use template creates and selects
-  an immutable school revision.
+  marketplace owns discovery, contextual preview, and import. It is a section of
+  its own like Settings (its own sidebar: Back to settings, the school's document
+  types, only the open type expanded with its designs); each design has its own
+  address and page, and Use template creates and selects an immutable school
+  revision.
 - When a document type has no selected school template, register one stable
   school-scoped `AppShellAlert` per authorized academic/finance domain. Viewers may
   see the warning, while only users with the corresponding domain's template-
@@ -446,7 +448,7 @@ deliberate and must remain visible in future redesigns:
   Once selected, reveal that type's required fields and preview/generation flow.
 - Template editing is a split workspace on wide screens and a stacked workspace
   on small screens: collapsible Handlebars source first, sanitized sample preview
-  second. Edit with AI and Marketplace are peer actions in the page header.
+  second. Get edit prompt and Marketplace are peer actions in the page header.
 - The AI helper is a portable-prompt workflow. It must remain provider-neutral and
   local to the browser; it never calls an AI service or silently replaces template
   source.
@@ -461,7 +463,7 @@ deliberate and must remain visible in future redesigns:
 
 - The question paper template is settings-only and belongs to the `assistant`
   feature: settings route `/settings/templates/question-paper` (nav item behind
-  `RequireFeature assistant`), a marketplace type card offered only with that
+  `RequireFeature assistant`), a marketplace sidebar type offered only with that
   feature, no footprint control (full A4). No default design is shipped; the body
   slot is placed exactly once.
 
