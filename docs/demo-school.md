@@ -90,7 +90,10 @@ the workflow keeps running.
 
 Steps: staff (+ generated monogram logo when none was uploaded) → session →
 classes → students (with illustrated photos) → exams → finance → templates →
-notices → credentials. The seed and `asOf` are drawn once and stored on the job, so a
+notices → credentials. The templates step selects the same designs every new
+school starts with (`DEFAULT_DOCUMENT_TEMPLATE_SLUGS`, the CampusPilot Standard
+set; docs/document-system.md "Default templates") plus the built-in
+`notice-default`, so a demo's half-A4 bill prints a Bill due with its credits. The seed and `asOf` are drawn once and stored on the job, so a
 retry rebuilds the same plan and every idempotent step finds its earlier work.
 Exam state and billing months follow from `asOf` (see `dates.ts`, `plan.ts`).
 The exams step generates each exam's plan for every demo class (all of them
@@ -162,7 +165,7 @@ science paper and a Hindi mathematics paper, each with two page photos and versi
   the worker, so it makes each page's thumbnail and model copy itself
   (`processPageDerivatives`) instead of handing them over, and a replay finishes any page
   left `pending`. For the same
-  reason `seedTemplates` saves the `question-paper-classic` design directly
+  reason `seedTemplates` saves the `standard-question-paper` design directly
   (`saveTemplate`, after the `MANAGE_DOCUMENT_TEMPLATES` check). The Question paper tab
   is invisible until an admin enables the feature; then the papers and PDFs are there.
   Printing needs Gotenberg reachable from the worker.

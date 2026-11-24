@@ -88,7 +88,9 @@ principal role. What differs is stated by each caller: a personal space is
 `kind = personal`, named "{name}'s personal school" ("My personal school"
 without a name), with an empty location and the slug `personal-` plus the
 random part of a fresh id (`personalSpaceSlug`): the slug never carries the
-person's name and is inserted once, with no search for a free one. It writes
+person's name and is inserted once, with no search for a free one. It selects **no default document templates** (a school's
+CampusPilot Standard set, docs/document-system.md "Default templates", is
+selected by `createOwnSchool`, not by `provisionSelfServiceSchool`). It writes
 **no `school_creation` row** (the space does not use the school creation
 allowance: the person can still create one school) and offers no guided setup.
 

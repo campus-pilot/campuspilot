@@ -75,7 +75,8 @@ management screens. It records the reference implementations, layout and feedbac
 conventions, mobile verification expectations, and examination redesign decisions.
 
 Before changing document generation, document history, school template settings,
-the template marketplace, or template rendering, read the canonical
+the template marketplace, template rendering, the default templates new schools
+start with, or Bill due, read the canonical
 [Document system guide](docs/document-system.md). It records the route ownership,
 permission boundaries, immutable template lifecycle, all-classroom timetable
 invariant, safe Handlebars contract, and the checks required when extending a
