@@ -120,15 +120,17 @@ document HTML is shown: an iframe with an **empty** `sandbox`. Its options:
   (`activationMode="manual"`), so arrowing along them converts nothing.
 - The builder follows the question paper studio: it fills the window from md up
   (`APP_SHELL_FILL_HEIGHT_MD_CLASS`), the editing pane (AI | Code tabs) and the
-  preview share a resizable divider, and *Hide editor* / *Show editor* fold the pane.
+  preview share a resizable divider; *Hide editor* (or dragging it all the way) folds
+  the pane to a rail (`EditRail`) that opens it again.
   On a phone a *Preview | AI | Code* switch shows one section at a time, all mounted.
 - Monaco is client-only and uses HTML language services for Handlebars-containing
   markup. Preserve line numbers, wrapping, theme support, and the format action.
 - The preview is the printed PDF (`PdfPreview`): report cards portrait A4,
   timetables landscape A4, ID cards imposed on portrait A4, half-A4 admit/finance
   revisions in one of two vertical slots, exactly as generated.
-- *Ask for edit* (assistant users) or *Edit with AI* (everyone else) and Marketplace
-  remain peer header actions. The marketplace should not visually dominate source
+- *Edit with AI* (only for someone without the assistant) and Marketplace remain
+  peer header actions. Assistant users reach the chat through the *AI* tab, or on a
+  phone the *Ask for a change* bar fixed to the bottom of the screen. The marketplace should not visually dominate source
   editing when a template is already selected.
 - At 390 px and 320 px the header wraps and sections switch without feature-level
   horizontal overflow.

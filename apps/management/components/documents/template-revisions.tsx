@@ -58,29 +58,35 @@ export function useTemplateRevision(scope: DocumentTemplateScope, revisionId: st
 
 /**
  * Which revision is on screen, as the question paper studio's version
- * select: the working copy first (said to be unsaved when it is), then the
- * newest revisions; the one in use is marked. A revision opened from the
+ * select: the newest revisions, the one in use marked. The working copy is
+ * the editor's own, in the browser: until anything changes (a hand edit, a
+ * draft from the assistant, a restore) the editor shows the revision it
+ * opened on (`baseRevisionId`), so the select names that revision and
+ * choosing it is the editable view; once something changed, *Working copy
+ * (unsaved)* is an option of its own and the base revision opens read-only
+ * like any other. A revision opened from the
  * history that is older than the listed ones is added so the select can
- * name it. Beside it, the history button opens every revision.
+ * name it. The history button (`AllRevisionsButton`) opens every revision.
  */
 export function RevisionPicker({
   scope,
   revisionId,
+  baseRevisionId,
   shown,
   failed,
   dirty,
   onChange,
-  onOpenHistory,
 }: {
   scope: DocumentTemplateScope;
   revisionId: string | null;
+  /** The revision the editor opened on, which an unchanged editor shows. */
+  baseRevisionId: string;
   /** The revision on screen when it was read; it names the select's value when it is not among the newest. */
   shown: TemplateRevision | undefined;
   /** The revision asked for could not be read (an old or mistyped link). */
   failed: boolean;
   dirty: boolean;
   onChange: (revisionId: string | null) => void;
-  onOpenHistory: () => void;
 }) {
   const recent = useRecentRevisions(scope);
   const listed = recent.data?.items ?? [];
@@ -88,28 +94,36 @@ export function RevisionPicker({
   // A revision asked for that the select cannot name yet (still loading, or not found) is an option of its own,
   // so the select shows what the preview shows and choosing Working copy is a change that leaves it.
   const unnamed = revisionId && !revisions.some((revision) => revision.revisionId === revisionId) ? revisionId : null;
+  // Unchanged, the editable view is the base revision itself, so it stands for the working copy.
+  const editable = dirty ? WORKING_COPY : baseRevisionId;
   const options = [
-    { value: WORKING_COPY, label: dirty ? 'Working copy (unsaved)' : 'Working copy' },
+    ...(dirty ? [{ value: WORKING_COPY, label: 'Working copy (unsaved)' }] : []),
+    // Until the list has loaded, the unchanged editor's revision still has a name to show.
+    ...(!dirty && !revisions.some((revision) => revision.revisionId === baseRevisionId) ? [{ value: baseRevisionId, label: 'Current revision' }] : []),
     ...revisions.map((revision) => ({ value: revision.revisionId, label: `Revision ${revision.revisionNo}${revision.selected ? ' (in use)' : ''}` })),
     ...(unnamed ? [{ value: unnamed, label: failed ? 'Revision not found' : 'Loading revision…' }] : []),
   ];
   return (
-    <div className="flex items-center gap-1">
-      <OptionSelect
-        value={revisionId ?? WORKING_COPY}
-        options={options}
-        onValueChange={(value) => onChange(value === WORKING_COPY ? null : value)}
-        triggerProps={{ 'aria-label': 'Revision', className: 'w-52 max-md:min-w-36 max-md:flex-1' }}
-      />
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button type="button" variant="ghost" size="icon" aria-label="All revisions" onClick={onOpenHistory}>
-            <History aria-hidden />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>All revisions</TooltipContent>
-      </Tooltip>
-    </div>
+    <OptionSelect
+      value={revisionId ?? editable}
+      options={options}
+      onValueChange={(value) => onChange(value === editable ? null : value)}
+      triggerProps={{ 'aria-label': 'Revision', className: 'w-52 max-md:w-36' }}
+    />
+  );
+}
+
+/** Opens every revision (`RevisionHistoryDialog`): an icon button named by its tooltip, styled like the header's Marketplace. */
+export function AllRevisionsButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button type="button" variant="outline" size="icon" aria-label="All revisions" onClick={onClick}>
+          <History aria-hidden />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>All revisions</TooltipContent>
+    </Tooltip>
   );
 }
 

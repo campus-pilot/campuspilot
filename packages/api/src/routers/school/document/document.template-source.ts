@@ -169,7 +169,11 @@ export function previewTemplateHtml(
   // Rendered like a real paper (template budget, one body slot, logo limit),
   // with the English example paper as the body so an author sees a real page.
   if (documentType === "question_paper") return renderSampleQuestionPaperDocument(content);
-  return combineDocuments([renderDocument(content, sampleDocumentContext(documentType), budget)], documentType, pageSize);
+  // A half-A4 design prints two documents per sheet, so its preview fills the
+  // sheet with two copies of the sample: one copy alone reads as a full page.
+  // (ID cards keep one sample; the sheet's other slots stay empty.)
+  const rendered = renderDocument(content, sampleDocumentContext(documentType), budget);
+  return combineDocuments(pageSize === "half" ? [rendered, rendered] : [rendered], documentType, pageSize);
 }
 
 /**

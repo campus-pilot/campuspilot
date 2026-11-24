@@ -32,6 +32,14 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe('half-A4 preview', () => {
+  it('fills the sheet with two copies of the sample, as half-A4 documents print', () => {
+    const items = (pageSize: 'full' | 'half') => previewTemplateHtml('<p>{{school.name}}</p>', 'admit_card', pageSize, undefined).match(/class="sheet-item"/g) ?? [];
+    expect(items('half')).toHaveLength(2);
+    expect(items('full')).toHaveLength(1);
+  });
+});
+
 describe('template preview limits (docs/document-system.md, "Preview limits")', () => {
   it('renders every marketplace design within the preview render budget, a Notice design at both print sizes', () => {
     for (const design of DOCUMENT_MARKETPLACE) {

@@ -46,7 +46,7 @@ const TEMPLATE_SUGGESTIONS: readonly AssistantSuggestion[] = [
 
 const TEMPLATE_WELCOME = {
   title: 'Ask for an edit',
-  text: 'Say what to change in this template. Each draft shows in the preview at once; nothing is saved until you press Save template.',
+  text: 'Say what to change in this template. Each draft shows in the preview at once; nothing is saved until you press Save.',
 };
 
 /**

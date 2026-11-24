@@ -204,25 +204,40 @@ like the question paper studio (`TemplateEditor` in `template-workspace.tsx`):
   editing pane on the left and the preview on the right, each scrolling inside
   itself, so the page never scrolls. The split is resizable (`ResizablePanelGroup`
   from `@campuspilot/ui/components/resizable`, on `react-resizable-panels`) and the
-  editing pane folds away (*Hide editor*; *Show editor* in the preview's strip brings
-  it back). On a phone it is an ordinary page with a section switch (*Preview | AI |
-  Code*, the preview first) and one section at a time; every section stays mounted,
-  so switching loses nothing.
+  editing pane folds away (*Hide editor*, or dragging the split all the way left),
+  leaving a rail at the left edge, as the question paper studio's assistant rail,
+  that brings it back (a dot marks an assistant draft not saved yet). On a phone it
+  is an ordinary page with one section at a time, chosen with a select in the
+  header (*Preview* or *Code*, the preview first, so the code is offered only to
+  someone who opens it); every section stays mounted, so switching loses nothing.
+  The phone puts *Save* beside the title so the selects and icons fit one row. There, as in the question paper studio, someone who
+  may use the assistant gets a bar fixed to the bottom of the screen, *Ask for a
+  change*, which opens the chat over the whole screen with its own header (*New
+  chat*, *Close assistant*); the chat stays mounted while it is closed, and showing
+  a draft from it closes it on the preview.
 - The **header row**: the template's title and state (*Saved*, *Unsaved changes*,
   or *Draft n from the assistant, not saved*), the revision select and *All
-  revisions* (see "Revision history"), the AI action, *Marketplace*, *Reload saved*
-  and *Save template*. The AI action is *Ask for edit* (a sparkle) for someone who may
-  use the assistant (the question paper's gate, `useAssistantGate`: the school's
-  `assistant` feature and the user's assistant role; there is no other flag), and
-  the portable *Edit with AI* dialog for everyone else, unchanged. While the gate is
-  still loading neither is shown. *Ask for edit* opens the AI tab, unfolding the pane.
+  revisions* (see "Revision history"), the AI action, *Marketplace* (an icon) and
+  *Save*. There is no standing *Reload saved*: going back to a saved revision is the
+  revision select's job. Reloading is offered inside a failed save's message, where a
+  template someone else saved meanwhile has to be re-read before saving. The AI action is the portable *Edit with AI* dialog, shown
+  only to someone who may not use the assistant (the question paper's gate,
+  `useAssistantGate`: the school's `assistant` feature and the user's assistant
+  role; there is no other flag). Someone who may use it has no header button: the
+  *AI* tab (wide screens) or the bottom bar (phones) is the way to the chat. While
+  the gate is still loading nothing is shown.
 - The **editing pane** has two tabs, *AI* (the assistant's chat, only for those who
-  may use it) and *Code*: the template name, for admit cards, bills, receipts and
-  statements an explicit paper footprint (half A4, two documents per physical sheet,
-  or full A4, one per sheet), the Monaco Handlebars/HTML code editor with formatting,
+  may use it) and *Code*: the Monaco Handlebars/HTML code editor, whose toolbar holds,
+  for admit cards, bills, receipts and statements, an unlabelled paper footprint
+  select (*Half A4*, two documents per physical sheet, or *Full A4*, one per sheet;
+  each option says so) beside *Format*, with formatting,
   syntax highlighting, line numbers, wrapping and theme support, and a collapsible
   variable reference (from `learn_document_template_editing`). Both tabs stay
-  mounted.
+  mounted. The template's name is not on screen while editing: *Save* asks for it in
+  a dialog, prefilled with the current name (a name the form refuses keeps the dialog
+  open; a save the server refuses closes it onto the error that offers *Reload saved*).
+  A half-A4 design's preview shows two copies of the sample on the sheet, as it
+  prints, so it never reads as a full page.
 - The **preview** is the template rendered with synthetic data **as the PDF it
   prints as**, drawn page by page with pdf.js: the same `PdfPages` viewer, page
   chrome, scrolling and skeleton as a question paper's saved version, through the
@@ -242,7 +257,7 @@ limits") with *Try again*. A preview is asked again by itself only when the serv
 said the person has several previews in flight; a failure or a timeout is never
 repeated behind their back. Preview never saves or selects a revision. Saving creates
 a new immutable object and makes it active. A keyed editor adopts the newly selected
-revision only after the query cache refreshes. *Reload saved* discards the working
+revision only after the query cache refreshes. *Reload saved* (offered in a failed save's message) discards the working
 copy (and any shown assistant draft) after the app's dirty dialog. Dirty navigation
 uses the application dialog and browser `beforeunload` fallback; it must not use
 `window.confirm`.
@@ -352,9 +367,14 @@ after its query was cancelled is freed by `loadPdf` itself.
 Every save and every marketplace import is an immutable revision; the builder lets the
 user look at earlier ones, as the question paper studio does with versions:
 
-- The header's **revision select** lists *Working copy* (*Working copy (unsaved)* while
-  dirty) and the 20 newest revisions as *Revision n*, the one the school uses marked
-  *(in use)*; *All revisions* opens a dialog with every revision, a page at a time
+- The header's **revision select** lists the 20 newest revisions as *Revision n*, the
+  one the school uses marked *(in use)*. The working copy is the editor's own state in
+  the browser, nothing stored: until something changes it (a hand edit, a draft from
+  the assistant, a restore) the select names the revision the editor opened on and
+  choosing it is the editable view; once something changed, *Working copy (unsaved)*
+  is an option of its own and that revision opens read-only like any other (until
+  the list loads, the unchanged revision is named *Current revision*). *All revisions*
+  (an icon button) opens a dialog with every revision, a page at a time
   (*Show older*), each with its name, how it was saved (in the editor or imported from
   the marketplace), when, by whom, and *Preview*.
 - The revision shown lives in the address (`?revision=<id>`, like the studio's
@@ -365,7 +385,7 @@ user look at earlier ones, as the question paper studio does with versions:
   with *Back to working copy* and **Restore**. The working copy and the chat stay as
   they are. While the revision loads, or when it cannot be read (an old or mistyped
   link), *Back to working copy* is offered all the same, and the select names it
-  (*Loading revision…* / *Revision not found*) so choosing *Working copy* leaves it.
+  (*Loading revision…* / *Revision not found*) so choosing the editable view leaves it.
 - *Restore* loads the revision's source and footprint into the working copy; the name
   stays the editor's. Nothing is saved: the user saves it like any edit, which creates
   a new revision; no revision is overwritten or reselected. When the working copy has
@@ -407,7 +427,7 @@ tool policy). What the template editor adds:
   seeded on its first message with `{ kind: 'document_template', documentType }`. It
   lives in the editor's address (`?chat=<id>`, rewritten in place with `replaceState`),
   so a reload or a save (which remounts the editor on the new revision) continues in
-  it; *New chat* (in the pane's header, and beside the section switch on a phone)
+  it; *New chat* (in the pane's header, and in the assistant sheet's header on a phone)
   starts another. A draft shown from the old chat stays on screen as the unsaved
   working copy (`adoptShownSource`), so starting a new chat never drops it silently.
   The tool and phone section on screen are kept above the editor's key, so a save
@@ -450,7 +470,7 @@ tool policy). What the template editor adds:
   until the next draft. A draft of another school or document type (a conversation
   opened in another editor) is only described (`elsewhere`), never loaded. Drafts are
   not rows: they exist only in the conversation.
-- **Saving.** Only the person saves, with *Save template* (what is on screen becomes a
+- **Saving.** Only the person saves, with *Save* (what is on screen becomes a
   new revision through `saveDocumentTemplate`, as always). In a conversation started
   from the template editor the assistant's runtime refuses `saveDocumentTemplate` and
   `selectMarketplaceTemplate` before any approval card (`TEMPLATE_EDITOR_REFUSED_TOOLS`
@@ -1270,7 +1290,7 @@ template merely to prove that an import button is clickable.
 - Do not silently call an AI provider from the portable Edit with AI dialog; the
   in-app assistant is the only AI path, behind its own gate.
 - Do not let the assistant save a template from the editor's chat, and do not store
-  its drafts: the person saves through Save template.
+  its drafts: the person saves through Save.
 - Do not weaken iframe sandboxing, sanitization, CSP, or Gotenberg network rules to
   accommodate a marketplace design.
 - Do not infer grades, attendance, approvals, registration, class membership, or
