@@ -11,16 +11,15 @@ import {
 import {
   assertValidSchoolNoticeTemplate,
   imposeHalfPageNoticeCopies,
+  renderNoticeDocument,
 } from "../notice/notice.render";
 import {
   assertValidSchoolQuestionPaperTemplate,
   renderSampleQuestionPaperDocument,
 } from "../question-paper/question-paper.render";
-import {
-  DOCUMENT_CONTEXT_HELP,
-  sampleDocumentContext,
-  SAMPLE_NOTICE_CONTEXT,
-} from "./document.catalog";
+import type { QuestionPaperContext } from "../question-paper/question-paper.context";
+import { DOCUMENT_CONTEXT_HELP, sampleDocumentContext } from "./document.catalog";
+import { contextImageChars } from "./document.images";
 import { rpcError } from "../../../errors";
 import type { DocumentTemplatePageSize, DocumentType } from "./document.dto";
 import { combineDocuments, convertDocumentPdf, isConversionTimeout, renderDocument } from "./document.render";
@@ -94,16 +93,27 @@ export function checkTemplateDraft(documentType: DocumentType, content: string):
 /**
  * The bounds of one template preview (docs/document-system.md, "Preview
  * limits"). A preview renders source the person typed (or a saved revision)
- * against one synthetic sample, so it needs far less than a generated batch,
- * and each one is a Chromium conversion: these keep a single preview small
- * and short whatever the source does.
+ * against one context (the school's own data where the caller may read it,
+ * the sample elsewhere: `document.preview-context.ts`), so it needs far less
+ * than a generated batch, and each one is a Chromium conversion: these keep
+ * a single preview small and short whatever the source does.
  *
  * - `renderChars`: the render budget (`maxOutputChars`), the Notice and
  *   Question paper template budget (2,000,000) instead of a batch's
  *   25,000,000. A catalog design renders its sample in a few kilobytes
  *   (the sample logo is 1 KB), so only a template that repeats itself
  *   massively reaches it. The Question paper preview keeps its own renderer,
- *   which already holds the template to this budget.
+ *   which already holds the template to this budget, and so does the Notice
+ *   preview (`renderNoticeDocument`); both place the logo after rendering,
+ *   at most three times.
+ * - `imageUses`: how many times the other types' previews may print each
+ *   embedded image (the school logo, a student photo) on top of
+ *   `renderChars`. A real logo can be a data URI of several megabytes (an
+ *   image may be 5 MB), which printed once would pass `renderChars` on its
+ *   own; generation sends images as conversion assets and never counts
+ *   them, so the preview budget grows by `imageUses` times the context's
+ *   image characters (`contextImageChars`). A design that prints a large
+ *   logo more often than this is refused in the preview, as a notice is.
  * - `timeoutMs`: how long the converter may work on one preview (a generated
  *   document gets 120 seconds, a question paper 60). Running out is refused
  *   as the template's fault ({@link PREVIEW_TIMEOUT_MESSAGE}).
@@ -127,6 +137,7 @@ export function checkTemplateDraft(documentType: DocumentType, content: string):
  */
 export const TEMPLATE_PREVIEW_LIMITS = {
   renderChars: 2_000_000,
+  imageUses: 4,
   timeoutMs: 20_000,
   pages: {
     report_card: 4,
@@ -149,51 +160,68 @@ const previewPageLimitMessage = (pages: number) =>
   `This template prints the sample on more than ${pages} pages, which is the preview limit. Check for content that overflows the page or repeats.`;
 
 /**
- * A template rendered with synthetic data for a preview, within the preview
- * render budget ({@link TEMPLATE_PREVIEW_LIMITS}). A Notice design is laid
- * out at the requested notice print size (`printSize`, full when omitted)
- * and told that size as `print.size`, exactly as a plain notice of that size
- * is printed; every other type uses its revision's footprint.
+ * A template rendered for a preview, within the preview render budget
+ * ({@link TEMPLATE_PREVIEW_LIMITS}), against `context`: the preview context
+ * the procedures resolve for the caller (`templatePreviewRenderContext`,
+ * images embedded), or the type's static sample when omitted (unit tests).
+ * A Notice design is rendered as a notice is (`renderNoticeDocument`: the
+ * notice budget, the logo placed at most three times) at the requested
+ * notice print size (`printSize`, full when omitted) and told that size as
+ * `print.size`, exactly as a plain notice of that size is printed; a
+ * Question paper design gets the example paper as its body; every other type
+ * uses its revision's footprint.
  */
 export function previewTemplateHtml(
   content: string,
   documentType: DocumentType,
   pageSize: DocumentTemplatePageSize,
   printSize: DocumentTemplatePageSize | undefined,
+  context: object = sampleDocumentContext(documentType),
 ) {
-  const budget = { maxOutputChars: TEMPLATE_PREVIEW_LIMITS.renderChars };
   if (documentType === "notice") {
     const size = printSize ?? "full";
-    return combineDocuments([renderDocument(content, { ...SAMPLE_NOTICE_CONTEXT, print: { size } }, budget)], "notice", size);
+    const notice = { ...(context as { school: { logoUrl: string | null } }), print: { size } };
+    return renderNoticeDocument(content, notice, TEMPLATE_PREVIEW_LIMITS.renderChars);
   }
   // Rendered like a real paper (template budget, one body slot, logo limit),
   // with the English example paper as the body so an author sees a real page.
-  if (documentType === "question_paper") return renderSampleQuestionPaperDocument(content);
-  return combineDocuments([renderDocument(content, sampleDocumentContext(documentType), budget)], documentType, pageSize);
+  if (documentType === "question_paper")
+    return renderSampleQuestionPaperDocument(content, context as QuestionPaperContext);
+  const budget = {
+    maxOutputChars: TEMPLATE_PREVIEW_LIMITS.renderChars + TEMPLATE_PREVIEW_LIMITS.imageUses * contextImageChars(context),
+  };
+  // A half-A4 design prints two documents per sheet, so its preview fills the
+  // sheet with two copies of the sample: one copy alone reads as a full page.
+  // (ID cards keep one sample; the sheet's other slots stay empty.)
+  const rendered = renderDocument(content, context, budget);
+  return combineDocuments(pageSize === "half" ? [rendered, rendered] : [rendered], documentType, pageSize);
 }
 
 /**
  * The preview as the PDF it prints as: the same HTML as
- * {@link previewTemplateHtml}, converted by the same Gotenberg call as a
- * generated document of the type, within the preview's page cap and timeout
- * ({@link TEMPLATE_PREVIEW_LIMITS}; running out of time is a BAD_REQUEST with
- * {@link PREVIEW_TIMEOUT_MESSAGE}, not a server error), and for a half-A4
- * notice imposed two copies per A4 sheet exactly as a published half notice
- * is. Nothing is stored.
+ * {@link previewTemplateHtml} (with the same `context`), converted by the
+ * same Gotenberg call as a generated document of the type, within the
+ * preview's page cap and timeout ({@link TEMPLATE_PREVIEW_LIMITS}; running
+ * out of time is a BAD_REQUEST with {@link PREVIEW_TIMEOUT_MESSAGE}, not a
+ * server error), and for a half-A4 notice imposed two copies per A4 sheet
+ * exactly as a published half notice is. Nothing is stored and nothing is
+ * cached: the context is the school's data as the caller may read it now.
+ * Every caller converts inside one of the person's conversion slots
+ * (`withPreviewConversionSlot`), the marketplace's previews included.
  */
 export async function previewTemplatePdf(
   content: string,
   documentType: DocumentType,
   pageSize: DocumentTemplatePageSize,
   printSize: DocumentTemplatePageSize | undefined,
-  signal?: AbortSignal,
+  options: { context?: object; signal?: AbortSignal } = {},
 ): Promise<Uint8Array> {
-  const html = previewTemplateHtml(content, documentType, pageSize, printSize);
+  const html = previewTemplateHtml(content, documentType, pageSize, printSize, options.context);
   const pages = TEMPLATE_PREVIEW_LIMITS.pages[documentType];
   let converted: Uint8Array;
   try {
     converted = new Uint8Array(
-      await convertDocumentPdf(html, documentType, signal, [], {
+      await convertDocumentPdf(html, documentType, options.signal, [], {
         // A question paper keeps the converter's own cap and message.
         ...(documentType === "question_paper" ? {} : { pageLimit: { pages, message: previewPageLimitMessage(pages) } }),
         timeoutMs: TEMPLATE_PREVIEW_LIMITS.timeoutMs,
@@ -204,46 +232,6 @@ export async function previewTemplatePdf(
     throw error;
   }
   return documentType === "notice" && printSize === "half" ? imposeHalfPageNoticeCopies(converted) : converted;
-}
-
-/**
- * Marketplace designs already converted, as the base64 the procedure returns,
- * by type, slug and notice print size. See {@link previewMarketplaceTemplatePdf}.
- */
-const marketplacePdfs = new Map<string, Promise<string>>();
-
-/** Forgets every converted marketplace design (tests only: the map lives for the process). */
-export function clearMarketplacePreviewCache() {
-  marketplacePdfs.clear();
-}
-
-/**
- * A marketplace design as the PDF it prints as, base64-encoded, with the
- * same synthetic data, conversion and limits as {@link previewTemplatePdf}.
- * The catalog ships with the code and the sample data is fixed, so a design
- * converts to the same PDF for the life of the process: each design (and
- * each print size of a Notice design) is converted and encoded once, however
- * many people preview it, and the map is bounded by the catalog. A
- * conversion in flight is shared and a failed one is forgotten, so the next
- * preview tries again. The caller's abort signal is therefore not passed on:
- * someone else may be waiting for the same conversion, and a finished one is
- * kept for the next.
- */
-export function previewMarketplaceTemplatePdf(
-  design: { slug: string; documentType: DocumentType; pageSize: DocumentTemplatePageSize; content: string },
-  printSize: DocumentTemplatePageSize | undefined,
-): Promise<string> {
-  // Only a Notice design is previewed at a print size (full when not asked).
-  const size = design.documentType === "notice" ? (printSize ?? "full") : undefined;
-  const key = `${design.documentType}:${design.slug}:${size ?? design.pageSize}`;
-  const held = marketplacePdfs.get(key);
-  if (held) return held;
-  const converting = previewTemplatePdf(design.content, design.documentType, design.pageSize, size).then((bytes) =>
-    Buffer.from(bytes).toString("base64"),
-  );
-  marketplacePdfs.set(key, converting);
-  converting.catch(() => marketplacePdfs.delete(key));
-  return converting;
 }
 
 /**

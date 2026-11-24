@@ -8,6 +8,7 @@ import { loadPdf, type LoadedPdf } from '@campuspilot/components/documents/pdf-p
 import { PdfPreview } from '@campuspilot/components/documents/pdf-preview';
 
 import { isClientError } from '@/components/assistant/assistant-stream';
+import { useStoredSchoolSessionId } from '@/components/session-selection';
 import { client } from '@/lib/orpc';
 
 import type { DocumentTemplateScope } from './document-common';
@@ -76,13 +77,26 @@ const templatePdfQueryDefaults = {
   retryDelay: (attempt: number) => 1_000 * 2 ** attempt,
 } as const;
 
+/**
+ * The session whose data a template preview shows: the one selected in the
+ * sidebar's session switcher, as every school page stores it. When none is
+ * stored, nothing is sent and the server uses the school's active session,
+ * else its latest: the same session the switcher then shows. Previews are
+ * rendered with the school's own data where the person may read it
+ * (docs/document-system.md, "Preview context"), so the session is part of
+ * every preview's query key.
+ */
+function usePreviewSessionId(schoolId: string): string | undefined {
+  return useStoredSchoolSessionId(schoolId);
+}
+
 /** Opens the base64 PDF a preview procedure returns; a document opened after the query was cancelled is freed (`loadPdf`). */
 function loadPreviewPdf(result: { pdfBase64: string }, signal: AbortSignal): Promise<LoadedPdf> {
   return loadPdf(bytesOfBase64(result.pdfBase64), signal);
 }
 
 /**
- * A template source rendered with sample data as the PDF it prints as
+ * A template source rendered with the school's data as the PDF it prints as
  * (`previewDocumentTemplatePdf`, for those who may change the template),
  * opened with pdf.js, converted once per source (`templatePdfQueryDefaults`).
  * While a newer source converts, the previous pages stay on screen
@@ -92,17 +106,24 @@ export function useTemplatePdf(input: { scope: DocumentTemplateScope; content: s
   const { scope, content, pageSize } = input;
   // Only a Notice design is previewed at a print size; every other type uses its footprint.
   const printSize = scope.documentType === 'notice' ? input.printSize : undefined;
+  const sessionId = usePreviewSessionId(scope.schoolId);
   return useQuery({
-    queryKey: ['document-template', 'preview-pdf', scope.schoolId, scope.documentType, pageSize, printSize ?? null, sourceKeyOf(content)],
+    queryKey: ['document-template', 'preview-pdf', scope.schoolId, scope.documentType, sessionId ?? null, pageSize, printSize ?? null, sourceKeyOf(content)],
     queryFn: async ({ signal }) =>
-      loadPreviewPdf(await client.school.previewDocumentTemplatePdf({ ...scope, content, pageSize, ...(printSize ? { printSize } : {}) }, { signal }), signal),
+      loadPreviewPdf(
+        await client.school.previewDocumentTemplatePdf(
+          { ...scope, content, pageSize, ...(printSize ? { printSize } : {}), ...(sessionId ? { sessionId } : {}) },
+          { signal },
+        ),
+        signal,
+      ),
     ...templatePdfQueryDefaults,
     placeholderData: keepPreviousData,
   });
 }
 
 /**
- * A saved revision rendered with sample data as the PDF it prints as, by its
+ * A saved revision rendered with the school's data as the PDF it prints as, by its
  * id (`previewDocumentTemplateRevisionPdf`, the template read gate): the
  * read-only template page and the builder's revision view. A revision never
  * changes, so it converts once per print size; like the marketplace it keeps
@@ -111,29 +132,38 @@ export function useTemplatePdf(input: { scope: DocumentTemplateScope; content: s
 export function useTemplateRevisionPdf(input: { scope: DocumentTemplateScope; revisionId: string | null; printSize: PageSize }) {
   const { scope, revisionId } = input;
   const printSize = scope.documentType === 'notice' ? input.printSize : undefined;
+  const sessionId = usePreviewSessionId(scope.schoolId);
   return useQuery({
-    queryKey: ['document-template', 'revision-pdf', scope.schoolId, scope.documentType, revisionId, printSize ?? null],
+    queryKey: ['document-template', 'revision-pdf', scope.schoolId, scope.documentType, sessionId ?? null, revisionId, printSize ?? null],
     queryFn: revisionId
       ? async ({ signal }) =>
-          loadPreviewPdf(await client.school.previewDocumentTemplateRevisionPdf({ ...scope, revisionId, ...(printSize ? { printSize } : {}) }, { signal }), signal)
+          loadPreviewPdf(
+            await client.school.previewDocumentTemplateRevisionPdf(
+              { ...scope, revisionId, ...(printSize ? { printSize } : {}), ...(sessionId ? { sessionId } : {}) },
+              { signal },
+            ),
+            signal,
+          )
       : skipToken,
     ...templatePdfQueryDefaults,
   });
 }
 
 /**
- * A marketplace design rendered with sample data as the PDF it prints as
- * (`previewMarketplaceTemplatePdf`, by slug: the client never downloads the
- * design's source to preview it), converted once per design and print size
- * (`templatePdfQueryDefaults`; the server converts each design once too).
+ * A marketplace design rendered with the school's data as the PDF it prints
+ * as (`previewMarketplaceTemplatePdf`, by slug: the client never downloads
+ * the design's source to preview it), converted once per design, session and
+ * print size (`templatePdfQueryDefaults`; the server converts every request,
+ * since each renders the school's data as the person may read it).
  * Unlike the editor's preview it keeps no previous data: another design's
  * pages must never stand in for the one asked for, so a design not yet
  * converted shows the page-shaped skeleton.
  */
 export function useMarketplaceTemplatePdf(input: { scope: DocumentTemplateScope; slug: string; printSize: PageSize }) {
-  const request = marketplaceTemplatePreviewInput(input.scope, input.slug, input.printSize);
+  const sessionId = usePreviewSessionId(input.scope.schoolId);
+  const request = marketplaceTemplatePreviewInput(input.scope, input.slug, input.printSize, sessionId);
   return useQuery({
-    queryKey: ['document-template', 'marketplace-pdf', request.schoolId, request.documentType, request.slug, request.printSize ?? null],
+    queryKey: ['document-template', 'marketplace-pdf', request.schoolId, request.documentType, sessionId ?? null, request.slug, request.printSize ?? null],
     queryFn: async ({ signal }) => loadPreviewPdf(await client.school.previewMarketplaceTemplatePdf(request, { signal }), signal),
     ...templatePdfQueryDefaults,
   });
@@ -194,7 +224,7 @@ function TemplatePdfQueryPreview({
 }
 
 /**
- * A template's preview with sample data, as its PDF pages (`PdfPreview`, the
+ * A template's preview with the school's data, as its PDF pages (`PdfPreview`, the
  * question paper studio's viewer). It takes its container's height.
  */
 export function TemplatePdfPreview({
@@ -216,7 +246,7 @@ export function TemplatePdfPreview({
 }
 
 /**
- * A marketplace design's preview with sample data, as its PDF pages. It
+ * A marketplace design's preview with the school's data, as its PDF pages. It
  * takes its container's height (the marketplace's preview frame, or the
  * full-screen preview dialog, which shows the same cached conversion).
  */
@@ -237,7 +267,7 @@ export function MarketplaceTemplatePdfPreview({
 }
 
 /**
- * A saved revision's preview with sample data, as its PDF pages, by its id
+ * A saved revision's preview with the school's data, as its PDF pages, by its id
  * (the read-only template page and the builder's revision view). It takes
  * its container's height.
  */

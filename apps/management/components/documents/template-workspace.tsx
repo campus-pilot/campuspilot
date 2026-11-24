@@ -4,7 +4,7 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useCallback, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useForm, useStore } from '@tanstack/react-form';
-import { Code2, FileText, PanelLeftClose, PanelLeftOpen, RefreshCw, Replace, Save, Sparkles, Store } from 'lucide-react';
+import { Code2, FileText, PanelLeftClose, PanelLeftOpen, RefreshCw, Replace, Save, Sparkles, Store, X } from 'lucide-react';
 import { z } from 'zod';
 import { APP_SHELL_FILL_HEIGHT_MD_CLASS } from '@campuspilot/components/app-shell';
 import type { AssistantEditorSource } from '@campuspilot/assistant-contract/template-editing';
@@ -18,11 +18,12 @@ import {
   type TemplateDraft,
 } from '@campuspilot/components/documents/template-draft-model';
 import type { TemplateDraftCardStatus } from '@campuspilot/components/documents/template-draft-card';
-import { DocumentButton, DocumentErrors, DocumentField, DocumentSelect } from '@campuspilot/components/documents/document-controls';
+import { DocumentButton, DocumentErrors, DocumentField } from '@campuspilot/components/documents/document-controls';
 import { OptionSelect } from '@campuspilot/components/option-select';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup, useResizablePanelRef } from '@campuspilot/ui/components/resizable';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@campuspilot/ui/components/tabs';
-import { ToggleGroup, ToggleGroupItem } from '@campuspilot/ui/components/toggle-group';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@campuspilot/ui/components/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@campuspilot/ui/components/select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@campuspilot/ui/components/tooltip';
 import { cn } from '@campuspilot/ui/lib/utils';
 import { HALF_PAGE_DOCUMENT_TYPES } from '@campuspilot/api/routers/school/document/document.dto';
@@ -37,7 +38,7 @@ import { noticePreviewPrintSizeSchema, noticePrintSizeOptions } from './notice-p
 import { NewTemplateChatButton, TemplateAssistantPane, useTemplateChat } from './template-assistant';
 import { TemplatePdfPreview } from './template-pdf-preview';
 import { TemplatePromptEditor } from './template-prompt-editor';
-import { RevisionHistoryDialog, RevisionPicker, RevisionPreview, useRevisionParam, useTemplateRevision } from './template-revisions';
+import { AllRevisionsButton, RevisionHistoryDialog, RevisionPicker, RevisionPreview, useRevisionParam, useTemplateRevision } from './template-revisions';
 import { ConfirmationDialog } from '@campuspilot/components/confirmation-dialog';
 
 
@@ -50,14 +51,15 @@ type PageSize = 'full' | 'half';
 /** The left pane's two tools: the assistant's chat and the code with its settings. */
 type EditTool = 'ai' | 'code';
 /** What a phone shows: one section at a time, as on the question paper studio. */
-type MobileSection = 'preview' | EditTool;
+type MobileSection = 'preview' | 'code';
 type PanelRef = ReturnType<typeof useResizablePanelRef>;
 
 const halfPageDocumentTypes = new Set<DocumentTemplateScope['documentType']>(HALF_PAGE_DOCUMENT_TYPES);
-const pageSizeOptions = [
-  { value: 'half', label: 'Half A4 · two per sheet' },
-  { value: 'full', label: 'Full A4 · one per sheet' },
-] as const;
+/** The paper footprints, each with a title (what the closed select shows) and what it means. */
+const PAGE_SIZE_OPTIONS: { value: PageSize; title: string; description: string }[] = [
+  { value: 'half', title: 'Half A4', description: 'Two documents per sheet' },
+  { value: 'full', title: 'Full A4', description: 'One document per sheet' },
+];
 /** From md up the editor and the preview sit side by side (the question paper studio's breakpoint). */
 const SIDE_BY_SIDE_QUERY = '(min-width: 768px)';
 /** How long typing pauses before the PDF preview is converted again (one Gotenberg conversion per preview). */
@@ -214,10 +216,12 @@ function useTemplateEditor(scope: DocumentTemplateScope, template: ActiveTemplat
     form.setFieldValue('error', '');
     await onReload();
   };
-  const save = () => {
+  /** Saves what is on screen; `invalid` when the form refused to submit (a name or source to fix), `done` otherwise (saved, or refused by the server into `error`). */
+  const save = async (): Promise<'invalid' | 'done'> => {
     // What is on screen is what is saved: a draft shown from the chat becomes the working copy first.
     choose(source.content);
-    void form.handleSubmit();
+    await form.handleSubmit();
+    return form.state.isValid ? 'done' : 'invalid';
   };
   /** The timer is the one outside thing; the root's ref callback clears it when the editor leaves. */
   const rootRef = useCallback((node: HTMLDivElement | null) => {
@@ -254,34 +258,29 @@ function draftBinding(editor: TemplateEditorState, scope: DocumentTemplateScope,
   };
 }
 
-/** The header's AI action: the assistant for those who may use it, else the portable prompt; nothing while unknown. */
+/**
+ * The header's AI action, for someone who may not use the assistant: the
+ * portable prompt. Assistant users reach the chat through the AI tab (wide
+ * screens) or the bottom bar (`MobileAssistantSheet`), so the header has no
+ * button for them; nothing while access is unknown.
+ */
 function AiAction({
   gate,
   scope,
   editor,
   contextHelp,
-  onAsk,
 }: {
   gate: 'allowed' | 'denied' | 'pending';
   scope: DocumentTemplateScope;
   editor: TemplateEditorState;
   contextHelp?: string;
-  onAsk: () => void;
 }) {
-  if (gate === 'pending') return null;
-  if (gate === 'allowed') {
-    return (
-      <DocumentButton variant="outline" onClick={onAsk}>
-        <Sparkles />
-        Ask for edit
-      </DocumentButton>
-    );
-  }
+  if (gate !== 'denied') return null;
   return <TemplatePromptEditor documentType={scope.documentType} content={editor.source.content} pageSize={editor.values.pageSize} contextHelp={contextHelp} />;
 }
 
-/** The one header row: the template's name and state, then its actions (the main one, Save, last). */
-function WorkspaceHeader({ title, editor, actions }: { title: string; editor: TemplateEditorState; actions: ReactNode }) {
+/** The template's name and its state (saved, unsaved, a draft from the assistant). */
+function TemplateTitle({ title, editor }: { title: string; editor: TemplateEditorState }) {
   const state = editor.source.draft
     ? `Draft ${editor.source.draft.ordinal} from the assistant, not saved`
     : editor.source.held
@@ -290,33 +289,128 @@ function WorkspaceHeader({ title, editor, actions }: { title: string; editor: Te
         ? 'Unsaved changes'
         : 'Saved';
   return (
-    <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 md:border-b md:px-4 md:py-2.5">
-      <div className="flex min-w-0 flex-1 flex-col">
-        <h1 className="truncate text-lg font-semibold tracking-tight">{title}</h1>
-        <p className="truncate text-xs text-muted-foreground" aria-live="polite">
-          {state}
-        </p>
+    <div className="flex min-w-0 flex-1 flex-col">
+      <h1 className="truncate text-lg font-semibold tracking-tight">{title}</h1>
+      <p className="truncate text-xs text-muted-foreground" aria-live="polite">
+        {state}
+      </p>
+    </div>
+  );
+}
+
+/** What the header places: the revision select, the icon actions (All revisions, Marketplace), the AI action, the phone's section select and Save. */
+type HeaderParts = { revision: ReactNode; icons: ReactNode; ai: ReactNode; section: ReactNode; save: ReactNode };
+
+/**
+ * The header. Wide screens: one row, the name on the left and the actions on
+ * the right, Save last. A phone (`compact`) has two rows so the name is never
+ * squeezed: the name with the icon actions on its right, then the revision
+ * select on the left and the section select and Save on the right.
+ */
+function WorkspaceHeader({ title, editor, parts, compact }: { title: string; editor: TemplateEditorState; parts: HeaderParts; compact: boolean }) {
+  if (compact) {
+    return (
+      <header className="flex shrink-0 flex-col gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <TemplateTitle title={title} editor={editor} />
+          {parts.icons}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {parts.revision}
+          <span className="flex-1" />
+          {parts.ai}
+          {parts.section}
+          {parts.save}
+        </div>
+      </header>
+    );
+  }
+  return (
+    <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-2.5">
+      <TemplateTitle title={title} editor={editor} />
+      <div className="flex flex-wrap items-center gap-2">
+        {parts.revision}
+        {parts.icons}
+        {parts.ai}
+        {parts.save}
       </div>
-      <div className="flex flex-wrap items-center gap-2">{actions}</div>
     </header>
   );
 }
 
-function SaveActions({ editor }: { editor: TemplateEditorState }) {
+/**
+ * Save: asks for the template's name in a dialog (prefilled with the current
+ * one), then stores what is on screen as a new revision. The name is asked
+ * only here, so the code pane keeps its room for the code. A name or source
+ * the form refuses keeps the dialog open with the errors; a save the server
+ * refuses closes it onto the header's error (`SaveError`, which offers the
+ * reload). Going back to a saved revision is the revision select's job.
+ */
+function SaveAction({ editor }: { editor: TemplateEditorState }) {
+  const [open, setOpen] = useState(false);
+  const confirm = async () => {
+    if ((await editor.save()) === 'done') setOpen(false);
+  };
   return (
-    <editor.form.Subscribe selector={(state) => ({ submitting: state.isSubmitting, canSubmit: state.canSubmit })}>
-      {({ submitting, canSubmit }) => (
-        <>
-          <DocumentButton variant="ghost" disabled={submitting} onClick={() => void editor.reload()}>
-            Reload saved
-          </DocumentButton>
-          <DocumentButton disabled={submitting || !canSubmit || !editor.dirty} onClick={editor.save}>
+    <editor.form.Subscribe selector={(state) => state.isSubmitting}>
+      {(submitting) => (
+        <Dialog open={open} onOpenChange={(next) => setOpen(submitting ? true : next)}>
+          <DocumentButton disabled={submitting || !editor.dirty} onClick={() => setOpen(true)}>
             <Save />
-            {submitting ? 'Saving…' : 'Save template'}
+            {submitting ? 'Saving…' : 'Save'}
           </DocumentButton>
-        </>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Save template</DialogTitle>
+              <DialogDescription>Saving adds a new revision, which new documents use.</DialogDescription>
+            </DialogHeader>
+            <form
+              className="flex flex-col gap-4"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void confirm();
+              }}
+            >
+              <editor.form.Field name="name">{(field) => <DocumentField field={field} label="Template name" />}</editor.form.Field>
+              <editor.form.Subscribe selector={(state) => state.errors}>{(errors) => <DocumentErrors errors={errors} />}</editor.form.Subscribe>
+              <DialogFooter>
+                <DocumentButton variant="outline" disabled={submitting} onClick={() => setOpen(false)}>
+                  Cancel
+                </DocumentButton>
+                <DocumentButton type="submit" disabled={submitting}>
+                  {submitting ? 'Saving…' : 'Save'}
+                </DocumentButton>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
       )}
     </editor.form.Subscribe>
+  );
+}
+
+/**
+ * The paper footprint, in the code editor's toolbar: no label, the closed
+ * select names the size (Half A4, Full A4) and each option says what it
+ * means, as the billing dialogs' described selects do.
+ */
+function FootprintSelect({ value, onChange }: { value: PageSize; onChange: (value: PageSize) => void }) {
+  return (
+    <Select value={value} onValueChange={(next) => onChange(next === 'half' ? 'half' : 'full')}>
+      <SelectTrigger size="sm" aria-label="Paper footprint" className="w-28">
+        <SelectValue>{PAGE_SIZE_OPTIONS.find((option) => option.value === value)?.title}</SelectValue>
+      </SelectTrigger>
+      <SelectContent align="end">
+        {PAGE_SIZE_OPTIONS.map((option) => (
+          <SelectItem key={option.value} value={option.value} className="min-h-12 py-2">
+            <span className="flex flex-col items-start gap-0.5 pr-5">
+              <span className="font-semibold">{option.title}</span>
+              <span className="text-muted-foreground">{option.description}</span>
+            </span>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 
@@ -341,28 +435,40 @@ function HeldDraftNotice({ editor }: { editor: TemplateEditorState }) {
   );
 }
 
-/** A failed save, under the header: the edits stay on screen. */
+/**
+ * A failed save, under the header: the edits stay on screen. Reloading lives
+ * here, where it is needed: when someone else saved the template meanwhile,
+ * a save is refused until the editor has read the revision now in use
+ * (restoring a revision from the select does not re-read it).
+ */
 function SaveError({ editor }: { editor: TemplateEditorState }) {
   if (!editor.values.error) return null;
   return (
-    <p role="alert" className="shrink-0 text-sm text-destructive md:border-b md:px-4 md:py-2">
-      {editor.values.error} Your edits are still here. Reload the saved revision if someone else changed the template.
-    </p>
+    <div role="alert" className="flex shrink-0 flex-wrap items-center gap-2 text-sm md:border-b md:px-4 md:py-2">
+      <p className="min-w-0 flex-1 text-destructive">
+        {editor.values.error} Your edits are still here. If someone else changed the template, reload the saved one.
+      </p>
+      <DocumentButton variant="outline" onClick={() => void editor.reload()}>
+        <RefreshCw />
+        Reload saved
+      </DocumentButton>
+    </div>
   );
 }
 
-/** The code tool: the template's name and footprint, the code editor, and the variable reference. */
+/**
+ * The code tool: the code editor (with the paper footprint in its toolbar,
+ * for the types that have one) and the variable reference. The template's
+ * name is asked when saving (`SaveAction`).
+ */
 function CodePane({ editor, template, contextHelp }: { editor: TemplateEditorState; template: ActiveTemplate; contextHelp?: string }) {
   const { form } = editor;
+  const footprint = halfPageDocumentTypes.has(template.artifact.documentType) ? (
+    <form.Field name="pageSize">{(field) => <FootprintSelect value={field.state.value} onChange={field.handleChange} />}</form.Field>
+  ) : null;
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <div className="grid shrink-0 gap-3 border-b p-3 sm:grid-cols-2">
-        <form.Field name="name">{(field) => <DocumentField field={field} label="Template name" />}</form.Field>
-        {halfPageDocumentTypes.has(template.artifact.documentType) ? (
-          <form.Field name="pageSize">{(field) => <DocumentSelect field={field} label="Paper footprint" options={pageSizeOptions} />}</form.Field>
-        ) : null}
-      </div>
-      <TemplateCodeEditor value={editor.source.content} onBlur={() => undefined} onChange={editor.editSource} />
+      <TemplateCodeEditor value={editor.source.content} onBlur={() => undefined} onChange={editor.editSource} toolbar={footprint} />
       <form.Subscribe selector={(state) => state.errors}>{(errors) => <DocumentErrors errors={errors} />}</form.Subscribe>
       <details className="shrink-0 border-t px-3 py-2">
         <summary className="cursor-pointer text-xs font-medium text-muted-foreground">Template variable reference</summary>
@@ -371,6 +477,22 @@ function CodePane({ editor, template, contextHelp }: { editor: TemplateEditorSta
         </pre>
       </details>
     </div>
+  );
+}
+
+/** The marketplace, as an icon button named by its tooltip. */
+function MarketplaceLink({ href }: { href: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <DocumentButton asChild size="icon" variant="outline">
+          <Link href={href} aria-label="Marketplace">
+            <Store />
+          </Link>
+        </DocumentButton>
+      </TooltipTrigger>
+      <TooltipContent>Marketplace</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -447,28 +569,24 @@ function EditPane({
   );
 }
 
-/** The preview's strip: what it shows, the notice print size, refresh, and the way back to a folded editor. */
+/** The preview's strip: what it shows, the notice print size and refresh. */
 function PreviewToolbar({
   scope,
   editor,
   showingRevision,
-  onExpand,
 }: {
   scope: DocumentTemplateScope;
   editor: TemplateEditorState;
   /** An earlier revision is on screen, not the working copy. */
   showingRevision: boolean;
-  /** Shows the folded editor again; absent while it is shown. */
-  onExpand?: () => void;
 }) {
   const waiting = !showingRevision && editor.previewSource !== editor.source.content;
   return (
     <div className="flex min-h-11 shrink-0 flex-wrap items-center gap-2 border-b bg-card px-3 py-1.5">
-      {onExpand ? <IconAction label="Show editor" icon={<PanelLeftOpen />} onClick={onExpand} /> : null}
       <FileText className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
       <span className="text-xs font-medium">Preview</span>
       <span className="flex-1 text-xs text-muted-foreground" aria-live="polite">
-        {waiting ? 'Waiting for you to stop typing…' : 'Sample data'}
+        {waiting ? 'Waiting for you to stop typing…' : 'Your school’s data, samples where missing'}
       </span>
       {scope.documentType === 'notice' ? (
         <editor.form.Field name="printSize">
@@ -490,7 +608,8 @@ function PreviewToolbar({
 }
 
 /**
- * The template as it prints, with sample data, as PDF pages: the working
+ * The template as it prints, with the school's data (samples where missing
+ * or not readable), as PDF pages: the working
  * copy, or an earlier revision read-only (`revision`, which brings its own
  * notice and preview).
  */
@@ -499,17 +618,15 @@ function PreviewPane({
   editor,
   title,
   revision,
-  onExpand,
 }: {
   scope: DocumentTemplateScope;
   editor: TemplateEditorState;
   title: string;
   revision: ReactNode | null;
-  onExpand?: () => void;
 }) {
   return (
     <section aria-label="Template preview" className="flex h-full min-h-0 min-w-0 flex-col md:bg-muted/30">
-      <PreviewToolbar scope={scope} editor={editor} showingRevision={revision !== null} onExpand={onExpand} />
+      <PreviewToolbar scope={scope} editor={editor} showingRevision={revision !== null} />
       <div className="min-h-0 flex-1 p-2 md:p-4">
         {revision ?? (
           <TemplatePdfPreview
@@ -525,70 +642,132 @@ function PreviewPane({
   );
 }
 
-/** The phone's section switch: the preview, or one of the editing tools. */
-function MobileSwitch({ value, withAssistant, onChange }: { value: MobileSection; withAssistant: boolean; onChange: (value: MobileSection) => void }) {
-  const options: { value: MobileSection; label: string }[] = [
-    { value: 'preview', label: 'Preview' },
-    ...(withAssistant ? [{ value: 'ai' as const, label: 'AI' }] : []),
-    { value: 'code', label: 'Code' },
-  ];
+const MOBILE_SECTIONS: { value: MobileSection; label: string }[] = [
+  { value: 'preview', label: 'Preview' },
+  { value: 'code', label: 'Code' },
+];
+
+/**
+ * The phone's section select in the header: the preview or the code. A
+ * select rather than a switch, so the code is offered only to someone who
+ * opens it; the assistant opens from the bottom bar (`MobileAssistantSheet`).
+ */
+function MobileSectionSelect({ value, onChange }: { value: MobileSection; onChange: (value: MobileSection) => void }) {
   return (
-    <ToggleGroup
-      type="single"
-      variant="outline"
-      spacing={0}
-      aria-label="Show"
-      className="min-w-0 flex-1"
+    <OptionSelect
       value={value}
-      onValueChange={(next) => {
-        // Pressing the chosen section again keeps it chosen.
-        const chosen = options.find((option) => option.value === next);
-        if (chosen) onChange(chosen.value);
-      }}
-    >
-      {options.map((option) => (
-        <ToggleGroupItem key={option.value} value={option.value} className="flex-1">
-          {option.label}
-        </ToggleGroupItem>
-      ))}
-    </ToggleGroup>
+      options={MOBILE_SECTIONS}
+      onValueChange={(next) => onChange(next === 'code' ? 'code' : 'preview')}
+      triggerProps={{ 'aria-label': 'Show', className: 'w-24' }}
+    />
+  );
+}
+
+/**
+ * The folded editing pane on wide screens, as the question paper studio's
+ * assistant rail: a strip the height of the workspace that opens the pane
+ * again, so folding it (with *Hide editor* or by dragging the split all the
+ * way) never leaves the editor without a visible way back. A dot marks an
+ * assistant draft that is not saved yet.
+ */
+function EditRail({ withAssistant, draftOrdinal, onOpen }: { withAssistant: boolean; draftOrdinal: number | null; onOpen: () => void }) {
+  const name = withAssistant ? 'assistant and code' : 'code';
+  const label = draftOrdinal === null ? `Show ${name}` : `Show ${name} (Draft ${draftOrdinal} is not saved yet)`;
+  const Icon = withAssistant ? Sparkles : Code2;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          aria-expanded={false}
+          onClick={onOpen}
+          className="group flex w-11 shrink-0 flex-col items-center gap-3 border-r bg-background py-3 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+        >
+          <PanelLeftOpen className="size-4" aria-hidden />
+          <span className="relative">
+            <Icon className="size-4 text-primary transition-transform group-hover:scale-110" aria-hidden />
+            {draftOrdinal === null ? null : <span className="absolute -end-1 -top-1 size-2 rounded-full bg-primary ring-2 ring-background" aria-hidden />}
+          </span>
+          <span className="rotate-180 text-xs font-medium tracking-wide [writing-mode:vertical-rl]">{withAssistant ? 'Ask the assistant' : 'Show code'}</span>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="right">{label}</TooltipContent>
+    </Tooltip>
   );
 }
 
 /**
  * Side by side from md up: the editing pane on the left (resizable, and
- * foldable so the preview takes the width), the preview on the right.
+ * foldable so the preview takes the width), the preview on the right. A
+ * folded pane leaves its rail (`EditRail`) at the left edge.
  */
 function DesktopPanes({
   panelRef,
   edit,
   preview,
+  rail,
 }: {
   panelRef: PanelRef;
   edit: (onCollapse: () => void) => ReactNode;
-  preview: (onExpand?: () => void) => ReactNode;
+  preview: ReactNode;
+  rail: (onOpen: () => void) => ReactNode;
 }) {
   const [editOpen, setEditOpen] = useState(true);
   return (
-    <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
-      <ResizablePanel defaultSize="40" minSize="28" collapsible collapsedSize="0" panelRef={panelRef} onResize={(size) => setEditOpen(size.asPercentage > 0)}>
-        {edit(() => panelRef.current?.collapse())}
-      </ResizablePanel>
-      <ResizableHandle withHandle />
-      <ResizablePanel defaultSize="60" minSize="30">
-        {preview(editOpen ? undefined : () => panelRef.current?.expand())}
-      </ResizablePanel>
-    </ResizablePanelGroup>
+    <div className="flex min-h-0 flex-1">
+      {editOpen ? null : rail(() => panelRef.current?.expand())}
+      <ResizablePanelGroup orientation="horizontal" className="min-h-0 min-w-0 flex-1">
+        <ResizablePanel defaultSize="40" minSize="28" collapsible collapsedSize="0" panelRef={panelRef} onResize={(size) => setEditOpen(size.asPercentage > 0)}>
+          {edit(() => panelRef.current?.collapse())}
+        </ResizablePanel>
+        <ResizableHandle withHandle />
+        <ResizablePanel defaultSize="60" minSize="30">
+          {preview}
+        </ResizablePanel>
+      </ResizablePanelGroup>
+    </div>
   );
 }
 
-/** The phone's section switch, with the chat's own action (New chat) beside it while the chat is the section shown. */
-function MobileSwitchRow({ switcher, aiActions }: { switcher: ReactNode; aiActions: ReactNode }) {
+/**
+ * The assistant on a phone, as in the question paper studio: a bar fixed to
+ * the bottom of the screen ("Ask for a change") opens the chat over the whole
+ * screen, with its own header (New chat, Close). The chat stays mounted while
+ * the sheet is closed, so a half-typed message and a streaming reply survive.
+ */
+function MobileAssistantSheet({
+  open,
+  onOpenChange,
+  actions,
+  children,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** The chat's own actions in the sheet's header (New chat). */
+  actions: ReactNode;
+  children: ReactNode;
+}) {
   return (
-    <div className="flex items-center gap-2">
-      {switcher}
-      {aiActions}
-    </div>
+    <>
+      <aside aria-label="Assistant for this template" className={cn('flex-col bg-background', open ? 'fixed inset-0 z-40 flex' : 'hidden')}>
+        <header className="flex h-11 shrink-0 items-center gap-1 border-b px-3">
+          <Sparkles className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+          <h3 className="ms-1 min-w-0 flex-1 truncate text-sm font-medium">Assistant</h3>
+          {actions}
+          <IconAction label="Close assistant" icon={<X />} onClick={() => onOpenChange(false)} />
+        </header>
+        <div className="min-h-0 flex-1">{children}</div>
+      </aside>
+      {open ? null : (
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t bg-background p-3">
+          <DocumentButton className="w-full" onClick={() => onOpenChange(true)}>
+            <Sparkles />
+            Ask for a change
+          </DocumentButton>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -604,15 +783,17 @@ function MobilePanes({ previewShown, edit, preview }: { previewShown: boolean; e
 
 /**
  * What the builder shows: the editing tool (AI or Code) and, on a phone,
- * whether the preview is the section on screen. Kept by the page above the
- * editor (`EditableTemplate`), so a save, which remounts the editor on the
- * new revision, does not send the person back to the defaults.
+ * whether the preview is the section on screen and whether the assistant's
+ * sheet is open. Kept by the page above the editor (`EditableTemplate`), so a
+ * save, which remounts the editor on the new revision, does not send the
+ * person back to the defaults.
  */
 export function useTemplateWorkspaceView() {
   const [tool, setTool] = useState<EditTool>('ai');
   // A phone shows the preview first, as the question paper studio shows the paper.
   const [mobilePreview, setMobilePreview] = useState(true);
-  return { tool, setTool, mobilePreview, setMobilePreview };
+  const [mobileChatOpen, setMobileChatOpen] = useState(false);
+  return { tool, setTool, mobilePreview, setMobilePreview, mobileChatOpen, setMobileChatOpen };
 }
 export type TemplateWorkspaceView = ReturnType<typeof useTemplateWorkspaceView>;
 
@@ -621,12 +802,12 @@ export type TemplateWorkspaceView = ReturnType<typeof useTemplateWorkspaceView>;
  * row, then the editing pane beside the template as it prints. The editing
  * pane holds the assistant ("AI", for those who may use it) and the code
  * ("Code", the source and its settings); the preview is the PDF the template
- * prints as, with sample data. From md up it fills the window under the app's
+ * prints as, with the school's data where available. From md up it fills the window under the app's
  * header and the two panes scroll inside themselves; on a phone it is an
  * ordinary page with one section at a time.
  *
  * The assistant proposes whole templates in its chat; the newest one is shown
- * in the code and the preview at once (unsaved), and Save template stores
+ * in the code and the preview at once (unsaved), and Save stores
  * what is on screen as a new revision, exactly as a hand edit would be.
  */
 export function TemplateEditor({
@@ -652,10 +833,10 @@ export function TemplateEditor({
   const editor = useTemplateEditor(scope, template, chat.latest, onReload);
   const sideBySide = useSideBySide();
   const editPanelRef = useResizablePanelRef();
-  const { tool, setTool, mobilePreview, setMobilePreview } = view;
+  const { tool, setTool, mobilePreview, setMobilePreview, mobileChatOpen, setMobileChatOpen } = view;
   const withAssistant = gate === 'allowed';
   const shownTool: EditTool = withAssistant ? tool : 'code';
-  const revisions = useRevisionView(scope, editor, setMobilePreview);
+  const revisions = useRevisionView(scope, editor, template.revisionId, setMobilePreview);
   const sourceForChat = (): AssistantEditorSource | null => {
     // Read at the moment of sending: what is on screen now is what the model will draft from.
     editor.markSent();
@@ -668,63 +849,65 @@ export function TemplateEditor({
     chat.startNew();
   };
   const chatWithDrafts = { ...chat, startNew: startNewChat };
+  const drafts = draftBinding(editor, scope, savedAt);
+  /** On a phone, showing a draft closes the sheet on the preview, where the draft now is. */
+  const phoneDrafts: TemplateDraftBinding = {
+    ...drafts,
+    onShow: (draft) => {
+      drafts.onShow(draft);
+      setMobileChatOpen(false);
+      setMobilePreview(true);
+    },
+  };
   const assistant = withAssistant ? (
-    <TemplateAssistantPane scope={scope} chat={chatWithDrafts} sourceToSend={sourceForChat} drafts={draftBinding(editor, scope, savedAt)} />
+    <TemplateAssistantPane scope={scope} chat={chatWithDrafts} sourceToSend={sourceForChat} drafts={sideBySide ? drafts : phoneDrafts} />
   ) : null;
   const aiActions = chat.chatId ? <NewTemplateChatButton onClick={startNewChat} /> : null;
   const code = <CodePane editor={editor} template={template} contextHelp={contextHelp} />;
-  /** "Ask for edit": the chat on screen, with the editing pane unfolded if it was folded away. */
-  const ask = () => {
-    setTool('ai');
-    setMobilePreview(false);
-    editPanelRef.current?.expand();
-  };
+  // On a phone the chat lives in its own sheet, so the editing pane holds the code alone.
   const edit = (onCollapse?: () => void) => (
-    <EditPane tool={shownTool} onTool={setTool} assistant={assistant} code={code} header={sideBySide} aiActions={aiActions} onCollapse={onCollapse} />
+    <EditPane tool={shownTool} onTool={setTool} assistant={sideBySide ? assistant : null} code={code} header={sideBySide} aiActions={aiActions} onCollapse={onCollapse} />
   );
-  const preview = (onExpand?: () => void) => <PreviewPane scope={scope} editor={editor} title={title} revision={revisions.view} onExpand={onExpand} />;
+  const preview = <PreviewPane scope={scope} editor={editor} title={title} revision={revisions.view} />;
+  const rail = (onOpen: () => void) => <EditRail withAssistant={withAssistant} draftOrdinal={editor.source.draft?.ordinal ?? null} onOpen={onOpen} />;
   return (
     // md+: cancels the shell's page padding and takes the window's remaining height, as the question paper studio does.
-    <div ref={editor.rootRef} className={cn('flex min-w-0 flex-col gap-4 md:-m-6 md:gap-0 lg:-m-8', APP_SHELL_FILL_HEIGHT_MD_CLASS)}>
+    // A phone with the assistant keeps room at the bottom for the fixed "Ask for a change" bar.
+    <div
+      ref={editor.rootRef}
+      className={cn('flex min-w-0 flex-col gap-4 md:-m-6 md:gap-0 lg:-m-8', APP_SHELL_FILL_HEIGHT_MD_CLASS, withAssistant && !sideBySide && 'pb-16')}
+    >
       <DocumentDirtyGuard dirty={editor.dirty} />
       <WorkspaceHeader
         title={title}
         editor={editor}
-        actions={
-          <>
-            {revisions.picker}
-            <AiAction gate={gate} scope={scope} editor={editor} contextHelp={contextHelp} onAsk={ask} />
-            <DocumentButton asChild variant="outline">
-              <Link href={marketplaceHref}>
-                <Store />
-                Marketplace
-              </Link>
-            </DocumentButton>
-            <SaveActions editor={editor} />
-          </>
-        }
+        compact={!sideBySide}
+        parts={{
+          revision: revisions.picker,
+          icons: (
+            <>
+              {revisions.historyButton}
+              <MarketplaceLink href={marketplaceHref} />
+            </>
+          ),
+          ai: <AiAction gate={gate} scope={scope} editor={editor} contextHelp={contextHelp} />,
+          section: sideBySide ? null : <MobileSectionSelect value={mobilePreview ? 'preview' : 'code'} onChange={(section) => setMobilePreview(section === 'preview')} />,
+          save: <SaveAction editor={editor} />,
+        }}
       />
       <SaveError editor={editor} />
       <HeldDraftNotice editor={editor} />
       {revisions.dialogs}
       {sideBySide ? (
-        <DesktopPanes panelRef={editPanelRef} edit={edit} preview={preview} />
+        <DesktopPanes panelRef={editPanelRef} edit={edit} preview={preview} rail={rail} />
       ) : (
         <>
-          <MobileSwitchRow
-            switcher={
-              <MobileSwitch
-                value={mobilePreview ? 'preview' : shownTool}
-                withAssistant={withAssistant}
-                onChange={(section) => {
-                  setMobilePreview(section === 'preview');
-                  if (section !== 'preview') setTool(section);
-                }}
-              />
-            }
-            aiActions={!mobilePreview && shownTool === 'ai' ? aiActions : null}
-          />
-          <MobilePanes previewShown={mobilePreview} edit={edit()} preview={preview()} />
+          <MobilePanes previewShown={mobilePreview} edit={edit()} preview={preview} />
+          {assistant ? (
+            <MobileAssistantSheet open={mobileChatOpen} onOpenChange={setMobileChatOpen} actions={aiActions}>
+              {assistant}
+            </MobileAssistantSheet>
+          ) : null}
         </>
       )}
     </div>
@@ -738,7 +921,7 @@ export function TemplateEditor({
  * confirmation. Restoring replaces unsaved changes only after the app's own
  * dialog.
  */
-function useRevisionView(scope: DocumentTemplateScope, editor: TemplateEditorState, setMobilePreview: (shown: boolean) => void) {
+function useRevisionView(scope: DocumentTemplateScope, editor: TemplateEditorState, baseRevisionId: string, setMobilePreview: (shown: boolean) => void) {
   const { revisionId, setRevision } = useRevisionParam();
   const revision = useTemplateRevision(scope, revisionId);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -769,20 +952,21 @@ function useRevisionView(scope: DocumentTemplateScope, editor: TemplateEditorSta
     <RevisionPicker
       scope={scope}
       revisionId={revisionId}
+      baseRevisionId={baseRevisionId}
       shown={revision.data?.revision}
       failed={revision.isError}
       dirty={editor.dirty}
       onChange={viewRevision}
-      onOpenHistory={() => setHistoryOpen(true)}
     />
   );
+  const historyButton = <AllRevisionsButton onClick={() => setHistoryOpen(true)} />;
   const dialogs = (
     <>
       <RevisionHistoryDialog scope={scope} open={historyOpen} onOpenChange={setHistoryOpen} shownRevisionId={revisionId} onView={viewRevision} />
       <ConfirmationDialog
         open={restoring !== null}
         title="Replace your unsaved changes?"
-        description="Restoring this revision replaces the template in the editor, including changes you have not saved. Nothing is saved until you press Save template."
+        description="Restoring this revision replaces the template in the editor, including changes you have not saved. Nothing is saved until you press Save."
         confirmLabel="Restore"
         confirmVariant="default"
         onOpenChange={(open) => {
@@ -794,5 +978,5 @@ function useRevisionView(scope: DocumentTemplateScope, editor: TemplateEditorSta
       />
     </>
   );
-  return { view, picker, dialogs };
+  return { view, picker, historyButton, dialogs };
 }

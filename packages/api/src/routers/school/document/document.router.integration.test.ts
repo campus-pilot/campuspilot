@@ -376,7 +376,9 @@ describe('document templates, generation, and artifact lifecycle', () => {
       content:
         '<h1>{{student.name}}</h1><script>alert(1)</script><img src="http://127.0.0.1/private">',
     });
-    expect(preview.html).toContain('Aarav Sharma');
+    // The school's own first student (docs/document-system.md, "Preview context"), escaped.
+    expect(preview.html).toContain('Aarav &lt;script&gt;');
+    expect(preview.html).not.toContain('Aarav Sharma');
     expect(preview.html).not.toContain('<script');
     expect(preview.html).not.toContain('127.0.0.1');
     expect(
@@ -1016,8 +1018,8 @@ describe('document templates, generation, and artifact lifecycle', () => {
     const design = { schoolId, documentType: 'id_card' as const, slug: 'id_card-modern' };
     const first = await teacher.school.previewMarketplaceTemplatePdf(design);
     expect((await PDFDocument.load(Buffer.from(first.pdfBase64, 'base64'))).getPageCount()).toBeGreaterThan(0);
-    // The catalog and the sample data are fixed, so a design converts once and the same bytes come back.
-    expect((await manager.school.previewMarketplaceTemplatePdf(design)).pdfBase64).toBe(first.pdfBase64);
+    // Rendered with the school's own data as each caller may read it, so nothing is shared: it converts again.
+    expect((await PDFDocument.load(Buffer.from((await manager.school.previewMarketplaceTemplatePdf(design)).pdfBase64, 'base64'))).getPageCount()).toBeGreaterThan(0);
     // A design is found by its type and slug together.
     await expect(
       teacher.school.previewMarketplaceTemplatePdf({ ...design, slug: 'report_card-default' }),

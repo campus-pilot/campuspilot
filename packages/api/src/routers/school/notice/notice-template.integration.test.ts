@@ -55,7 +55,9 @@ describe('notice document template', () => {
     ]);
     const item = await teacher.school.getMarketplaceTemplate({ ...scope(), slug: 'notice-default' });
     expect(item.html).toContain('Annual Sports Day');
-    expect(item.html).toContain('Greenwood Public School');
+    // The sample notice under the school's own letterhead (docs/document-system.md, "Preview context").
+    expect(item.html).toContain('Notice Template School');
+    expect(item.html).not.toContain('Greenwood Public School');
     expect(item.html).toContain('@page{size:A4;margin:16mm}');
     expect(item.html).not.toContain('overflow:hidden');
     // No student, exam or finance sample data is rendered into a notice.

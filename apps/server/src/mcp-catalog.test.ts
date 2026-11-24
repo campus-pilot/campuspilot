@@ -78,6 +78,10 @@ const HIDDEN_TOOLS = [
   'school.previewDocumentTemplatePdf',
   'school.previewDocumentTemplateRevisionPdf',
   'school.previewMarketplaceTemplatePdf',
+  // The data the template editor's previews render with (students, results,
+  // finance as the caller may read them): the editor's, not an agent tool;
+  // agents read that data through its own tools.
+  'school.getDocumentTemplatePreviewContext',
   'auth.setPassword',
   'auth.getOAuthConsentClient',
   'auth.listOAuthConnections',
@@ -880,6 +884,7 @@ describe('assistant service view', () => {
     expect(byName.has('school.previewDocumentTemplatePdf')).toBe(false);
     expect(byName.has('school.previewMarketplaceTemplatePdf')).toBe(false);
     expect(byName.has('school.previewDocumentTemplateRevisionPdf')).toBe(false);
+    expect(byName.has('school.getDocumentTemplatePreviewContext')).toBe(false);
   });
 
   /** The question paper tools by name: what each is for, and how the in-app assistant and external clients reach it. */
