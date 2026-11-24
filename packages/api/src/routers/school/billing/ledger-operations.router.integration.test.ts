@@ -128,6 +128,15 @@ describe("school finance ledger operations", () => {
     await expect(scenario.actors.accountant.client.school.recordRefund({ schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id, paymentId: payment.id, amountMinor: "401", method: "cash", reason: "Too much", effectiveAt: "2040-05-04T00:00:00Z", idempotencyKey: createFinanceIdempotencyKey("refund-too-much") })).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
+  it("refuses a reversal that would take effect before the entry it reverses, and allows the same instant", async () => {
+    const scope = { schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id };
+    const payment = await scenario.actors.accountant.client.school.recordPayment(paymentInput(scenario, "backdated-reversal"));
+    await expect(scenario.actors.accountant.client.school.reverseLedgerEntry({ ...scope, ledgerEntryId: payment.ledgerEntryId, reason: "Backdated", effectiveAt: "2040-05-01T00:00:00Z", idempotencyKey: createFinanceIdempotencyKey("backdated-reversal") })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(scenario.actors.accountant.client.school.reverseLedgerEntry({ ...scope, ledgerEntryId: payment.ledgerEntryId, reason: "Same instant", effectiveAt: "2040-05-02T10:00:00Z", idempotencyKey: createFinanceIdempotencyKey("same-instant-reversal") })).resolves.toMatchObject({ type: "reversal" });
+    const bill = await createBill(scenario, { sessionId: scenario.activeSession.id, issueDate: "2040-05-10", amountMinor: "900", suffix: "backdated-bill" });
+    await expect(scenario.actors.accountant.client.school.reverseBill({ ...scope, billId: bill.id, reason: "Backdated", effectiveAt: "2040-05-01T00:00:00Z", idempotencyKey: createFinanceIdempotencyKey("backdated-bill-reversal") })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
   it("restores refundable credit after refund reversal and then permits payment reversal", async () => {
     const payment = await scenario.actors.accountant.client.school.recordPayment(paymentInput(scenario, "reversible-payment", "500"));
     const refund = await scenario.actors.accountant.client.school.recordRefund({ schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id, paymentId: payment.id, amountMinor: "200", method: "cash", reason: "Temporary refund", effectiveAt: "2040-05-03T00:00:00Z", idempotencyKey: createFinanceIdempotencyKey("temporary-refund") });

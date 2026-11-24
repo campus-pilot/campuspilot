@@ -45,6 +45,7 @@ import {
 import {
   appendFinanceLedgerEntries,
   appendFinanceLedgerEntry,
+  assertReversalNotBeforeTarget,
 } from "./ledger-posting";
 import { allocateFinanceNumber, reserveFinanceNumbers } from "./numbering";
 import { localDateToInstant } from "./period";
@@ -886,6 +887,13 @@ async function reverseBillInTransaction(
   if (existingReversal) {
     throw rpcError.conflict("This bill has already been reversed.");
   }
+  const [billFact] = await transaction
+    .select({ effectiveAt: financeLedgerEntryTable.effectiveAt })
+    .from(financeLedgerEntryTable)
+    .where(and(eq(financeLedgerEntryTable.schoolId, command.schoolId), eq(financeLedgerEntryTable.id, bill.ledgerEntryId)))
+    .limit(1);
+  if (!billFact) throw rpcError.notFound("Bill");
+  assertReversalNotBeforeTarget(billFact, command.effectiveAt);
   const reversal = await appendFinanceLedgerEntry(transaction, {
     schoolId: command.schoolId,
     admissionId: command.admissionId,
@@ -1128,6 +1136,16 @@ export async function reversePostedBillingRun(
         }
         return { ...item, existing };
       });
+
+      // A reversal never takes effect before the bill it reverses (`assertReversalNotBeforeTarget`).
+      const billFacts = ledgerEntryIds.length
+        ? await transaction
+            .select({ effectiveAt: financeLedgerEntryTable.effectiveAt })
+            .from(financeLedgerEntryTable)
+            .where(and(eq(financeLedgerEntryTable.schoolId, command.schoolId), inArray(financeLedgerEntryTable.id, ledgerEntryIds)))
+        : [];
+      if (validated.some(({ existing }) => !existing))
+        for (const fact of billFacts) assertReversalNotBeforeTarget(fact, command.effectiveAt);
 
       const existingChildCount = validated.filter(({ existing }) => existing).length;
       if (existingChildCount !== 0 && existingChildCount !== validated.length) {

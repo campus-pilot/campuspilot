@@ -1,3 +1,4 @@
+import { rpcError } from "../../../errors";
 import type { DatabaseTransaction } from "@campuspilot/db";
 import { generateId } from "@campuspilot/db/id";
 import {
@@ -286,4 +287,17 @@ export async function appendFinanceLedgerEntry(
       },
     });
   return entry;
+}
+
+/**
+ * A reversal takes effect no earlier than the fact it reverses. A reversal
+ * dated before its target would sit in an earlier period than the fact it
+ * cancels: a Bill due (docs/document-system.md "Bill due") would then count
+ * the reversal in the opening balance while printing its target as a fact of
+ * the period, and no period's rows would add up. Refused for every reversal
+ * (ledger entries, bills and billing runs). Equal instants are allowed.
+ */
+export function assertReversalNotBeforeTarget(target: { effectiveAt: Date }, reversalEffectiveAt: Date) {
+  if (reversalEffectiveAt.getTime() < target.effectiveAt.getTime())
+    throw rpcError.badRequest("A reversal cannot take effect before the entry it reverses. Choose an effective date on or after that entry's.");
 }

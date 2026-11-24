@@ -19,7 +19,7 @@ import { notifyPaymentRecorded } from "../../../notifications/emitters/finance";
 import { handOffNotificationEvents } from "../../../notifications/notification.outbox";
 import { lockFinanceAdmissionAccount } from "./account-lock";
 import { billSettlementMap } from "./ledger-read";
-import { appendFinanceLedgerEntry } from "./ledger-posting";
+import { appendFinanceLedgerEntry, assertReversalNotBeforeTarget } from "./ledger-posting";
 import { allocateFinanceNumber } from "./numbering";
 import { POSTGRES_BIGINT_MAX } from "./transport";
 
@@ -361,6 +361,7 @@ export async function reverseLedgerEntry(db: Database, command: ReverseLedgerCom
     const [target] = await transaction.select().from(financeLedgerEntryTable).where(and(eq(financeLedgerEntryTable.schoolId, command.schoolId), eq(financeLedgerEntryTable.admissionId, command.admissionId), eq(financeLedgerEntryTable.sessionId, command.sessionId), eq(financeLedgerEntryTable.id, command.ledgerEntryId))).for("update").limit(1);
     if (!target) throw rpcError.notFound("Ledger entry");
     if (target.type === "reversal" || target.reversalOfEntryId) throw rpcError.badRequest("A reversal cannot itself be reversed in v1.");
+    assertReversalNotBeforeTarget(target, command.effectiveAt);
     const prior = await transaction.select({ id: financeLedgerEntryTable.id }).from(financeLedgerEntryTable).where(and(eq(financeLedgerEntryTable.schoolId, command.schoolId), eq(financeLedgerEntryTable.reversalOfEntryId, target.id))).limit(1);
     if (prior[0]) throw rpcError.conflict("This ledger entry has already been reversed.");
     const [bill] = await transaction.select().from(financeBillTable).where(and(eq(financeBillTable.schoolId, command.schoolId), eq(financeBillTable.ledgerEntryId, target.id))).limit(1);

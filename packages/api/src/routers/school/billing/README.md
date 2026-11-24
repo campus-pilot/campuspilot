@@ -282,6 +282,11 @@ A reversed refund restores that refundable capacity.
 
 Generic ledger reversal appends one exact opposite posting. It rejects a prior
 reversal, reversal-of-reversal, adjusted bills, and payments with live refunds.
+Every reversal (ledger entry, bill and billing run) takes effect no earlier
+than the fact it reverses: an `effectiveAt` before the target's is refused
+(BAD_REQUEST, `assertReversalNotBeforeTarget`). A reversal dated before its
+target would fall in an earlier period than what it cancels, so a period view
+such as a Bill due could not add up. Existing data was not migrated.
 Specialized metadata remains immutable and historically readable.
 All posting commands lock session then admission, use serializable transactions,
 and compare idempotent retries against the original immutable command snapshot.
