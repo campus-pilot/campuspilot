@@ -2,7 +2,7 @@
 
 import Editor, { type OnMount } from '@monaco-editor/react';
 import { Braces, PanelLeftClose, WandSparkles } from 'lucide-react';
-import { useRef } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { DocumentButton } from '@campuspilot/components/documents/document-controls';
 import { useTheme } from '@campuspilot/ui/lib/theme';
 
@@ -19,12 +19,15 @@ export function TemplateCodeEditor({
   onChange,
   onBlur,
   onCollapse,
+  toolbar,
 }: {
   value: string;
   onChange: (value: string) => void;
   onBlur: () => void;
   /** Collapses the editor's panel; the control is drawn only where the editor sits in a collapsible panel. */
   onCollapse?: () => void;
+  /** Controls of the template drawn in the editor's toolbar before Format (the paper footprint). */
+  toolbar?: ReactNode;
 }) {
   const editorRef = useRef<MonacoEditor | null>(null);
   const { resolvedTheme } = useTheme();
@@ -37,6 +40,7 @@ export function TemplateCodeEditor({
           Handlebars HTML
         </span>
         <div className="flex items-center gap-1">
+          {toolbar}
           <DocumentButton
             variant="ghost"
             size="sm"

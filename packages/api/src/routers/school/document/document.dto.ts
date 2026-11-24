@@ -305,11 +305,22 @@ function validateNoticePrintSize(
       message: "A print size can be previewed for Notice designs only.",
     });
 }
+/**
+ * The academic session a template preview takes the school's data from
+ * (`document.preview-context.ts`): the management app sends the session
+ * selected in its sidebar. It must be one of the school's sessions
+ * (NOT_FOUND otherwise). Omitted, the school's active session is used, else
+ * its latest by start year; a school without sessions previews sample data.
+ */
+const previewSessionIdSchema = id
+  .optional()
+  .describe("Session whose data fills the preview (school.listSessions); the school's active session, else its latest, when omitted.");
 export const previewTemplateSchema = templateScopeSchema
   .extend({
     content: templateContentSchema,
     pageSize: documentTemplatePageSizeSchema.default("full"),
     printSize: noticePrintSizeSchema,
+    sessionId: previewSessionIdSchema,
   })
   .superRefine(validateTemplatePageSize)
   .superRefine(validateNoticePrintSize);
@@ -350,7 +361,7 @@ export const templateRevisionOutputSchema = z.object({
  * `previewDocumentTemplatePdf`, is for those who may change templates).
  */
 export const previewTemplateRevisionPdfSchema = templateRevisionInputSchema
-  .extend({ printSize: noticePrintSizeSchema })
+  .extend({ printSize: noticePrintSizeSchema, sessionId: previewSessionIdSchema })
   .superRefine(validateNoticePrintSize);
 /**
  * A template the assistant proposes in the template editor's chat. Only the
@@ -388,8 +399,40 @@ export const templateEditingGuideOutputSchema = z.object({
  */
 export const previewTemplatePdfOutputSchema = z.object({ pdfBase64: z.string() });
 export const marketplaceTemplateInputSchema = templateScopeSchema
-  .extend({ slug: z.string().min(1).max(100), printSize: noticePrintSizeSchema })
+  .extend({ slug: z.string().min(1).max(100), printSize: noticePrintSizeSchema, sessionId: previewSessionIdSchema })
   .superRefine(validateNoticePrintSize);
+/**
+ * The parts of a template preview's context that can come from the school's
+ * own data. Each part is decided on its own (`document.preview-context.ts`).
+ */
+export const templatePreviewPartSchema = z.enum(["school", "session", "student", "exam", "results", "timetable", "finance"]);
+export type TemplatePreviewPart = z.infer<typeof templatePreviewPartSchema>;
+/**
+ * Where one part of a preview's context came from: the school's own data,
+ * or the sample, with why: the caller may not read that data
+ * (`not_permitted`), the school does not have the feature it belongs to
+ * (`feature_off`), or the school has no such data (`no_data`).
+ */
+export const templatePreviewPartSourceSchema = z.discriminatedUnion("source", [
+  z.object({ source: z.literal("school") }),
+  z.object({ source: z.literal("sample"), reason: z.enum(["not_permitted", "feature_off", "no_data"]) }),
+]);
+export type TemplatePreviewPartSource = z.infer<typeof templatePreviewPartSourceSchema>;
+export const templatePreviewContextInputSchema = templateScopeSchema.extend({ sessionId: previewSessionIdSchema });
+/**
+ * The context a template of the type is previewed with, as the previews
+ * render it, except that every image (the school logo, a student photo) is
+ * `TEMPLATE_PREVIEW_IMAGE_MARKER` (or null when none is printed) instead of
+ * its data URI, which can be megabytes.
+ */
+export const templatePreviewContextOutputSchema = z.object({
+  /** The session the data was taken from; null when the school has none or the caller may not read it. */
+  sessionId: z.string().nullable(),
+  parts: z.partialRecord(templatePreviewPartSchema, templatePreviewPartSourceSchema),
+  context: z.record(z.string(), z.unknown()),
+});
+/** What an image field of a returned preview context holds instead of its data URI. */
+export const TEMPLATE_PREVIEW_IMAGE_MARKER = "[image]";
 export const previewOutputSchema = z.object({
   /** The sample: the first documents, enough to fill two physical sheets. */
   html: z.string(),

@@ -63,10 +63,11 @@ export function isDocumentImageRef(value: unknown): value is DocumentImageRef {
  * image field in a context builder must be added here, or it would reach the
  * template unresolved (and be removed by the sanitiser).
  */
-const IMAGE_FIELDS = [
+export const DOCUMENT_IMAGE_FIELDS = [
   ["school", "logoUrl"],
   ["student", "photoUrl"],
 ] as const;
+const IMAGE_FIELDS = DOCUMENT_IMAGE_FIELDS;
 
 type ContextRecord = Record<string, unknown>;
 
@@ -104,6 +105,24 @@ export function withResolvedImages<T extends object>(
       copy[parent] = { ...holder, [field]: resolve(value.documentImageKey) };
   }
   return copy as T;
+}
+
+/**
+ * How many characters the embedded images of one context take (the `data:`
+ * URIs in its image fields; references and nulls count nothing). A template
+ * preview adds a bounded multiple of this to its render budget, so a real
+ * school logo of a few megabytes is not refused where the 1 KB sample logo
+ * was accepted (docs/document-system.md, "Preview limits").
+ */
+export function contextImageChars(context: object): number {
+  let chars = 0;
+  for (const [parent, field] of IMAGE_FIELDS) {
+    const holder = (context as ContextRecord)[parent];
+    if (!isRecord(holder)) continue;
+    const value = holder[field];
+    if (typeof value === "string") chars += value.length;
+  }
+  return chars;
 }
 
 /** Why an image cannot be printed; the message is safe to show. */

@@ -28,12 +28,12 @@ for the management implementation.
 | `finance-document-generator.tsx` | The Bills creator's tabs (By date, Billing cycles), posted billing-run and payment selection, finance preview, PDF creation |
 | `bill-due.tsx` | Bill due: the By date tab (date, whole session / class / chosen students) and the admission ledger's Bill dialog; always previews before creating (review hash) |
 | `finance-preview-panel.tsx` | The finance generators' shared preview and create panel with job progress and download |
-| `template-save-dialog.tsx`, `template-save-model.ts` | Save confirms the name and footprint; the footprint starts unselected when the HTML differs from the loaded revision |
+| `template-save-model.ts` | `initialSaveFootprint`: the Save dialog (in `template-workspace.tsx`) asks for the name and, for two-up types, the footprint, which starts unselected when the HTML differs from the loaded revision |
 | `document-history.tsx` | Unified session history, downloads, deletion |
 | `document-templates.tsx` | Settings empty state, read-only PDF preview, and the editor's entry (keyed by revision) |
 | `template-workspace.tsx` | The template builder: header row, resizable AI/Code pane, PDF preview, working copy, assistant drafts, revision restore |
 | `template-assistant.tsx` | The builder's chat (`?chat=`), its seed, suggestions and drafts |
-| `template-pdf-preview.tsx` | A template source as its PDF (`previewDocumentTemplatePdf`, manage only), cached per source; a saved revision by id (`previewDocumentTemplateRevisionPdf`); a marketplace design by slug (`previewMarketplaceTemplatePdf`) |
+| `template-pdf-preview.tsx` | A template source as its PDF (`previewDocumentTemplatePdf`, manage only), cached per source; a saved revision by id (`previewDocumentTemplateRevisionPdf`); a marketplace design by slug (`previewMarketplaceTemplatePdf`); each sends the sidebar's selected session (`sessionId`), whose data the server previews with (docs/document-system.md "Preview context") |
 | `template-revisions.tsx` | Revision select (`?revision=`), All revisions dialog, read-only revision with Restore |
 | `template-code-editor.tsx` | Dynamically loaded Monaco source editor and format action |
 | `document-template-settings.tsx` | Settings permission boundary and scope adapter |
@@ -126,15 +126,17 @@ document HTML is shown: an iframe with an **empty** `sandbox`. Its options:
   (`activationMode="manual"`), so arrowing along them converts nothing.
 - The builder follows the question paper studio: it fills the window from md up
   (`APP_SHELL_FILL_HEIGHT_MD_CLASS`), the editing pane (AI | Code tabs) and the
-  preview share a resizable divider, and *Hide editor* / *Show editor* fold the pane.
+  preview share a resizable divider; *Hide editor* (or dragging it all the way) folds
+  the pane to a rail (`EditRail`) that opens it again.
   On a phone a *Preview | AI | Code* switch shows one section at a time, all mounted.
 - Monaco is client-only and uses HTML language services for Handlebars-containing
   markup. Preserve line numbers, wrapping, theme support, and the format action.
 - The preview is the printed PDF (`PdfPreview`): report cards portrait A4,
   timetables landscape A4, ID cards imposed on portrait A4, half-A4 admit/finance
   revisions in one of two vertical slots, exactly as generated.
-- *Ask for edit* (assistant users) or *Edit with AI* (everyone else) and Marketplace
-  remain peer header actions. The marketplace should not visually dominate source
+- *Edit with AI* (only for someone without the assistant) and Marketplace remain
+  peer header actions. Assistant users reach the chat through the *AI* tab, or on a
+  phone the *Ask for a change* bar fixed to the bottom of the screen. The marketplace should not visually dominate source
   editing when a template is already selected.
 - At 390 px and 320 px the header wraps and sections switch without feature-level
   horizontal overflow.

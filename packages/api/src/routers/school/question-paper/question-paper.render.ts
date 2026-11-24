@@ -234,14 +234,20 @@ export function exampleQuestionPaperBody(): RenderedBody {
 }
 
 /**
- * The preview of a template: the synthetic school and paper context with the
- * example body in the slot. Also the way a template is checked when saved:
- * exactly one slot, the template budget, the logo limit, the 25 MB total.
+ * The preview of a template: a school and paper context with the example
+ * body in the slot. The context is the synthetic sample unless the caller
+ * passes one (a template preview passes the sample paper with the school's
+ * own header, `document.preview-context.ts`). Also the way a template is
+ * checked when saved, against the sample: exactly one slot, the template
+ * budget, the logo limit, the 25 MB total.
  */
-export function renderSampleQuestionPaperDocument(templateContent: string): string {
+export function renderSampleQuestionPaperDocument(
+  templateContent: string,
+  context: QuestionPaperContext = SAMPLE_QUESTION_PAPER_CONTEXT,
+): string {
   return renderQuestionPaperDocument({
     template: { content: templateContent },
-    context: SAMPLE_QUESTION_PAPER_CONTEXT,
+    context,
     body: exampleQuestionPaperBody(),
   });
 }

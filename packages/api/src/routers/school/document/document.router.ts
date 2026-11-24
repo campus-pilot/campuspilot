@@ -40,14 +40,19 @@ import { getDocumentJob, listDocumentJobs, startDocumentGeneration } from "./doc
 import { getSelectedDocumentTemplate as getTemplate } from "./document.selected-template";
 import { getTemplateRevision, listTemplateRevisions } from "./document.template-revisions";
 import { withPreviewConversionSlot } from "./document.preview-slots";
+import { sourceReadActions } from "./document.permissions";
 import {
   assertValidTemplateSource,
   checkTemplateDraft,
-  previewMarketplaceTemplatePdf,
   previewTemplateHtml,
   previewTemplatePdf,
   templateEditingGuide,
 } from "./document.template-source";
+import {
+  describeTemplatePreviewImages,
+  resolveTemplatePreviewContext,
+  templatePreviewRenderContext,
+} from "./document.preview-context";
 
 const isFinanceDocument = dto.isFinanceDocumentType;
 
@@ -91,34 +96,6 @@ type GeneratorDocumentType = Exclude<dto.DocumentType, dto.TemplateOnlyDocumentT
 const GENERATOR_DOCUMENT_TYPES = dto.documentTypeSchema.options.filter(
   (type): type is GeneratorDocumentType => !(dto.TEMPLATE_ONLY_DOCUMENT_TYPES as readonly string[]).includes(type),
 );
-/**
- * The reads of a document type's source data (its template and the records
- * it prints), checked besides its generate action. Decided by the type alone
- * (no source field changes it), so starting, reading and listing jobs share
- * one rule.
- */
-function sourceReadActions(type: dto.DocumentType) {
-  if (isFinanceDocument(type))
-    return [
-      SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES,
-      SCHOOL_ACTIONS.READ_SESSION_FINANCE,
-      SCHOOL_ACTIONS.READ_ADMISSION_LEDGER,
-    ];
-  const sourceReads =
-    type === "timetable"
-      ? [SCHOOL_ACTIONS.READ_EXAM_TIMETABLE, SCHOOL_ACTIONS.READ_EXAMS]
-      : type === "report_card"
-        ? [SCHOOL_ACTIONS.READ_STUDENT, SCHOOL_ACTIONS.READ_EXAM_RESULTS, SCHOOL_ACTIONS.READ_EXAMS, SCHOOL_ACTIONS.READ_EXAM_PLANS]
-        : type === "admit_card"
-          ? [SCHOOL_ACTIONS.READ_STUDENT, SCHOOL_ACTIONS.READ_EXAM_TIMETABLE, SCHOOL_ACTIONS.READ_EXAMS]
-          : [SCHOOL_ACTIONS.READ_STUDENT];
-  return [
-    SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES,
-    SCHOOL_ACTIONS.READ_SESSION,
-    SCHOOL_ACTIONS.READ_CLASS,
-    ...sourceReads,
-  ];
-}
 /** Every action starting a document of `type` needs: its generate action and its source reads. */
 function startActions(type: dto.DocumentType) {
   return [
@@ -409,7 +386,7 @@ export const schoolDocumentRouter = {
     .route(
       route(
         "Preview a marketplace template",
-        "Get template source, variable documentation, and a safe preview using synthetic sample data.",
+        "Get template source, variable documentation, and a safe HTML preview with the school's own data where the caller may read it (sample data elsewhere) from sessionId (default: the active session).",
       ),
     )
     .meta({
@@ -429,30 +406,37 @@ export const schoolDocumentRouter = {
         contextHelp: z.string(),
       }),
     )
-    .handler(async ({ input }) => {
+    .handler(async ({ context, input, signal }) => {
       const item = DOCUMENT_MARKETPLACE.find(
         (t) => t.slug === input.slug && t.documentType === input.documentType,
       );
       if (!item) throw rpcError.notFound("Marketplace template");
-      return {
-        ...item,
-        html: previewTemplateHtml(item.content, item.documentType, item.pageSize, input.printSize),
-        contextHelp: DOCUMENT_CONTEXT_HELP,
-      };
+      try {
+        const previewContext = await templatePreviewRenderContext(context, input, signal);
+        return {
+          ...item,
+          html: previewTemplateHtml(item.content, item.documentType, item.pageSize, input.printSize, previewContext),
+          contextHelp: DOCUMENT_CONTEXT_HELP,
+        };
+      } catch (error) {
+        throw toRpcError(error);
+      }
     }),
   /**
    * A marketplace design as the PDF it prints as, named by its slug, so the
    * marketplace previews a design without first downloading its source and
    * HTML. It has `getMarketplaceTemplate`'s read gate and, like the editor's
    * `previewDocumentTemplatePdf`, is a person's preview only (`hidden` from
-   * MCP and the assistant). The conversion is shared: each design converts
-   * once per server process (`previewMarketplaceTemplatePdf`).
+   * MCP and the assistant). It renders the school's own data as the caller
+   * may read it, so nothing is shared between schools or people: each call
+   * converts within one of the person's conversion slots, like every other
+   * template preview (docs/document-system.md, "Marketplace PDF previews").
    */
   previewMarketplaceTemplatePdf: protectedProcedure
     .route(
       route(
         "Preview a marketplace template as a PDF",
-        "Render a marketplace design with synthetic data and convert it to the PDF it prints as. Stores nothing.",
+        "Render a marketplace design with the school's own data where the caller may read it (sample data elsewhere) and convert it to the PDF it prints as. Stores nothing.",
       ),
     )
     .meta({
@@ -466,13 +450,19 @@ export const schoolDocumentRouter = {
     .input(dto.marketplaceTemplateInputSchema)
     .use(requireDocumentTypePermission(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES))
     .output(dto.previewTemplatePdfOutputSchema)
-    .handler(async ({ input }) => {
+    .handler(async ({ context, input, signal }) => {
       const item = DOCUMENT_MARKETPLACE.find(
         (t) => t.slug === input.slug && t.documentType === input.documentType,
       );
       if (!item) throw rpcError.notFound("Marketplace template");
       try {
-        return { pdfBase64: await previewMarketplaceTemplatePdf(item, input.printSize) };
+        const bytes = await withPreviewConversionSlot(context.session.user.id, async () =>
+          previewTemplatePdf(item.content, item.documentType, item.pageSize, input.printSize, {
+            context: await templatePreviewRenderContext(context, input, signal),
+            signal,
+          }),
+        );
+        return { pdfBase64: Buffer.from(bytes).toString("base64") };
       } catch (error) {
         throw toRpcError(error);
       }
@@ -649,7 +639,7 @@ export const schoolDocumentRouter = {
     .route(
       route(
         "Preview template changes",
-        "Render unsaved Handlebars source with synthetic data in a sanitized, network-free HTML document. Does not change the selected school template.",
+        "Render unsaved Handlebars source in a sanitized, network-free HTML document, with the school's own data where the caller may read it (sample data elsewhere) from sessionId (default: the active session). Does not change the selected school template.",
       ),
     )
     .meta({
@@ -663,10 +653,17 @@ export const schoolDocumentRouter = {
     .input(dto.previewTemplateSchema)
     .use(requireDocumentTypePermission(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES))
     .output(z.object({ html: z.string(), contextHelp: z.string() }))
-    .handler(async ({ input }) => ({
-      html: previewTemplateHtml(input.content, input.documentType, input.pageSize, input.printSize),
-      contextHelp: DOCUMENT_CONTEXT_HELP,
-    })),
+    .handler(async ({ context, input, signal }) => {
+      try {
+        const previewContext = await templatePreviewRenderContext(context, input, signal);
+        return {
+          html: previewTemplateHtml(input.content, input.documentType, input.pageSize, input.printSize, previewContext),
+          contextHelp: DOCUMENT_CONTEXT_HELP,
+        };
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
   /**
    * The template editor's preview as the PDF it prints as (the same pdf.js
    * viewer as a question paper's versions). Each call is one Gotenberg
@@ -683,7 +680,7 @@ export const schoolDocumentRouter = {
     .route(
       route(
         "Preview template changes as a PDF",
-        "Render unsaved Handlebars source with synthetic data and convert it to the PDF it prints as. Does not change the selected school template and stores nothing.",
+        "Render unsaved Handlebars source with the school's own data where the caller may read it (sample data elsewhere) and convert it to the PDF it prints as. Does not change the selected school template and stores nothing.",
       ),
     )
     .meta({
@@ -699,8 +696,11 @@ export const schoolDocumentRouter = {
     .output(dto.previewTemplatePdfOutputSchema)
     .handler(async ({ context, input, signal }) => {
       try {
-        const bytes = await withPreviewConversionSlot(context.session.user.id, () =>
-          previewTemplatePdf(input.content, input.documentType, input.pageSize, input.printSize, signal),
+        const bytes = await withPreviewConversionSlot(context.session.user.id, async () =>
+          previewTemplatePdf(input.content, input.documentType, input.pageSize, input.printSize, {
+            context: await templatePreviewRenderContext(context, input, signal),
+            signal,
+          }),
         );
         return { pdfBase64: Buffer.from(bytes).toString("base64") };
       } catch (error) {
@@ -718,7 +718,7 @@ export const schoolDocumentRouter = {
     .route(
       route(
         "Preview a saved template revision as a PDF",
-        "Render one saved revision of the school's template with synthetic data and convert it to the PDF it prints as. Stores nothing.",
+        "Render one saved revision of the school's template with the school's own data where the caller may read it (sample data elsewhere) and convert it to the PDF it prints as. Stores nothing.",
       ),
     )
     .meta({
@@ -735,10 +735,55 @@ export const schoolDocumentRouter = {
     .handler(async ({ context, input, signal }) => {
       try {
         const { revision, content } = await getTemplateRevision(context.db, input);
-        const bytes = await withPreviewConversionSlot(context.session.user.id, () =>
-          previewTemplatePdf(content, input.documentType, revision.pageSize, input.printSize, signal),
+        const bytes = await withPreviewConversionSlot(context.session.user.id, async () =>
+          previewTemplatePdf(content, input.documentType, revision.pageSize, input.printSize, {
+            context: await templatePreviewRenderContext(context, input, signal),
+            signal,
+          }),
         );
         return { pdfBase64: Buffer.from(bytes).toString("base64") };
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+  /**
+   * The data a template of the type is previewed with in this school, for
+   * the editor (its variable reference can show real values): exactly what
+   * every template preview renders (`resolveTemplatePreviewContext`, one
+   * builder for both), with each part's source and the session used. It has
+   * the template read gate and the preview's own gating: each part of the
+   * school's data appears only when the caller may read it, else the sample
+   * (docs/document-system.md, "Preview context"). Images are marked, not
+   * sent (`describeTemplatePreviewImages`). `hidden` from MCP: it serves the
+   * editor, and an agent reads students, exams and finance through their
+   * own tools.
+   */
+  getDocumentTemplatePreviewContext: protectedProcedure
+    .route(
+      route(
+        "Get a template's preview data",
+        "The context a template of the document type is previewed with: the school's own data where the caller may read it, sample data elsewhere, from sessionId (default: the active session, else the latest). Images are marked, not included.",
+      ),
+    )
+    .meta({
+      mcp: {
+        exposure: "hidden",
+        access: "read",
+        destructive: false,
+        module: "documents",
+      },
+    })
+    .input(dto.templatePreviewContextInputSchema)
+    .use(requireDocumentTypePermission(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES))
+    .output(dto.templatePreviewContextOutputSchema)
+    .handler(async ({ context, input, signal }) => {
+      try {
+        const preview = await resolveTemplatePreviewContext(context, input, signal);
+        return {
+          sessionId: preview.sessionId,
+          parts: preview.parts,
+          context: describeTemplatePreviewImages(preview.context),
+        };
       } catch (error) {
         throw toRpcError(error);
       }

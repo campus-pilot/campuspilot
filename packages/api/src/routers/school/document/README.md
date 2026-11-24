@@ -12,7 +12,9 @@ the backend contract for data, persistence, rendering, and authorization.
 | `document.dto.ts` | Strict request/output schemas and the discriminated document-source union |
 | `document.router.ts` | oRPC procedures, authorization composition, template selection, generation, history, and deletion |
 | `document.context.ts` | Independently validates source relationships and builds the explicit Handlebars context |
-| `document.catalog.ts` | Synthetic preview context and user-facing variable reference |
+| `document.catalog.ts` | Synthetic sample context (the save check, and every part a preview cannot fill) and user-facing variable reference |
+| `document.preview-context.ts` | The context every template preview renders with: the school's own data part by part as the caller may read it, the sample elsewhere (`resolveTemplatePreviewContext`) |
+| `document.permissions.ts` | `sourceReadActions`: the source reads of each type, shared by generation, job reads and preview parts |
 | `document.catalog.marketplace.ts` | Server-owned marketplace metadata, legacy adaptations, and statement designs |
 | `document.catalog.legacy.ts` | Faithful source snapshot imported from the legacy application |
 | `document.render.ts` | Handlebars restrictions, sanitization, batch layout, and Gotenberg conversion |
@@ -94,13 +96,24 @@ Deleting a PDF first records `deleting`, removes its object, then removes its ro
 The server-owned marketplace contains the legacy application's named report-card,
 ID-card, admit-card, timetable, bill, and receipt designs, plus matching account
 statement designs. Source and sample previews are available through normal oRPC
-procedures. `document.catalog.ts` defines the variable reference and synthetic
-preview data, while `document.catalog.marketplace.ts` owns the catalog.
+procedures. `document.catalog.ts` defines the variable reference and the synthetic
+sample, while `document.catalog.marketplace.ts` owns the catalog.
+
+Previews render with the **preview context** (`document.preview-context.ts`,
+docs/document-system.md "Preview context"): the sample, with the school's own data
+replacing it part by part (school details, session, a student, the exam and its
+results or timetable, a finance record), each part only when the caller holds its
+reads from the type's `sourceReadActions` (one `checkPermissions` round) and, for
+student data, the school has `studentManagement`; otherwise that part stays the
+sample and the preview still renders. Every preview procedure takes an optional
+`sessionId` (validated against the school; the active session, else the latest,
+when omitted). `getDocumentTemplatePreviewContext` (hidden from MCP) returns the same
+context with images marked. Saving and draft checks still render against the static
+sample.
 The management marketplace previews a design as its PDF by slug
-(`previewMarketplaceTemplatePdf`, hidden from MCP): the catalog and sample data are
-fixed, so `previewMarketplaceTemplatePdf` in `document.template-source.ts` converts
-and base64-encodes each design (and each Notice print size) once per process and
-shares a conversion in flight.
+(`previewMarketplaceTemplatePdf`, hidden from MCP). It is converted on every request
+inside the person's conversion slot: the context is the school's data as the caller
+may read it, so no conversion is shared across requests or schools.
 
 Every template PDF preview runs within `TEMPLATE_PREVIEW_LIMITS`
 (`document.template-source.ts`): a 2,000,000 render budget, a 20 second conversion
@@ -108,7 +121,9 @@ timeout (refused as BAD_REQUEST, not a 500) and a page cap per document type tha
 the converter enforces (`ConversionPageLimit` in `document.render.ts`). Previews of
 source (`previewDocumentTemplatePdf`, manage permission) and of saved revisions by
 id (`previewDocumentTemplateRevisionPdf`, read permission) also take one of the
-person's Redis-backed conversion slots (`document.preview-slots.ts`). See
+person's Redis-backed conversion slots (`document.preview-slots.ts`), and so do
+marketplace previews. The render budget grows by four times the context's embedded
+image characters (`imageUses`), so a real multi-megabyte logo fits. See
 docs/document-system.md, "Preview limits".
 
 Admit-card and finance template revisions may use a `half` footprint. The batch
