@@ -11,6 +11,8 @@ import {
   createTestSchool,
   type UserSession,
 } from '../../../../test/fixtures';
+import { selectedTemplateSlugs } from '../../../../test/documents';
+import { DEFAULT_DOCUMENT_TEMPLATE_SLUGS } from '../../school/document/document.catalog';
 
 describe('systemAdmin.school Router Integration', () => {
   let adminSession: UserSession;
@@ -45,6 +47,8 @@ describe('systemAdmin.school Router Integration', () => {
       // A new school is not suspended.
       expect(created.suspendedAt).toBeNull();
       expect(created.suspendedReason).toBeNull();
+      // Every new school starts with the CampusPilot Standard templates selected.
+      expect(await selectedTemplateSlugs(created.id)).toEqual(DEFAULT_DOCUMENT_TEMPLATE_SLUGS);
     });
 
     it('rejects invalid slug format with validation error', async () => {

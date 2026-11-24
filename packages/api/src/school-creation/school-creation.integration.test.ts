@@ -26,6 +26,8 @@ import {
 } from './school-creation.contract';
 import { addBillingPeriods } from '../billing/billing.contract';
 import { slugifySchoolName } from '../workflows/demo-school/slug';
+import { selectedTemplateSlugs } from '../../test/documents';
+import { DEFAULT_DOCUMENT_TEMPLATE_SLUGS } from '../routers/school/document/document.catalog';
 
 /** Self-service school creation (docs/school-creation.md). */
 
@@ -70,6 +72,10 @@ describe('school.createSchool', () => {
     expect(new Date(listed!.planEndsAt!).getTime()).toBe(trial!.endsAt.getTime());
     const members = await client.school.listMembers({ schoolId });
     expect(members.items).toMatchObject([{ userId, isOwner: true, roles: [{ role: 'principal' }] }]);
+    // It starts with the CampusPilot Standard templates selected, as its own revisions.
+    expect(await selectedTemplateSlugs(schoolId)).toEqual(DEFAULT_DOCUMENT_TEMPLATE_SLUGS);
+    const bill = await client.school.getActiveDocumentTemplate({ schoolId, documentType: 'bill' });
+    expect(bill).toMatchObject({ artifact: { schoolId, marketplaceSlug: 'standard-bill', pageSize: 'half', name: 'CampusPilot Standard Fee Bill', createdBy: userId } });
     // The trial gives a plan, so the owner can change things.
     await client.school.updateSchool({ schoolId, name: 'Sunrise School' });
 

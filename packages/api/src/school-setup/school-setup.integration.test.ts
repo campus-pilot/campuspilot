@@ -13,6 +13,8 @@ import { describe, expect, it } from 'vitest';
 import { createAdminSession } from '../../test/fixtures';
 import { SCHOOL_SETUP_RUN_STEPS, initialSchoolSetupDraft, readRequestFacts, type SchoolSetupDraft } from './school-setup.contract';
 import { readSchoolSetupResult, runSchoolSetupStep } from './school-setup.service';
+import { selectedTemplateSlugs } from '../../test/documents';
+import { DEFAULT_DOCUMENT_TEMPLATE_SLUGS } from '../routers/school/document/document.catalog';
 
 async function runningSetup(overrides: (draft: SchoolSetupDraft) => SchoolSetupDraft = (draft) => draft) {
   const admin = await createAdminSession();
@@ -53,6 +55,8 @@ describe('school setup steps', () => {
     const result = await readSchoolSetupResult(setup.id);
     const [school] = await db.select().from(schoolTable).where(eq(schoolTable.id, result.schoolId));
     expect(school).toMatchObject({ isDemo: false, tier: null, location: '14 Station Road, Jaipur' });
+    // Like every new school, it starts with the CampusPilot Standard templates selected.
+    expect(await selectedTemplateSlugs(result.schoolId)).toEqual(DEFAULT_DOCUMENT_TEMPLATE_SLUGS);
     expect(await db.select({ tier: schoolBillingPeriodTable.tier, kind: schoolBillingPeriodTable.kind }).from(schoolBillingPeriodTable).where(eq(schoolBillingPeriodTable.schoolId, result.schoolId))).toEqual([{ tier: 'pro', kind: 'trial' }]);
     const [assistant] = await db.select().from(schoolFeatureFlagTable).where(and(eq(schoolFeatureFlagTable.schoolId, result.schoolId), eq(schoolFeatureFlagTable.feature, 'assistant')));
     expect(assistant).toMatchObject({ enabled: true, config: expect.objectContaining({ monthlyLimitUsd: 10 }) });

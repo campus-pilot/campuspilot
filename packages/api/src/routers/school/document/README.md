@@ -24,6 +24,10 @@ the backend contract for data, persistence, rendering, and authorization.
 | `document.router.integration.test.ts` | Procedure, authorization, persistence, conflict, storage, and artifact lifecycle coverage |
 | `document-exam.integration.test.ts` | Examination context, approval, schedule, rendering, PDF size/page, and legacy compatibility coverage |
 | `finance-document.context.ts` | Immutable bill, payment/refund receipt, and cutoff statement contexts |
+| `bill-due.context.ts` | Bill due contexts: the billing period containing a date, set-based reads for up to 1,500 accounts, review hash |
+| `finance-document.values.ts`, `finance-document.ledger.ts` | Money, date parts, billing periods as templates see them; shared ledger helpers (chunks, cutoff) |
+| `document.catalog.standard.ts` | The CampusPilot Standard designs: a frozen copy of Prem Chandra's templates (2026-11-24) |
+| `document.default-templates.ts` | Selects the default designs for a new school, with S3 compensation |
 | `finance-document.integration.test.ts` | Finance history, authorization, cutoff, and historical-regeneration coverage |
 | `../notice/notice.render.ts` | Notice context, template choice and pinning, flowing layout use, and the cached notice PDF (the `notice` type has a template but no generator source) |
 
@@ -47,6 +51,14 @@ Documents are available at `/school/:schoolId/sessions/:sessionId/documents` in 
   posting-time ledger identity plus per-admission high-water sequences protected
   by the preview review hash. Statement rows show the current month's opening
   balance, period activity, human document references, and closing balance.
+- Bills due (`bill_due`) print a bill per admission as of a date with the
+  selected **bill** template: the billing period containing the date, every bill
+  line, debit and credit of that period, the balance carried in and the amount
+  due, bound to a review hash like statements. Template procedures refuse the
+  type (it borrows the bill template). See docs/document-system.md "Bill due".
+- Every new school (self-service, administrator, onboarding setup) starts with
+  the CampusPilot Standard designs selected; see docs/document-system.md
+  "Default templates".
 
 The session-global Receipts workflow sends the explicit
 `posted_unreversed_payments` selection policy. Finance context construction checks

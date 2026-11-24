@@ -1,6 +1,9 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_DOCUMENT_TEMPLATE_SLUGS,
   DOCUMENT_MARKETPLACE,
+  SAMPLE_BILL_DUE_CONTEXT,
   SAMPLE_DOCUMENT_CONTEXT,
   SAMPLE_QUESTION_PAPER_CONTEXT,
   sampleDocumentContext,
@@ -77,7 +80,7 @@ function rowCellCounts(html: string) {
 }
 
 describe('document template marketplace', () => {
-  it('offers the legacy catalog plus matching statement designs', () => {
+  it('offers the legacy catalog plus matching statement designs and the CampusPilot Standard set', () => {
     const expected = {
       report_card: ['default', 'default-attendance', 'minimal'],
       id_card: ['default', 'modern', 'minimal', 'classic'],
@@ -90,16 +93,20 @@ describe('document template marketplace', () => {
       question_paper: ['classic', 'compact'],
     } as const;
     // Slugs follow the document type, except that the question paper designs
-    // use hyphens (`question-paper-classic`).
+    // use hyphens (`question-paper-classic`). The Standard set is
+    // `standard-<type with hyphens>`, one per type except statements and notices.
     const slugPrefix = (documentType: string) =>
       documentType === 'question_paper' ? 'question-paper' : documentType;
+    const standard = (documentType: string) =>
+      documentType === 'statement' || documentType === 'notice' ? [] : [`standard-${documentType.replaceAll('_', '-')}`];
     for (const [documentType, variants] of Object.entries(expected)) {
       const items = DOCUMENT_MARKETPLACE.filter(
         (item) => item.documentType === documentType,
       );
-      expect(items.map((item) => item.slug)).toEqual(
-        variants.map((variant) => `${slugPrefix(documentType)}-${variant}`),
-      );
+      expect(items.map((item) => item.slug)).toEqual([
+        ...variants.map((variant) => `${slugPrefix(documentType)}-${variant}`),
+        ...standard(documentType),
+      ]);
       for (const item of items) {
         expect(item.content).toContain('school.logoUrl');
         expect(item.content).toContain('alt="School logo"');
@@ -121,7 +128,67 @@ describe('document template marketplace', () => {
       'receipt-compact',
       'statement-default',
       'statement-compact',
+      'standard-admit-card',
+      'standard-bill',
+      'standard-receipt',
     ]);
+  });
+
+  describe('CampusPilot Standard defaults', () => {
+    it('name one existing design of the right type for every type a new school starts with, without a paper size in the name', () => {
+      expect(Object.keys(DEFAULT_DOCUMENT_TEMPLATE_SLUGS).sort()).toEqual(
+        ['admit_card', 'bill', 'id_card', 'question_paper', 'receipt', 'report_card', 'statement', 'timetable'],
+      );
+      for (const [documentType, slug] of Object.entries(DEFAULT_DOCUMENT_TEMPLATE_SLUGS)) {
+        const design = template(slug);
+        expect(design.documentType, slug).toBe(documentType);
+        if (slug.startsWith('standard-')) {
+          expect(design.name, slug).toMatch(/^CampusPilot Standard /);
+          expect(design.name, slug).not.toMatch(/A4/);
+        }
+      }
+      // Statements reuse the existing full-A4 design.
+      expect(DEFAULT_DOCUMENT_TEMPLATE_SLUGS.statement).toBe('statement-default-full');
+    });
+
+    it('print the admit card, bill and receipt on half A4 and everything else on full A4', () => {
+      const half = Object.values(DEFAULT_DOCUMENT_TEMPLATE_SLUGS).filter((slug) => template(slug).pageSize === 'half');
+      expect(half.sort()).toEqual(['standard-admit-card', 'standard-bill', 'standard-receipt']);
+    });
+
+    it('leave out the school-specific affiliation line of the timetable', () => {
+      const { content } = template('standard-timetable');
+      expect(content).not.toContain('Bihar');
+      expect(content).not.toContain('Affiliated');
+      expect(renderDocument(content, SAMPLE_DOCUMENT_CONTEXT)).toContain('Greenwood Public School');
+    });
+
+    it('print a Bill due with the Standard bill: DUE number, Statement Through, credit rows and the amount due', () => {
+      const due = renderDocument(template('standard-bill').content, SAMPLE_BILL_DUE_CONTEXT);
+      expect(due).toContain('DUE/24/11/2026');
+      expect(due).toContain('Statement Through');
+      expect(due).toContain('01/11/2026 – 30/11/2026');
+      expect(due).toContain('Discount');
+      expect(due).toContain('Payment RCP/2026-27/000087 (10/11/2026)');
+      expect(due).toContain('1100.00');
+      expect(due).not.toContain('monthly:2026-11');
+      const bill = renderDocument(template('standard-bill').content, SAMPLE_DOCUMENT_CONTEXT);
+      expect(bill).toContain('B/2026/000001');
+      expect(bill).not.toContain('DUE/');
+      expect(bill).not.toContain('Statement Through');
+    });
+  });
+
+  it("keeps printing a Bill due with Prem Chandra's production bill template, unchanged", () => {
+    const production = readFileSync(new URL('./__fixtures__/prem-production-bill.hbs', import.meta.url), 'utf8');
+    const html = renderDocument(production, SAMPLE_BILL_DUE_CONTEXT);
+    expect(html).toContain('Tuition fee');
+    expect(html).toContain('Transport fee');
+    expect(html).toContain('INR 1300.00');
+    expect(html).toContain('INR 800.00');
+    expect(html).toContain('-INR 200.00');
+    expect(html).toContain('INR 1100.00');
+    expect(html).toContain('2026-11-24');
   });
 
   it('stores every Notice design as full: designs adapt to each notice\'s print size instead of having a footprint', () => {
@@ -151,9 +218,16 @@ describe('document template marketplace', () => {
     });
 
     it('flow: no clipping, and a repeating fixed footer after the body', () => {
+      // The CampusPilot Standard design is a school's own heading without a
+      // footer (a frozen copy, docs/document-system.md "Default templates");
+      // every design with a footer must repeat it.
       for (const item of designs) {
         const css = cssOf(item.content);
         expect(css, item.slug).not.toMatch(/overflow\s*:\s*hidden/);
+        if (item.slug === 'standard-question-paper') {
+          expect(item.content, item.slug).not.toContain('<footer');
+          continue;
+        }
         expect(css, item.slug).toMatch(/position\s*:\s*fixed;\s*bottom\s*:\s*0;/);
         // The header is in normal flow, the footer is after the body.
         const body = item.content.indexOf('{{{questionPaper.bodyHtml}}}');
@@ -338,16 +412,30 @@ describe('document template marketplace', () => {
     }
   });
 
-  it('renames legacy bill fields to whole current paths only', () => {
+  it('renames legacy bill fields to whole current paths only, and reads the period, frequency and Statement Through from real fields', () => {
     for (const slug of ['bill-default', 'bill-compact', 'bill-default-full']) {
       const { content } = template(slug);
       expect(content, slug).not.toContain('periodKeyKey');
-      expect(content, slug).toContain('bill.periodKey');
-      expect(
-        renderDocument(content, SAMPLE_DOCUMENT_CONTEXT),
-        slug,
-      ).toContain('2026-10');
+      expect(content, slug).not.toContain('bill.periodKey');
+      expect(content, slug).not.toContain('statementDate');
+      expect(content, slug).toContain('bill.period.cadence');
+      const bill = renderDocument(content, SAMPLE_DOCUMENT_CONTEXT);
+      expect(bill, slug).toContain('monthly');
+      expect(bill, slug).not.toContain('monthly:2026-10');
+      expect(bill, slug).not.toContain('Statement Through');
+      expect(bill, slug).toContain('B/2026/000001');
+      const due = renderDocument(content, SAMPLE_BILL_DUE_CONTEXT);
+      expect(due, slug).toContain('Statement Through');
+      expect(due, slug).toContain('DUE/24/11/2026');
+      expect(due, slug).toContain('Payment RCP/2026-27/000087');
+      expect(due, slug).toContain('Discount');
+      // Zero optional rows are hidden: no waiver, write-off or refund rows.
+      expect(due, slug).not.toContain('Waiver');
     }
+    // A bill whose cadence is unknown prints no frequency and no period.
+    const unknown = renderDocument(template('bill-default').content, { ...SAMPLE_DOCUMENT_CONTEXT, bill: { ...SAMPLE_DOCUMENT_CONTEXT.bill, period: null } });
+    expect(unknown).not.toContain('monthly');
+    expect(unknown).not.toContain('31/10/2026');
   });
 
   it('keeps legacy class selectors that contain "body" when scoping the page root', () => {

@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 import { createAdminSession, createRegularUserSession, createTestClient, createTestSchool, createTestSchoolMember } from '../../test/fixtures';
 import { createCadetTestClient } from '../../test/cadet';
 import { expectRpcCode } from '../../test/finance/assertions';
+import { selectedTemplateSlugs } from '../../test/documents';
 import { googleNewcomer, personalSpaceOwner } from '../../test/personal-space';
 import { handleSchoolLogoBlob } from '../routers/school/logo/logo.blob';
 import { handleCadetManifestBlob } from '../routers/school/manifest/cadet-manifest.blob';
@@ -52,6 +53,8 @@ describe('personalSpace.create', () => {
     expect(await client.personalSpace.getStatus()).toEqual({ schoolId, refusal: 'already_has_one' });
     const [listed] = await client.school.listMySchools();
     expect(listed).toMatchObject({ id: schoolId, kind: 'personal', hasActivePlan: true, planSource: 'trial' });
+    // A personal space gets no default document templates (only schools do).
+    expect(await selectedTemplateSlugs(schoolId)).toEqual({});
   });
 
   it('does not use the school creation allowance: the person can still create a school', async () => {
