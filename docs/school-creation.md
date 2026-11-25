@@ -53,8 +53,8 @@ A personal space ([Personal space](personal-space.md)) is a school the person
 owns, of kind `personal`. It writes no `school_creation` row, so it does not
 use the allowance, and owning it is not `member_of_other_school`: someone with
 a personal space can still create one school. Who gets a personal space is
-decided by its own rules (a linked Google account, no school at all), not by
-these.
+decided by its own rules (a linked Google account, none ever, school
+membership not mattering), not by these.
 
 ## Closing the loopholes
 

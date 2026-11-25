@@ -26,6 +26,8 @@ import { confirmNavigation } from '@/lib/navigation-guard';
 import { useOffersSchoolCreation } from './school-creation/school-creation-panel';
 import { storeSchoolId } from './school-selection';
 import { personalSpaceOf, schoolEntryHrefOf } from './personal-space/personal-space-model';
+import { useCreatePersonalSpace } from './personal-space/create-personal-space';
+import { requestErrorMessage } from './question-paper/question-paper-model';
 
 const switcherSearchSchema = z.object({ searchQuery: z.string().max(200) });
 
@@ -162,6 +164,8 @@ export function SchoolSwitcher() {
                   Personal space
                 </CommandItem>
               </CommandGroup>
+            ) : schoolsQuery.isSuccess ? (
+              <CreatePersonalSpaceGroup onCreated={() => handleOpenChange(false)} />
             ) : null}
             {offersSchoolCreation ? (
               <CommandGroup>
@@ -182,5 +186,38 @@ export function SchoolSwitcher() {
         </Command>
       </PopoverContent>
     </Popover>
+  );
+}
+
+/**
+ * The switcher's way to a personal space for someone who has none yet
+ * (docs/personal-space.md): a member of a school, or a person who signed up
+ * before personal spaces existed, creates theirs here when they want it, so
+ * its trial starts only then. Shown only while the server offers one
+ * ({@link useCreatePersonalSpace}); the switcher stays open until it is
+ * created, and a refusal is shown under the entry.
+ */
+function CreatePersonalSpaceGroup({ onCreated }: { onCreated: () => void }) {
+  const { mayCreate, create } = useCreatePersonalSpace({ onCreated });
+  if (!mayCreate) return null;
+  return (
+    <CommandGroup heading="Personal">
+      <CommandItem
+        value="Create personal space"
+        disabled={create.isPending}
+        onSelect={async () => {
+          if (!(await confirmNavigation())) return;
+          create.mutate({});
+        }}
+      >
+        <NotebookPen aria-hidden />
+        {create.isPending ? 'Creating personal space…' : 'Create personal space'}
+      </CommandItem>
+      {create.error ? (
+        <p role="alert" className="px-2 py-1 text-xs text-destructive">
+          {requestErrorMessage(create.error, 'Your personal space could not be created.')}
+        </p>
+      ) : null}
+    </CommandGroup>
   );
 }

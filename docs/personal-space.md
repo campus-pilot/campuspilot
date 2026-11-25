@@ -50,8 +50,12 @@ decides from the facts, in this order (`PERSONAL_SPACE_REFUSALS` in
 3. **`already_has_one`**: the person has had their personal space
    (`user.personal_space_created_at` is set): one over the life of the
    account, so deleting the space does not make them eligible again.
-4. **`member_of_school`**: the person is a member of any school. Someone with
-   a school is never given a personal space.
+
+Belonging to a school is **not** a refusal: a member of any school may open
+their personal space too and switches between it and their schools. Nothing
+creates spaces in bulk: a person who signed up before personal spaces
+existed, or who joined a school first, gets theirs only when they create it,
+so its trial starts when they want it.
 
 A refused creation is FORBIDDEN with `data: { reason: 'PERSONAL_SPACE_REFUSED', refusal }`
 (`personalSpaceRefusalOf`).
@@ -74,8 +78,9 @@ Two ways create one, through the same `createPersonalSpace`:
   API); a refusal creates nothing and any failure is logged, never failing the
   sign-in.
 - **On request.** `personalSpace.create`, from the "You are not part of a
-  school yet" page (**Create personal space**, shown while
-  `personalSpace.getStatus` has no refusal).
+  school yet" page and from the school switcher (**Create personal space**,
+  both shown while `personalSpace.getStatus` has no refusal, through
+  `useCreatePersonalSpace`).
 
 `createPersonalSpace`, in the caller's transaction: locks the person, checks
 the status, then provisions the school with `provisionSelfServiceSchool`
@@ -404,6 +409,10 @@ saves always state all four.
   routes, permission and seed.
 - Switcher: a personal space is its own **Personal space** entry in a
   **Personal** group; a school opens its entry, a personal space its papers.
+  A person without one sees **Create personal space** in that group instead,
+  while `personalSpace.getStatus` offers one; the switcher stays open while it
+  is created, shows a refusal under the entry, and opens the new space's
+  papers.
   The **Your schools** group is left out when the person has no school (never
   shown empty). **Create a school** is offered as everywhere
   (`useOffersSchoolCreation`); creating one opens the new school's guided

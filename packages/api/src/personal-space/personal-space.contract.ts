@@ -20,15 +20,14 @@ import { z } from 'zod';
  *    (set when it was created, never cleared), so deleting the space does not
  *    make the person eligible again. A partial unique index backs up one live
  *    space per owner.
- * 4. `member_of_school`: the person is a member of a school, any school. A
- *    member of a school is never given a personal space, neither by the
- *    sign-up nor by the button, so it is offered only to someone who has no
- *    school at all.
+ *
+ * Belonging to a school is not a refusal: a member of any school may open
+ * their personal space too, and switches between it and their schools.
  *
  * A personal space does not use the person's school creation allowance: no
  * `school_creation` row is written and the allowance's refusals do not apply.
  */
-export const PERSONAL_SPACE_REFUSALS = ['demo_account', 'no_google_account', 'already_has_one', 'member_of_school'] as const;
+export const PERSONAL_SPACE_REFUSALS = ['demo_account', 'no_google_account', 'already_has_one'] as const;
 export const personalSpaceRefusalSchema = z.enum(PERSONAL_SPACE_REFUSALS);
 export type PersonalSpaceRefusal = z.infer<typeof personalSpaceRefusalSchema>;
 
@@ -37,7 +36,6 @@ export const PERSONAL_SPACE_REFUSAL_MESSAGES = {
   demo_account: 'Demo accounts cannot have a personal space.',
   no_google_account: 'Sign in with Google to create your personal space.',
   already_has_one: 'You already have a personal space. Each person gets one.',
-  member_of_school: 'You are a member of a school, so a personal space is not offered to you.',
 } as const satisfies Record<PersonalSpaceRefusal, string>;
 
 /** `data.reason` of the FORBIDDEN error that refuses creating a personal space. */
