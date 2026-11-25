@@ -134,10 +134,10 @@ export async function createPersonalSpace(
  * `isGoogleSignUpEndpoint` in `@campuspilot/auth`). It runs after the user
  * and their Google account are committed, so {@link createPersonalSpace}
  * reads the linked Google account like the manual path does. A refusal
- * (a demo account, an account that is already a member somewhere) creates
- * nothing and is not an error. Any failure is logged and swallowed: a
- * personal space must never stop someone from signing in, and the person can
- * still create it from the "not part of a school" page.
+ * (a demo account, an account that already had its space) creates nothing
+ * and is not an error. Any failure is logged and swallowed: a personal space
+ * must never stop someone from signing in, and the person can still create it
+ * from the "not part of a school" page or the school switcher.
  */
 export async function createPersonalSpaceAfterGoogleSignUp(db: Database, userId: string): Promise<void> {
   try {

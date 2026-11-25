@@ -141,12 +141,11 @@ describe('after a Google sign-up', () => {
     expect(spaces).toHaveLength(1);
   });
 
-  it('creates nothing, and does not fail, for an account that already belongs to a school', async () => {
-    const { userId } = await googleNewcomer();
-    const school = await createTestSchool();
-    await createTestSchoolMember({ schoolId: school.id, userId, roles: [{ role: 'principal', meta: null }] });
+  it('creates nothing, and does not fail, for an account that may not get one', async () => {
+    const { userId, schoolId } = await personalSpaceOwner();
     await expect(createPersonalSpaceAfterGoogleSignUp(db, userId)).resolves.toBeUndefined();
-    expect(await db.select().from(schoolTable).where(and(eq(schoolTable.ownerUserId, userId), eq(schoolTable.kind, 'personal')))).toEqual([]);
+    const spaces = await db.select({ id: schoolTable.id }).from(schoolTable).where(and(eq(schoolTable.ownerUserId, userId), eq(schoolTable.kind, 'personal')));
+    expect(spaces).toEqual([{ id: schoolId }]);
   });
 });
 
