@@ -80,11 +80,20 @@ describe('personalSpace.create', () => {
     expect(await refusalOf(client.personalSpace.create())).toBe('no_google_account');
   });
 
-  it('refuses a member of any school', async () => {
+  it('gives a member of a school a personal space beside their school', async () => {
     const { client, userId } = await googleNewcomer();
     const school = await createTestSchool();
     await createTestSchoolMember({ schoolId: school.id, userId, roles: [{ role: 'teacher', meta: { classIds: [] } }] });
-    expect(await refusalOf(client.personalSpace.create())).toBe('member_of_school');
+    expect(await client.personalSpace.getStatus()).toEqual({ schoolId: null, refusal: null });
+    const { schoolId } = await client.personalSpace.create();
+    expect(await client.personalSpace.getStatus()).toEqual({ schoolId, refusal: 'already_has_one' });
+    const mine = await client.school.listMySchools();
+    expect(mine.map((entry) => [entry.id, entry.kind]).sort()).toEqual(
+      [
+        [school.id, 'school'],
+        [schoolId, 'personal'],
+      ].sort(),
+    );
   });
 
   it('refuses a demo login', async () => {

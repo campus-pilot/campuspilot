@@ -2,7 +2,6 @@ import { ORPCError } from '@orpc/server';
 import type { Database, DatabaseExecutor } from '@campuspilot/db';
 import { account, user } from '@campuspilot/db/schema/auth';
 import { schoolTable } from '@campuspilot/db/schema/school';
-import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
 import { and, eq } from 'drizzle-orm';
 
 import { generateId } from '@campuspilot/db/id';
@@ -26,9 +25,11 @@ import {
  * - automatically, right after a new account signs up with Google
  *   ({@link createPersonalSpaceAfterGoogleSignUp}, run by the Better Auth hook
  *   `apps/server` registers);
- * - on request, from the "You are not part of a school yet" page
- *   (`personalSpace.create`), for someone with a linked Google account and no
- *   school at all.
+ * - on request (`personalSpace.create`), for someone with a linked Google
+ *   account who has never had one, whether or not they belong to a school:
+ *   from the "You are not part of a school yet" page and from the school
+ *   switcher, so a person who signed up before personal spaces, or joined a
+ *   school first, opens theirs when they want it (its trial starts then).
  */
 
 /**
@@ -59,7 +60,7 @@ export async function readPersonalSpaceStatus(db: DatabaseExecutor, userId: stri
     .where(eq(user.id, userId))
     .limit(1);
   if (!person) throw rpcError.unauthorized();
-  const [[google], [personal], [membership]] = await Promise.all([
+  const [[google], [personal]] = await Promise.all([
     db
       .select({ id: account.id })
       .from(account)
@@ -70,7 +71,6 @@ export async function readPersonalSpaceStatus(db: DatabaseExecutor, userId: stri
       .from(schoolTable)
       .where(and(eq(schoolTable.ownerUserId, userId), eq(schoolTable.kind, 'personal')))
       .limit(1),
-    db.select({ schoolId: schoolMemberTable.schoolId }).from(schoolMemberTable).where(eq(schoolMemberTable.userId, userId)).limit(1),
   ]);
   const refusal: PersonalSpaceRefusal | null =
     person.demoSchoolId !== null
@@ -80,9 +80,7 @@ export async function readPersonalSpaceStatus(db: DatabaseExecutor, userId: stri
         : // Decided from the permanent fact, not from the space's row: a deleted space was still the person's one.
           person.personalSpaceCreatedAt !== null
           ? 'already_has_one'
-          : membership
-            ? 'member_of_school'
-            : null;
+          : null;
   return { schoolId: personal?.id ?? null, refusal };
 }
 
