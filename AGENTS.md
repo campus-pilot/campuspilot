@@ -20,6 +20,23 @@ Add jsdoc comments to explain behavior, precedence, or non-obvious implementatio
 
 Do not use `useEffect` unless the user has explicitly approved it. Prefer derived values, event handlers, keyed component lifecycles, TanStack Query, or framework-native data loading as appropriate. If an effect is genuinely required, explain why and ask for approval before adding it.
 
+## Linear tickets
+
+When working on a Linear ticket (for example ENG-18):
+
+- Move the ticket to **In Progress** as soon as work on it starts.
+- Do the work on a branch named with the ticket's Linear git branch name
+  (the `gitBranchName` Linear gives the issue, for example
+  `shubhaman47/eng-18-schools-show-ai-usage-as-a-percentage-of`), so Linear
+  links the branch and its pull request to the ticket.
+- Mention the ticket in the pull request: its identifier in the title
+  (for example `feat(management): … (ENG-18)`) and a link to the ticket in the
+  description.
+- When the pull request is merged, move the ticket to **Done**.
+
+A ticket covered by the same pull request as another one follows the same
+steps. A ticket deliberately left unimplemented stays where it is.
+
 ## Forms and user input
 
 Use TanStack Form's `useForm` for every form and user-input workflow. Do not manage input values or form submission state with standalone `useState` calls.
