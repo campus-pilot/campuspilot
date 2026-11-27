@@ -293,6 +293,27 @@ describe('school.getFeatureFlags', () => {
     await setTestSchoolFeature(school.id, 'cadet', null);
     expect((await createTestClient(teacher.session).school.getFeatureFlags({ schoolId: school.id })).features).toEqual(BASELINE);
   });
+
+  it('tells members whether the assistant is limited, never the dollar limit, which administrators still read', async () => {
+    const school = await createTestSchool();
+    await setTestSchoolFeature(school.id, 'assistant', true, { monthlyLimitUsd: 25, voice: { enabled: true } });
+    const teacher = createTestClient((await createSchoolStaffSession(school.id, [{ role: 'teacher', meta: { classIds: [] } }])).session);
+    const admin = createTestClient(await createAdminSession());
+
+    const flags = await teacher.school.getFeatureFlags({ schoolId: school.id });
+    expect(flags.features.assistant).toEqual({ ...ADDED, config: { limited: true, voice: { enabled: true } } });
+    expect(JSON.stringify(flags)).not.toContain('monthlyLimitUsd');
+    expect((await admin.systemAdmin.getSchoolFeatureFlags({ id: school.id })).features.assistant.config).toEqual({
+      monthlyLimitUsd: 25,
+      voice: { enabled: true },
+    });
+
+    await setTestSchoolFeature(school.id, 'assistant', true, { monthlyLimitUsd: null, voice: { enabled: false } });
+    expect((await teacher.school.getFeatureFlags({ schoolId: school.id })).features.assistant.config).toEqual({
+      limited: false,
+      voice: { enabled: false },
+    });
+  });
 });
 
 /**

@@ -105,7 +105,7 @@ const HIDDEN_TOOLS = [
   // Who may use the in-app assistant is a human setting; never offered to the assistant itself.
   'school.getAssistantAccess',
   'school.updateAssistantRoles',
-  'school.getAssistantUsage',
+  'school.getAssistantAllowance',
   'systemAdmin.getSchoolAssistantUsage',
   'systemAdmin.getAssistantPlatformStatus',
   'systemAdmin.getPlatformAssistantUsage',

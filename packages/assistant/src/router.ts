@@ -1,3 +1,4 @@
+import { assistantAllowanceOf } from '@campuspilot/api/assistant/allowance';
 import { issueAssistantRunToken } from '@campuspilot/api/assistant/token';
 import { rpcError } from '@campuspilot/api/errors';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
@@ -231,7 +232,8 @@ export const assistantRouter = os.router({
    * The user's assistant state in the school: whether their role may use it
    * (`allowed`, which the app's entry points follow) and whether they can
    * send now (`available`, with the reason when not: no model, their role,
-   * the school's limit).
+   * the school's limit), and how much of the school's AI allowance is used
+   * (`allowance`).
    */
   getStatus: authed.getStatus.handler(async ({ context, input }) => {
     const access = await loadAssistantAccess(context.session, input.schoolId);
@@ -240,8 +242,10 @@ export const assistantRouter = os.router({
     assertMember(access);
     const provider = providerAvailability();
     const allowed = canSee(access);
+    // The school's allowance is a fact about the school, told to everyone who may see the assistant, with or without a model.
+    const allowance = allowed ? await assistantAllowanceOf(db, input.schoolId, access) : null;
     if (!provider.configured) {
-      return { configured: false, allowed, available: false, unavailableReason: provider.unavailableReason, voice: { available: false } };
+      return { configured: false, allowed, available: false, unavailableReason: provider.unavailableReason, voice: { available: false }, allowance };
     }
     return {
       configured: true,
@@ -250,6 +254,7 @@ export const assistantRouter = os.router({
       unavailableReason: access.refusal?.message ?? null,
       // A spoken request becomes an ordinary message, so voice needs a text model too (checked above).
       voice: { available: voiceRefusal(context.session, access, voiceSettings(), await readSchoolKind(db, input.schoolId)) === null },
+      allowance,
     };
   }),
 

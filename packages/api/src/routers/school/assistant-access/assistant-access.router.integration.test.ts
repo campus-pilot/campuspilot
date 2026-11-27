@@ -1,7 +1,12 @@
 import { db } from '@campuspilot/db';
-import { schoolAssistantAccessRoleTable } from '@campuspilot/db/schema/assistant';
+import { assistantModelRequestTable, schoolAssistantAccessRoleTable } from '@campuspilot/db/schema/assistant';
+import { getRedisClient } from '@campuspilot/redis/client';
 import { eq } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
+
+import { resolveAssistantAccess } from '../../../assistant/access';
+import { schoolSpendWindow } from '../../../assistant/spend';
 
 import { expectFeatureDisabled, expectPermissionDenied } from '../../../../test/feature-flags';
 import {
@@ -41,7 +46,8 @@ describe('school.getAssistantAccess / school.updateAssistantRoles', () => {
 
     await expect(principal.school.getAssistantAccess({ schoolId: school.id })).resolves.toEqual({
       schoolId: school.id,
-      monthlyLimitUsd: 20,
+      // Whether there is a limit, never its amount.
+      limited: true,
       roles: [
         { role: 'principal', enabled: true },
         { role: 'manager', enabled: true },
@@ -226,5 +232,132 @@ describe('systemAdmin.getSchoolAssistantRoles / systemAdmin.updateSchoolAssistan
       admin.systemAdmin.updateSchoolAssistantRoles({ id: 'school_missing', roles: [{ role: 'teacher', enabled: true }] }),
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
     await expect(admin.systemAdmin.updateSchoolAssistantRoles({ id: school.id, roles: [] })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+});
+
+/**
+ * Saves one model request as the voice relay would (it needs no run), at a
+ * given instant (default now, inside the school's current window).
+ */
+async function spend(schoolId: string, userId: string, costUsd: string, at: Date = new Date()) {
+  await db.insert(assistantModelRequestTable).values({
+    source: 'voice',
+    voiceSessionId: `avs_${randomUUID().replaceAll('-', '').slice(0, 21)}`,
+    schoolId,
+    userId,
+    requestKey: `voice:allowance-test:${randomUUID()}`,
+    provider: 'gemini',
+    requestedModel: 'gemini-live',
+    answeredModel: 'gemini-live',
+    usageComplete: true,
+    inputTokens: 10,
+    outputTokens: 10,
+    cacheReadInputTokens: 0,
+    cacheCreationInputTokens: 0,
+    inputUsdPerMtok: '1',
+    outputUsdPerMtok: '1',
+    cacheReadUsdPerMtok: '0',
+    cacheWriteUsdPerMtok: '0',
+    costUsd,
+    createdAt: at,
+  });
+}
+
+/** Forgets the limit check's cached total, as its 10 minutes running out would. */
+async function expireSpendCache(schoolId: string) {
+  const window = await schoolSpendWindow(db, schoolId);
+  await getRedisClient().del(`assistant:spend:${schoolId}:${window.key}`);
+}
+
+describe('school.getAssistantAllowance', () => {
+  it('shows the share of this window’s allowance used, overall and per person, and no amount of money', async () => {
+    const school = await schoolWithAssistant();
+    const principal = await createSchoolStaffSession(school.id, [{ role: 'principal' }]);
+    const manager = await createSchoolStaffSession(school.id, [{ role: 'manager' }]);
+    const deletedUserId = `usr_deleted_${randomUUID()}`;
+    const window = await schoolSpendWindow(db, school.id);
+    await spend(school.id, principal.user.id, '5');
+    await spend(school.id, manager.user.id, '2.5');
+    // A deleted account's use still counts, without a name.
+    await spend(school.id, deletedUserId, '0.5');
+    // The previous window and another school are not counted.
+    await spend(school.id, principal.user.id, '10', new Date(window.start.getTime() - 60_000));
+    const other = await schoolWithAssistant();
+    await spend(other.id, principal.user.id, '10');
+
+    const allowance = await createTestClient(principal.session).school.getAssistantAllowance({ schoolId: school.id });
+    expect(allowance).toEqual({
+      limited: true,
+      // 8 of the school's 20.
+      usedPercent: 40,
+      windowStart: window.start,
+      windowEnd: window.end,
+      maxAgeSeconds: 600,
+      users: [
+        { userId: principal.user.id, name: principal.user.name, email: principal.user.email, phoneNumber: null, usedPercent: 25 },
+        { userId: manager.user.id, name: manager.user.name, email: manager.user.email, phoneNumber: null, usedPercent: 12.5 },
+        { userId: deletedUserId, name: null, email: null, phoneNumber: null, usedPercent: 2.5 },
+      ],
+    });
+    expect(JSON.stringify(allowance)).not.toMatch(/usd|cost|limitUsd/i);
+    // The manager reads it too.
+    await expect(createTestClient(manager.session).school.getAssistantAllowance({ schoolId: school.id })).resolves.toMatchObject({ usedPercent: 40 });
+  });
+
+  it('reads the total the limit check reads: rounded down, 100% exactly when the assistant refuses', async () => {
+    const school = await createTestSchool({ features: [{ feature: 'assistant', config: { monthlyLimitUsd: 3 } }] });
+    const principal = await createSchoolStaffSession(school.id, [{ role: 'principal' }]);
+    const client = createTestClient(principal.session);
+    await spend(school.id, principal.user.id, '2.99999999');
+    await expect(client.school.getAssistantAllowance({ schoolId: school.id })).resolves.toMatchObject({ usedPercent: 99.9 });
+    expect(await resolveAssistantAccess(db, { schoolId: school.id, userId: principal.user.id })).toMatchObject({ allowed: true });
+
+    // The total is the limit check's cached figure: a new request shows in it once the cache entry is gone.
+    // The people's shares are read fresh, so they may be ahead of it meanwhile.
+    await spend(school.id, principal.user.id, '0.00000001');
+    await expect(client.school.getAssistantAllowance({ schoolId: school.id })).resolves.toMatchObject({
+      usedPercent: 99.9,
+      users: [expect.objectContaining({ usedPercent: 100 })],
+    });
+    await expireSpendCache(school.id);
+    await expect(client.school.getAssistantAllowance({ schoolId: school.id })).resolves.toMatchObject({ usedPercent: 100 });
+    expect(await resolveAssistantAccess(db, { schoolId: school.id, userId: principal.user.id })).toMatchObject({
+      allowed: false,
+      refusal: { code: 'limit_reached' },
+    });
+  });
+
+  it('has no percentage and no people for a school without a limit', async () => {
+    const school = await createTestSchool({ features: [{ feature: 'assistant', config: { monthlyLimitUsd: null } }] });
+    const principal = await createSchoolStaffSession(school.id, [{ role: 'principal' }]);
+    const client = createTestClient(principal.session);
+    await spend(school.id, principal.user.id, '4');
+    const window = await schoolSpendWindow(db, school.id);
+    await expect(client.school.getAssistantAllowance({ schoolId: school.id })).resolves.toEqual({
+      limited: false,
+      usedPercent: null,
+      windowStart: window.start,
+      windowEnd: window.end,
+      maxAgeSeconds: 600,
+      users: [],
+    });
+    await expect(client.school.getAssistantAccess({ schoolId: school.id })).resolves.toMatchObject({ limited: false });
+  });
+
+  it('is for the principal and manager only, behind the feature after the permission check', async () => {
+    const school = await schoolWithAssistant();
+    // The accountant may use the assistant (a default role) but not read the school's usage.
+    const accountant = createTestClient((await createSchoolStaffSession(school.id, [{ role: 'accountant' }])).session);
+    const teacher = createTestClient(
+      (await createSchoolStaffSession(school.id, [{ role: 'teacher', meta: { classIds: [] } }])).session,
+    );
+    await expectPermissionDenied(accountant.school.getAssistantAllowance({ schoolId: school.id }));
+    await expectPermissionDenied(teacher.school.getAssistantAllowance({ schoolId: school.id }));
+    await expect(createTestClient(null).school.getAssistantAllowance({ schoolId: school.id })).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    const other = await schoolWithAssistant();
+    await expectPermissionDenied((await principalOf(other.id)).school.getAssistantAllowance({ schoolId: school.id }));
+
+    const withoutAssistant = await createTestSchool();
+    await expectFeatureDisabled((await principalOf(withoutAssistant.id)).school.getAssistantAllowance({ schoolId: withoutAssistant.id }), 'assistant');
   });
 });

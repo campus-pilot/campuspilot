@@ -1,8 +1,14 @@
 import { z } from 'zod';
 
 import { assistantRoleChangesSchema, assistantRoleStateSchema } from '../../../assistant/roles';
-import { withUsageRange } from '../../../assistant/usage';
 
+export {
+  allowanceUserSchema,
+  schoolAssistantAllowanceSchema,
+  type SchoolAssistantAllowance,
+} from '../../../assistant/allowance';
+
+// The dollar usage reads stay for the admin app (`systemAdmin.getSchoolAssistantUsage`), which imports them from here.
 export {
   assistantUsageSchema,
   MAX_USAGE_RANGE_DAYS,
@@ -26,8 +32,12 @@ export const assistantAccessDtoSchema = z.object({
   schoolId: z.string(),
   /** Every school role, in the platform's role order. */
   roles: z.array(assistantRoleStateSchema),
-  /** The school's monthly spend limit in USD (set by the platform); null when there is none. */
-  monthlyLimitUsd: z.number().nullable(),
+  /**
+   * Whether the school has an AI limit (set by the platform). Schools are
+   * never told the dollar amount: they see the share of it used
+   * (`school.getAssistantAllowance`).
+   */
+  limited: z.boolean(),
 });
 
 export type AssistantAccessDto = z.infer<typeof assistantAccessDtoSchema>;
@@ -40,5 +50,6 @@ export const updateAssistantRolesInputSchema = z.object({
 
 export type UpdateAssistantRolesInput = z.infer<typeof updateAssistantRolesInputSchema>;
 
-/** A school's assistant spend over an inclusive range of IST calendar days. */
-export const schoolAssistantUsageInputSchema = withUsageRange({ schoolId: z.string().min(1) });
+export const schoolAssistantAllowanceInputSchema = z.object({
+  schoolId: z.string().min(1),
+});

@@ -28,7 +28,7 @@ export function questionPaperWorkflowKey(jobId: string, attempt: number): string
  * page in their message, so their text here is only the default.
  */
 export const QUESTION_PAPER_JOB_FAILURES = {
-  limit_reached: 'This school has reached its AI spending limit for the current period.',
+  limit_reached: 'This school has used 100% of this period’s AI allowance. Try again once it resets.',
   feature_disabled: 'The AI assistant is switched off for this school.',
   role_not_enabled: 'You cannot use the AI assistant in this school.',
   school_suspended: 'This school is suspended, so nothing can be generated. Contact CampusPilot support.',

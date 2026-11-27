@@ -5,6 +5,7 @@ import { requireSchoolMember } from '../../../permissions/school-member';
 import {
   schoolFeatureFlagsDtoSchema,
   schoolFeatureFlagsInputSchema,
+  toSchoolFacingFeatureFlags,
 } from './feature-flags.dto';
 
 /**
@@ -18,7 +19,7 @@ export const schoolFeatureFlagsRouter = {
     .route({
       summary: 'Get school feature flags',
       description:
-        'Read the tier of a school\'s plan (its subscription, or a higher active trial) and which platform features (for example the Cadet Portal or notices) it has, with each feature\'s configuration. Any member of the school may read it; only platform administrators change it.',
+        'Read the tier of a school\'s plan (its subscription, or a higher active trial) and which platform features (for example the Cadet Portal or notices) it has, with each feature\'s configuration (for the assistant, whether its use is limited, never an amount). Any member of the school may read it; only platform administrators change it.',
       tags: ['School', 'Feature flags'],
     })
     // App chrome with no agent value: tools of a disabled feature already
@@ -33,7 +34,8 @@ export const schoolFeatureFlagsRouter = {
         const flags = await readSchoolFeatureFlags(context.db, input.schoolId);
         // A member's school exists; only a school deleted this instant is missing.
         if (!flags) throw rpcError.notFound('School');
-        return { schoolId: input.schoolId, ...flags };
+        // The school-facing form: the assistant's config says whether there is a limit, never its amount.
+        return { schoolId: input.schoolId, tier: flags.tier, features: toSchoolFacingFeatureFlags(flags.features), invalidConfigs: flags.invalidConfigs };
       } catch (error) {
         throw toRpcError(error);
       }
