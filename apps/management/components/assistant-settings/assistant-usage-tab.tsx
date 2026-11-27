@@ -1,91 +1,57 @@
 'use client';
 
-import {
-  formatSpend,
-  groupUsage,
-  sourceRows,
-  UsageChart,
-  UsageFreshness,
-  UsageRangeControls,
-  UsageSourcesTable,
-  UsageTable,
-  useUsageRangeForm,
-  useUsageSelection,
-} from '@campuspilot/components/assistant-usage';
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@campuspilot/ui/components/card';
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import type { SchoolAssistantAllowance } from '@campuspilot/api/routers/school/assistant-access/assistant-access.dto';
+import { AllowanceUsersTable } from '@campuspilot/components/assistant-allowance';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@campuspilot/ui/components/card';
 
-import { orpc } from '@/lib/orpc';
+import { allowanceErrorText, SchoolAllowanceMeter, useAssistantAllowance } from './assistant-allowance';
 
-/**
- * Settings › Usage › AI usage: what the school's assistant use cost, in USD,
- * per IST day or month, from the costs saved with every model request. The
- * API caches the figures for an hour; the card says when they were computed
- * and Refresh computes them again.
- */
-export function AssistantUsageTab({ schoolId }: { schoolId: string }) {
-  const [now] = useState(() => new Date());
-  const form = useUsageRangeForm();
-  const selection = useUsageSelection(form, now);
-  const query = useQuery({
-    ...orpc.school.getAssistantUsage.queryOptions({ input: { schoolId, from: selection?.from ?? '', to: selection?.to ?? '' } }),
-    enabled: selection !== null,
-    placeholderData: keepPreviousData,
-  });
-  const refresh = useRefreshUsage();
-  const periods = query.data && selection ? groupUsage(query.data.days, selection.grouping) : null;
+/** Each person's share, largest first; a period nobody has used yet says so. */
+function AllowanceUsers({ users }: { users: SchoolAssistantAllowance['users'] }) {
+  if (users.length === 0) return <p className="text-sm text-muted-foreground">Nobody has used the assistant this period yet.</p>;
   return (
-    <div className="flex flex-col gap-4">
-      <UsageRangeControls form={form} />
-      <Card>
-        <CardHeader>
-          <CardTitle>AI assistant spend</CardTitle>
-          <CardDescription>
-            {query.data
-              ? `${formatSpend(query.data.total.costUsd, null)} over ${query.data.total.requests} model requests. Days are in IST.`
-              : 'Days are in IST.'}
-          </CardDescription>
-          {query.data && selection ? (
-            <CardAction>
-              <UsageFreshness
-                computedAt={query.data.computedAt}
-                refreshing={refresh.isPending}
-                onRefresh={() => refresh.mutate({ schoolId, from: selection.from, to: selection.to, refresh: true })}
-              />
-            </CardAction>
-          ) : null}
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          {periods && selection && query.data ? (
-            <>
-              <UsageChart periods={periods} inrPerUsd={null} label={`AI assistant spend per ${selection.grouping}`} />
-              <UsageTable periods={periods} inrPerUsd={null} periodLabel={selection.grouping === 'day' ? 'Day' : 'Month'} />
-              <h3 className="text-sm font-medium">By feature</h3>
-              <UsageSourcesTable rows={sourceRows(query.data.sources)} inrPerUsd={null} />
-            </>
-          ) : query.isError ? (
-            <p className="text-sm text-destructive">{query.error.message}</p>
-          ) : (
-            <div className="h-60 animate-pulse rounded-lg bg-muted" />
-          )}
-        </CardContent>
-      </Card>
+    <div className="flex flex-col gap-2">
+      <h3 className="text-sm font-medium">By person</h3>
+      <AllowanceUsersTable rows={users} />
     </div>
   );
 }
 
+/** The period's allowance: the meter and who used it, or one line for a plan without a limit. */
+function AllowanceDetails({ allowance }: { allowance: SchoolAssistantAllowance }) {
+  if (!allowance.limited) return <p className="text-sm text-muted-foreground">Your plan has no AI usage limit.</p>;
+  return (
+    <div className="flex flex-col gap-6">
+      <SchoolAllowanceMeter allowance={allowance} />
+      <AllowanceUsers users={allowance.users} />
+    </div>
+  );
+}
+
+function AllowanceBody({ schoolId }: { schoolId: string }) {
+  const state = useAssistantAllowance(schoolId);
+  if (state.kind === 'pending') return <div className="h-40 animate-pulse rounded-lg bg-muted" />;
+  if (state.kind === 'failed') return <p className="text-sm text-destructive">{allowanceErrorText(state.error)}</p>;
+  return <AllowanceDetails allowance={state.data} />;
+}
+
 /**
- * Computes the usage again (`refresh`), bypassing the API's hour-long cache,
- * and shows the answer under the range it was asked for, so the page's query
- * keeps reading it without a second request.
+ * Settings › Usage › AI usage: the current period only. How much of the
+ * plan's AI allowance the school has used, as a percentage with the reset
+ * date, and each person's share. Never amounts of money (those stay in the
+ * admin app). The period is the one the limit counts (28-day steps of the
+ * billing period, or the IST calendar month without one).
  */
-function useRefreshUsage() {
-  const queryClient = useQueryClient();
-  return useMutation(
-    orpc.school.getAssistantUsage.mutationOptions({
-      onSuccess: (usage, { refresh: _refresh, ...input }) =>
-        queryClient.setQueryData(orpc.school.getAssistantUsage.queryKey({ input }), usage),
-    }),
+export function AssistantUsageTab({ schoolId }: { schoolId: string }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>AI allowance</CardTitle>
+        <CardDescription>How much of this period’s AI allowance your school has used, and by whom.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <AllowanceBody schoolId={schoolId} />
+      </CardContent>
+    </Card>
   );
 }

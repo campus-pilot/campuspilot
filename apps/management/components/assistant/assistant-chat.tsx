@@ -12,6 +12,7 @@ import type { AssistantModelTier, AssistantSurface, AssistantToolCallItemDto, As
 import {
   ASSISTANT_LANE_CLASS,
   ASSISTANT_SURFACE_PROPS,
+  AssistantAllowanceNotice,
   AssistantComposer,
   type AssistantComposerControls,
   AssistantContextChip,
@@ -52,6 +53,7 @@ import { useCallback, useRef, useState, type ReactNode } from 'react';
 import { assistantAttachmentOriginalUrl, assistantAttachmentThumbUrl } from '@/lib/assistant-attachments';
 import { orpc } from '@/lib/orpc';
 
+import { allowanceWarningOf } from './assistant-allowance-model';
 import { useApprovalMoney } from './assistant-approval-currency';
 import { AssistantApprovalWithSummary } from './assistant-approval-request';
 import { AssistantDraftCard, useDraftVerdicts } from './assistant-question-paper';
@@ -732,10 +734,14 @@ export function AssistantChat({
       <AssistantProSuggestion onUsePro={() => setPickedTier('pro')} onDismiss={() => setProSuggestionDismissed(true)} />
     ) : null;
   const seedChip = activeSeed && onSeedRemoved ? <SeedChip paperLabel={seedPaper.paperLabel} failed={seedPaper.failed} onRemove={removeSeed} /> : null;
+  // The school's AI allowance is nearly used (80% up to the limit): everyone who may send is told, with the reset date.
+  const allowanceWarning = allowanceWarningOf(status.data);
+  const allowanceNotice = allowanceWarning ? <AssistantAllowanceNotice message={allowanceWarning} /> : null;
   // Null when there is nothing to show: the composer draws its request sections only then.
   const requests =
-    seedChip || proSuggestion ? (
+    seedChip || proSuggestion || allowanceNotice ? (
       <>
+        {allowanceNotice}
         {seedChip}
         {proSuggestion}
         {tray}
