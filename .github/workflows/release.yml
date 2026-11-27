@@ -200,6 +200,7 @@ jobs:
               VITE_WHATSAPP_NUMBER=${{ vars.VITE_WHATSAPP_NUMBER }}
               VITE_WHATSAPP_LABEL=${{ vars.VITE_WHATSAPP_LABEL }}
               VITE_STAFF_LOGIN_URL=${{ vars.VITE_STAFF_LOGIN_URL }}
+              VITE_DEMO_MEDIA_URL=${{ vars.VITE_DEMO_MEDIA_URL }}
               VITE_STUDENT_LOGIN_URL=${{ vars.VITE_STUDENT_LOGIN_URL || '' }}
               VITE_META_PIXEL_ID=${{ vars.VITE_META_PIXEL_ID || '' }}
           - name: api

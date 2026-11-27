@@ -3,6 +3,7 @@ import { FaqSection } from "@/site/ui/faq";
 import { FinalCta } from "@/site/ui/final-cta";
 
 import { AiSection } from "./ai-section";
+import { DemosSection } from "./demos";
 import { homeFaqs } from "./faq-data";
 import { Hero } from "./hero";
 import { StepsSection } from "./steps";
@@ -23,14 +24,15 @@ function DoneOnceNotebook() {
 }
 
 /**
- * Home: hero → workflows (tabs) → AI-ready (voice, chat, your own assistant)
- * → how it works (steps) → notebook → FAQ → final CTA. Section ids:
- * `workflows`, `ai`, `how-it-works`, `done-once`, `faq`.
+ * Home: hero → product demos → workflows (tabs) → AI-ready (voice, chat, your
+ * own assistant) → how it works (steps) → notebook → FAQ → final CTA. Section
+ * ids: `demos`, `workflows`, `ai`, `how-it-works`, `done-once`, `faq`.
  */
 export function HomePage() {
   return (
     <>
       <Hero />
+      <DemosSection />
       <WorkflowsSection />
       <AiSection />
       <StepsSection />

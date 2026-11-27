@@ -35,7 +35,7 @@ export function Footer() {
     <footer className="cp-footer">
       <div className="cp-footer-grid">
         <FooterBrand />
-        {navMenus.map((menu) => (
+        {navMenus.filter((menu) => menu.inFooter).map((menu) => (
           <FooterColumn key={menu.id} title={menu.label} links={menu.groups.flatMap((group) => group.items)} />
         ))}
       </div>

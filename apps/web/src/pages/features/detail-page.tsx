@@ -1,4 +1,6 @@
 import { featureData, type FeatureSlug } from "@/site/content/catalog";
+import { DemoPlayer } from "@/site/demo/demo-player";
+import { demoForFeature } from "@/site/demo/demos";
 import { featureArt } from "@/site/signature";
 import { LoginCta } from "@/site/shell/login-dialog";
 import { ButtonLink, ButtonRow } from "@/site/ui/button";
@@ -12,10 +14,17 @@ import { OutcomesSection } from "./outcomes";
 import { SpotlightBand } from "./spotlight";
 import { WorkflowStrip } from "./workflow-strip";
 
+/** The feature's narrated demo when one has been recorded, otherwise its illustration. */
+function HeroVisual({ slug }: { slug: FeatureSlug }) {
+  const demo = demoForFeature(slug);
+  if (demo) return <DemoPlayer demo={demo} eager />;
+  const Art = featureArt[slug];
+  return <Art label={featureExtras[slug].artLabel} />;
+}
+
 function FeatureHero({ slug }: { slug: FeatureSlug }) {
   const data = featureData[slug];
   const extra = featureExtras[slug];
-  const Art = featureArt[slug];
   return (
     <PageHero
       eyebrow={data.eyebrow}
@@ -32,7 +41,7 @@ function FeatureHero({ slug }: { slug: FeatureSlug }) {
           <ButtonLink href="/features" tone="light">All features</ButtonLink>
         </ButtonRow>
       }
-      visual={<Art label={extra.artLabel} />}
+      visual={<HeroVisual slug={slug} />}
     />
   );
 }

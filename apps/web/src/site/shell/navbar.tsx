@@ -4,7 +4,7 @@ import { Link, NavLink } from "react-router";
 import { BrandGlyph } from "@campuspilot/components/brand-logo";
 
 import { LoginButton } from "./login-dialog";
-import { navLinks, navMenus, type NavGroup, type NavLinkItem, type NavMenu } from "./nav-data";
+import { navLinks, navMenus, type NavFooterLink, type NavGroup, type NavLinkItem, type NavMenu } from "./nav-data";
 
 /** Distance (px) after which the bar condenses into its floating, bordered form. */
 const SCROLL_THRESHOLD = 12;
@@ -150,13 +150,28 @@ function QuestionPaperSpotlight({ onNavigate }: { onNavigate: () => void }) {
   );
 }
 
-function MenuPanel({ menu, onNavigate }: { menu: NavMenu; onNavigate: () => void }) {
+/** Full-width row under the link groups that leads to the menu's index page. */
+function MenuFooterLink({ link, onNavigate }: { link: NavFooterLink; onNavigate: () => void }) {
   return (
-    <div className={`cp-menu-panel ${menu.spotlight ? "has-spotlight" : ""}`}>
+    <Link className="cp-menu-footer" to={link.href} onClick={onNavigate}>
+      <span className="cp-menu-text">
+        <b>{link.label}</b>
+        <small>{link.description}</small>
+      </span>
+      <ArrowRight aria-hidden="true" />
+    </Link>
+  );
+}
+
+function MenuPanel({ menu, onNavigate }: { menu: NavMenu; onNavigate: () => void }) {
+  const className = ["cp-menu-panel", menu.spotlight ? "has-spotlight" : "", menu.footer ? "has-footer" : ""].join(" ").trim();
+  return (
+    <div className={className}>
       {menu.groups.map((group) => (
         <MenuGroupList key={group.label} group={group} onNavigate={onNavigate} />
       ))}
       {menu.spotlight ? <QuestionPaperSpotlight onNavigate={onNavigate} /> : null}
+      {menu.footer ? <MenuFooterLink link={menu.footer} onNavigate={onNavigate} /> : null}
     </div>
   );
 }
@@ -227,6 +242,11 @@ function MobileGroup({ menu, onNavigate }: { menu: NavMenu; onNavigate: () => vo
         {items.map((item) => (
           <MenuLink key={item.href} item={item} onNavigate={onNavigate} />
         ))}
+        {menu.footer ? (
+          <Link className="cp-mobile-view-all" to={menu.footer.href} onClick={onNavigate}>
+            {menu.footer.label} <ArrowRight aria-hidden="true" />
+          </Link>
+        ) : null}
       </div>
     </details>
   );
