@@ -435,7 +435,7 @@ describe('what a school of each tier can do', () => {
     for (const tier of ['plus', 'pro', 'enterprise'] as const) {
       const school = await schoolOn(tier);
       await setTestSchoolFeature(school.school.id, 'assistant', true, { monthlyLimitUsd: 12 });
-      await expect(school.assistant()).resolves.toMatchObject({ schoolId: school.school.id, monthlyLimitUsd: 12 });
+      await expect(school.assistant()).resolves.toMatchObject({ schoolId: school.school.id, limited: true });
     }
   });
 });

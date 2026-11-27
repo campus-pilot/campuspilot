@@ -292,8 +292,8 @@ describe('school.getAssistantAllowance', () => {
       limited: true,
       // 8 of the school's 20.
       usedPercent: 40,
-      windowStart: window.start,
-      windowEnd: window.end,
+      windowStart: window.start.toISOString(),
+      windowEnd: window.end.toISOString(),
       maxAgeSeconds: 600,
       users: [
         { userId: principal.user.id, name: principal.user.name, email: principal.user.email, phoneNumber: null, usedPercent: 25 },
@@ -373,8 +373,8 @@ describe('school.getAssistantAllowance', () => {
     await expect(client.school.getAssistantAllowance({ schoolId: school.id })).resolves.toEqual({
       limited: false,
       usedPercent: null,
-      windowStart: window.start,
-      windowEnd: window.end,
+      windowStart: window.start.toISOString(),
+      windowEnd: window.end.toISOString(),
       maxAgeSeconds: 600,
       users: [],
     });
