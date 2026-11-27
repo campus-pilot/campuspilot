@@ -22,6 +22,7 @@ const facts = {
 } as const;
 
 const noPdf = { schoolName: 'Maple Grove', canAttach: () => false };
+const allPdfs = { schoolName: 'Maple Grove', canAttach: () => true };
 
 describe('WhatsApp template mapper', () => {
   it('maps every student type to a template and every staff type to nothing', () => {
@@ -32,39 +33,59 @@ describe('WhatsApp template mapper', () => {
     }
   });
 
-  it('uses the document template only when the PDF can be produced', () => {
-    expect(mapWhatsAppMessage('exam.results_published', facts['exam.results_published'], noPdf)).toEqual({
-      template: 'school_update',
-      params: { student_name: 'Asha', school_name: 'Maple Grove', update_text: 'the results of Half-Yearly Examination 2026 are now available', reference: 'Half-Yearly Examination 2026' },
+  it('sends results as text pointing to the Cadet Portal, never with a PDF', () => {
+    const expected = { template: 'results_published', params: { student_name: 'Asha', school_name: 'Maple Grove', exam_name: 'Half-Yearly Examination 2026' } };
+    expect(mapWhatsAppMessage('exam.results_published', facts['exam.results_published'], noPdf)).toEqual(expected);
+    expect(mapWhatsAppMessage('exam.results_published', facts['exam.results_published'], allPdfs)).toEqual(expected);
+  });
+
+  it('sends a bill with its PDF, or as text, with the issue date and amount in words', () => {
+    const params = { student_name: 'Asha', school_name: 'Maple Grove', bill_number: 'BILL/1', issue_date: '5 October 2026', amount: '₹1.00' };
+    expect(mapWhatsAppMessage('bill.issued', facts['bill.issued'], allPdfs)).toEqual({
+      template: 'bill_document',
+      params,
+      document: { kind: 'bill', billId: 'b', sessionId: 's', admissionId: 'a', filename: 'Bill BILL/1.pdf' },
     });
-    const withPdf = mapWhatsAppMessage('exam.results_published', facts['exam.results_published'], { schoolName: 'Maple Grove', canAttach: (kind) => kind === 'report_card' });
-    expect(withPdf).toMatchObject({
-      template: 'school_document',
-      params: { document_name: 'report card for Half-Yearly Examination 2026' },
-      document: { kind: 'report_card', sessionId: 's', examSlug: 'half-yearly', admissionId: 'a' },
+    expect(mapWhatsAppMessage('bill.issued', facts['bill.issued'], noPdf)).toEqual({ template: 'bill_issued', params });
+  });
+
+  it('sends a payment with its receipt, or as text', () => {
+    const params = { student_name: 'Asha', school_name: 'Maple Grove', amount: '₹1.00', receipt_number: 'RCP/1' };
+    expect(mapWhatsAppMessage('payment.received', facts['payment.received'], allPdfs)).toEqual({
+      template: 'payment_receipt',
+      params,
+      document: { kind: 'payment_receipt', paymentId: 'p', sessionId: 's', admissionId: 'a', filename: 'Receipt RCP/1.pdf' },
     });
+    expect(mapWhatsAppMessage('payment.received', facts['payment.received'], noPdf)).toEqual({ template: 'payment_received', params });
   });
 
   it('sends a notice as its PDF, or as text when no PDF can be attached, and never to staff', () => {
+    const params = { student_name: 'Asha', school_name: 'Maple Grove', notice_title: 'Sports Day' };
     expect(mapWhatsAppMessage('notice.published', facts['notice.published'], { schoolName: 'Maple Grove', canAttach: (kind) => kind === 'notice' })).toEqual({
-      template: 'school_document',
-      params: { student_name: 'Asha', school_name: 'Maple Grove', document_name: 'school notice', reference: 'Sports Day' },
+      template: 'notice_document',
+      params,
       document: { kind: 'notice', noticeId: 'n', filename: 'Notice Sports Day.pdf' },
     });
-    expect(mapWhatsAppMessage('notice.published', facts['notice.published'], noPdf)).toEqual({
-      template: 'school_update',
-      params: { student_name: 'Asha', school_name: 'Maple Grove', update_text: 'a new school notice has been published', reference: 'Sports Day' },
-    });
+    expect(mapWhatsAppMessage('notice.published', facts['notice.published'], noPdf)).toEqual({ template: 'notice_published', params });
     // A title with line breaks or of any length still makes a parameter Meta accepts.
     const long = mapWhatsAppMessage('notice.published', { ...facts['notice.published'], noticeTitle: `Line one\nline two ${'x'.repeat(400)}` }, noPdf);
-    expect(long?.params.reference).toHaveLength(300);
-    expect(long?.params.reference).not.toContain('\n');
-    expect(mapWhatsAppMessage('notice.published_staff', facts['notice.published_staff'], { schoolName: 'Maple Grove', canAttach: () => true })).toBeNull();
+    const title = (long?.params as { notice_title: string } | undefined)?.notice_title;
+    expect(title).toHaveLength(300);
+    expect(title).not.toContain('\n');
+    expect(mapWhatsAppMessage('notice.published_staff', facts['notice.published_staff'], allPdfs)).toBeNull();
   });
 
-  it('describes manual bills by issue date', () => {
-    const plan = mapWhatsAppMessage('bill.issued', facts['bill.issued'], noPdf);
-    expect(plan?.params).toMatchObject({ update_text: 'a bill of ₹1.00 has been issued on 5 October 2026' });
+  it('attaches the PDF of the timetable publication the event names, and sends text for an event without one', () => {
+    const params = { student_name: 'Asha', school_name: 'Maple Grove', exam_name: 'Half-Yearly Examination 2026' };
+    const published = { ...facts['exam.timetable_published'], timetableId: 'tt', publicationNumber: 2 };
+    expect(mapWhatsAppMessage('exam.timetable_published', published, allPdfs)).toEqual({
+      template: 'timetable_document',
+      params,
+      document: { kind: 'timetable', sessionId: 's', examSlug: 'half-yearly', timetableId: 'tt', publicationNumber: 2, filename: 'Timetable Half-Yearly Examination 2026.pdf' },
+    });
+    expect(mapWhatsAppMessage('exam.timetable_published', published, noPdf)).toEqual({ template: 'timetable_published', params });
+    // Queued before the publication was recorded on the event.
+    expect(mapWhatsAppMessage('exam.timetable_published', facts['exam.timetable_published'], allPdfs)).toEqual({ template: 'timetable_published', params });
   });
 
   it('flattens parameters Meta would refuse', () => {

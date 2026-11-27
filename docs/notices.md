@@ -427,8 +427,12 @@ students. The publisher is notified like every other member.
   later is not notified (they still see the notice).
 - **Routes.** Staff: the notice page. Students: `/notices/{noticeId}`, from an
   inbox row and from a push click through `/notifications/open`.
-- **WhatsApp** uses the `school_document` template with the notice PDF (below),
-  or the `school_update` text template when a document cannot be attached.
+- **WhatsApp** uses the `notice_document` Utility template (student_name,
+  school_name, notice_title) with the notice PDF in its header (below), or the
+  `notice_published` text template (same parameters) when a document cannot be
+  attached. The PDF is uploaded to WhatsApp once and its media ID reused for
+  every other recipient (`whatsapp_media_upload`, see the Document system
+  guide).
 - **Failures.** WhatsApp failures of one notice are reported as one grouped
   alert (`notification.whatsapp_batch_failed`, batch kind `notice`) to holders of
   `school.notification.failure.notices.receive`.

@@ -26,3 +26,4 @@ export * from "./lead";
 export * from "./document-generation-job";
 export * from "./school-registration-request";
 export * from "./school-setup";
+export * from "./whatsapp-media";

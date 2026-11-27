@@ -47,7 +47,7 @@ published.
 `notifications/emitters/exam-timetable.ts`, emitted in the publish transaction:
 
 - `exam.timetable_published_staff` (in-app): every school member.
-- `exam.timetable_published` (in-app, web push, WhatsApp text): one event per
+- `exam.timetable_published` (in-app, web push, WhatsApp): one event per
   registered student enrolled in the timetable's session **whose class takes
   part in the examination** (`exam_class`); they may read every class taking
   part. A student of an excluded class does not sit the examination, so they
@@ -58,9 +58,16 @@ published.
 
 Every publication notifies: keys are `exam-timetable[-staff]:{timetableId}:{publication_count}:…`,
 so a replay never notifies twice but publishing again after a withdrawal does.
-There is no WhatsApp document attachment (the portal links to the PDF) and no
-grouped batch alert; an individual failed WhatsApp copy alerts the `results`
-failure topic.
+The student events also record the timetable and publication they are about
+(`timetableId`, `publicationNumber`; absent on events emitted before they were
+added). WhatsApp sends the `timetable_document` template with the
+publication's cached PDF (the one the portal download serves, rendered once
+per publication by `exam-timetable.pdf.ts` and uploaded to WhatsApp once)
+while the school has a selected Timetable template, otherwise the
+`timetable_published` text. A copy whose publication was withdrawn or
+superseded before it was sent attaches nothing and fails visibly; an event
+without the publication facts goes out as text. There is no grouped batch
+alert; an individual failed WhatsApp copy alerts the `results` failure topic.
 
 ## Cadet Portal
 
@@ -76,7 +83,8 @@ old notification link. Taking part is checked for the student's **current**
 class in the session, not for the class their results were made in (the exam
 list and results use that), so a student moved to a class not taking part
 loses the timetable but keeps their results (see the Cadet Portal guide). The PDF uses the school's selected Timetable template
-and is cached in S3 under `schools/{id}/exam-timetables/{timetable}-{publication}-{template}.pdf`.
+and is cached in S3 under `schools/{id}/exam-timetables/{timetable}-{publication}-{template}.pdf`
+(`ensureExamTimetablePdfStored`, shared with the WhatsApp attachment).
 Screens: `apps/cadet` `/timetables` and `/timetables/{sessionId}/{examSlug}`
 (linked from More and the notification).
 

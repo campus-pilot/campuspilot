@@ -23,6 +23,7 @@ import {
 } from './client';
 import { whatsappDocumentSources } from './document-sources';
 import { DOCUMENT_TEMPLATE_UNAVAILABLE, WHATSAPP_DOCUMENT_KINDS, type NotificationDocument, type WhatsAppDocumentKind, type WhatsAppDocumentRequest, type WhatsAppDocumentSources } from './documents';
+import { findReusableWhatsAppMedia, recordWhatsAppMediaUpload } from './media-cache';
 import { mapWhatsAppMessage, WHATSAPP_TEMPLATE_LANGUAGE, type WhatsAppMessagePlan } from './templates';
 
 /**
@@ -61,8 +62,9 @@ function bodyComponent(plan: WhatsAppMessagePlan): TemplateComponent {
 
 /**
  * WhatsApp sender (Cloud API). Per claimed delivery: re-check eligibility
- * against the live admission, map the template, produce and upload the PDF
- * when the template has a document header, then send. Upload answers are
+ * against the live admission, map the template, produce the PDF when the
+ * template has a document header and upload it (or reuse the upload of a
+ * PDF shared by every recipient), then send. Upload answers are
  * classified by `classifyWhatsAppFailure` (safe to repeat), the message
  * send's by `classifyWhatsAppSendFailure`, which never retries a send that
  * may have gone out (D-7, review round 2 #2).
@@ -82,10 +84,12 @@ export function createWhatsAppAdapter(options: {
     switch (request.kind) {
       case 'payment_receipt':
         return sources.payment_receipt ? sources.payment_receipt.produce(request, { schoolId }) : null;
-      case 'report_card':
-        return sources.report_card ? sources.report_card.produce(request, { schoolId }) : null;
+      case 'bill':
+        return sources.bill ? sources.bill.produce(request, { schoolId }) : null;
       case 'notice':
         return sources.notice ? sources.notice.produce(request, { schoolId }) : null;
+      case 'timetable':
+        return sources.timetable ? sources.timetable.produce(request, { schoolId }) : null;
       default: {
         const unhandled: never = request;
         throw new Error(`Unhandled document kind ${JSON.stringify(unhandled)}.`);
@@ -101,6 +105,41 @@ export function createWhatsAppAdapter(options: {
       if (source && (await source.available({ schoolId }))) kinds.add(kind);
     }
     return kinds;
+  }
+
+  /**
+   * Meta's media ID for a produced PDF. A document shared by every
+   * recipient (`shareKey`) reuses the ID recorded by an earlier send from
+   * this phone number while it is inside the reuse window
+   * (`./media-cache.ts`); anything else is uploaded. Recording a fresh
+   * shared upload is best effort: when it fails, the message still goes out
+   * and the next recipient uploads again.
+   */
+  async function documentMediaId(
+    document: NotificationDocument,
+    filename: string,
+    schoolId: string,
+  ): Promise<{ ok: true; mediaId: string } | { ok: false; outcome: DeliverySendOutcome }> {
+    const shared = document.shareKey ? { phoneNumberId: options.config.phoneNumberId, shareKey: document.shareKey } : null;
+    if (shared) {
+      let cached: string | null;
+      try {
+        cached = await findReusableWhatsAppMedia(db, shared);
+      } catch {
+        return { ok: false, outcome: { kind: 'retry', errorCode: 'document_error', scope: 'recipient', definiteAnswer: false } };
+      }
+      if (cached) return { ok: true, mediaId: cached };
+    }
+    const upload = await uploadMedia(options.config, fetcher, { bytes: document.bytes, mimeType: document.mimeType, filename });
+    if (!upload.ok) return { ok: false, outcome: classifyWhatsAppFailure(upload) };
+    if (shared) {
+      try {
+        await recordWhatsAppMediaUpload(db, { ...shared, schoolId, mediaId: upload.mediaId });
+      } catch (error) {
+        log.warn({ schoolId, err: error instanceof Error ? { name: error.name, message: error.message } : String(error) }, 'notification.whatsapp.media_cache_write_failed');
+      }
+    }
+    return { ok: true, mediaId: upload.mediaId };
   }
 
   async function send(delivery: ClaimedDelivery): Promise<DeliverySendOutcome> {
@@ -136,7 +175,7 @@ export function createWhatsAppAdapter(options: {
     if (!plan) return { kind: 'failed', errorCode: 'no_template', definiteAnswer: false };
 
     let document: NotificationDocument | null = null;
-    if (plan.template === 'school_document') {
+    if ('document' in plan) {
       let produced: Awaited<ReturnType<typeof produceDocument>>;
       try {
         produced = await produceDocument(plan.document, delivery.schoolId);
@@ -157,11 +196,11 @@ export function createWhatsAppAdapter(options: {
     }
 
     const components: TemplateComponent[] = [];
-    if (plan.template === 'school_document' && document) {
+    if ('document' in plan && document) {
       const filename = safeFilename(plan.document.filename);
-      const upload = await uploadMedia(options.config, fetcher, { bytes: document.bytes, mimeType: document.mimeType, filename });
-      if (!upload.ok) return classifyWhatsAppFailure(upload);
-      components.push({ type: 'header', parameters: [{ type: 'document', document: { id: upload.mediaId, filename } }] });
+      const media = await documentMediaId(document, filename, delivery.schoolId);
+      if (!media.ok) return media.outcome;
+      components.push({ type: 'header', parameters: [{ type: 'document', document: { id: media.mediaId, filename } }] });
     }
     components.push(bodyComponent(plan));
 

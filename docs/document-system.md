@@ -1330,16 +1330,36 @@ by the template. What this document system owns for the type:
 
 ## Notification attachments (WhatsApp)
 
-WhatsApp `school_document` messages (receipts for `payment.received`, report
-cards for `exam.results_published`) carry one PDF rendered in the worker by
+Every student notification type has its own fixed-wording Utility template in
+Meta (`notifications/channels/whatsapp/templates.ts`): a document template with
+a PDF header and a matching text template without one. A document template is
+used only when its PDF can be produced; otherwise the same fact goes out as
+the text template.
+
+| Type | Document template (PDF) | Text template | PDF source |
+| --- | --- | --- | --- |
+| `bill.issued` | `bill_document` | `bill_issued` | `documents/bill.ts`, needs a selected `bill` template |
+| `payment.received` | `payment_receipt` | `payment_received` | `documents/receipt.ts`, needs a selected `receipt` template |
+| `notice.published` | `notice_document` | `notice_published` | `documents/notice.ts`, always available |
+| `exam.timetable_published` | `timetable_document` | `timetable_published` | `documents/timetable.ts`, needs a selected `timetable` template |
+| `exam.results_published` | none | `results_published` | none: the text points to the Cadet Portal |
+
+Results carry no report card: `results_published` sends the student to the
+Cadet Portal, so it is sent only to schools with the `cadet` feature
+(`notificationTypeChannelRequiredFeatures`; a school without it gets no
+WhatsApp copy of results, while the inbox and web push are unchanged).
+
+Bills and receipts are rendered in the worker per message by
 `packages/api/src/notifications/documents/`. Those sources reuse this system
 unchanged: the school's selected immutable template revision, the type's own
 context builder (receipts with the `posted_unreversed_payments` policy and the
-payment's posting-time snapshot; report cards for exactly one registered,
-fully approved student), the restricted renderer, sanitising, batch layout and
-the same Gotenberg conversion. A domain refusal (reversed payment, unapproved
-results, invalid template) produces no PDF and the delivery fails visibly; it
-is never replaced by a partial document.
+payment's posting-time snapshot; bills from the bill's posting-time snapshot,
+for exactly the notification's bill, admission and session), the restricted
+renderer, sanitising, batch layout and the same Gotenberg conversion. A
+domain refusal (reversed payment, reversed bill, invalid template) produces
+no PDF and the delivery fails visibly; it is never replaced by a partial
+document. A bill reversal keeps the bill `posted` and appends a ledger
+reversal of its entry, so the bill source checks for that reversal itself.
 
 A `notice.published` message carries the notice's PDF from the notice cache
 described under "Notices": rendered once per notice, not once per recipient,
@@ -1347,7 +1367,22 @@ and always available (no selected template is required), so a notice is never
 downgraded to text for lack of a template. Its delivery records the notice's
 pinned template revision.
 
-Receipt and report-card PDFs are message attachments, not documents of the school's history:
+An `exam.timetable_published` message carries the PDF of the publication it is
+about (the event's `timetableId` and `publicationNumber`) from the timetable
+cache (`routers/school/exam/exam-timetable.pdf.ts`,
+`schools/{schoolId}/exam-timetables/{timetableId}-{publicationCount}-{templateId}.pdf`),
+the same object the Cadet Portal download serves: one render per publication.
+A withdrawn or re-published timetable produces nothing for an older message
+(the delivery fails visibly), and an event emitted before those facts were
+recorded goes out as text.
+
+Notice and timetable PDFs are identical for every recipient, so the document
+carries a `shareKey` (its S3 key) and the adapter uploads it to WhatsApp media
+once per sending phone number, recording Meta's media ID in
+`whatsapp_media_upload` and reusing it for 25 days (Meta keeps media for 30).
+Bills and receipts never carry a share key and are uploaded per message.
+
+Receipt and bill PDFs are message attachments, not documents of the school's history:
 no `artifact` row or S3 object is written, so they never appear in Document
 history and cannot be downloaded again. Provenance is kept on the delivery
 (`notification_delivery.document_template_revision_id`). When the school has

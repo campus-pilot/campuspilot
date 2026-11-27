@@ -89,7 +89,7 @@ export async function previewNoticeDelivery(db: DatabaseExecutor, notice: Notice
   if (notice.cadetScope === 'none') return { staffRecipientCount: staff.length, cadetForecast: null };
   const roster = await noticeCadetRoster(db, notice);
   const recipients = await resolveAdmissionRecipients(db, notice.schoolId, roster.map((row) => row.admissionId));
-  return { staffRecipientCount: staff.length, cadetForecast: forecastDeliveries('notice.published', await schoolDeliveryFacts(db, notice.schoolId), recipients) };
+  return { staffRecipientCount: staff.length, cadetForecast: forecastDeliveries('notice.published', await schoolDeliveryFacts(db, notice.schoolId, 'notice.published'), recipients) };
 }
 
 /** The recipients of a publication, resolved once by the publishing transaction. */

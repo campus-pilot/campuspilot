@@ -197,6 +197,15 @@ export const notificationPayloadSchemas = {
     examName: label,
     admissionId: id,
     studentName: label,
+    /**
+     * The timetable (`exam_timetable.id`) and the publication
+     * (`publication_count` when it was published) the notification is
+     * about, so the WhatsApp copy attaches the PDF of that publication and
+     * nothing once it is withdrawn or published again. Absent on events
+     * emitted before they were recorded (their WhatsApp copy is text).
+     */
+    timetableId: id.optional(),
+    publicationNumber: z.number().int().positive().optional(),
   }),
   /** An examination's timetable was published; addressed to the school's staff. */
   "exam.timetable_published_staff": z.object({
@@ -329,6 +338,40 @@ export const notificationChannelRequiredFeatures = {
   web_push: [],
   whatsapp: ["whatsapp"],
 } as const satisfies Record<RemoteNotificationChannel, readonly SchoolFeatureKey[]>;
+
+/**
+ * The per-school platform features a type needs **on one remote channel
+ * only**, besides the type's own (`notificationRequiredFeatures`, every
+ * channel) and the channel's own (`notificationChannelRequiredFeatures`,
+ * every type). A school without one sends nothing of that type on that
+ * channel, decided at the same points and recorded the same way
+ * (`skipped: feature_disabled`); the inbox and the type's other channels
+ * are not affected.
+ *
+ * Exhaustive, so each new type decides. The WhatsApp copy of results is a
+ * fixed text that sends the student to the Cadet Portal for the results
+ * themselves (no report card is attached), so it is sent only while the
+ * school has the `cadet` feature. This holds on its own, even though
+ * results are released by procedures that require `cadet` today: a copy
+ * queued before `cadet` was switched off does not point a guardian to a
+ * portal the school no longer has.
+ */
+export const notificationTypeChannelRequiredFeatures = {
+  "bill.issued": {},
+  "payment.received": {},
+  "exam.results_published": { whatsapp: ["cadet"] },
+  "exam.results_publish_finished": {},
+  "notification.whatsapp_failed": {},
+  "notification.whatsapp_batch_failed": {},
+  "billing.run_posted": {},
+  "notice.published": {},
+  "notice.published_staff": {},
+  "exam.timetable_published": {},
+  "exam.timetable_published_staff": {},
+} as const satisfies Record<
+  NotificationType,
+  Partial<Record<RemoteNotificationChannel, readonly SchoolFeatureKey[]>>
+>;
 
 /** Every known type, in catalogue order. */
 export const NOTIFICATION_TYPES = Object.keys(

@@ -3,20 +3,22 @@ import { noticeTable } from '@campuspilot/db/schema/notice';
 import { ORPCError } from '@orpc/server';
 import { and, eq } from 'drizzle-orm';
 
-import { asPublishedNotice, readNoticePdf } from '../../routers/school/notice/notice.render';
+import { asPublishedNotice, noticePdfKey, readNoticePdf } from '../../routers/school/notice/notice.render';
 import { disabledFeatureOf } from '../features';
 import type { WhatsAppDocumentSource } from '../channels/whatsapp/documents';
 
 /**
  * The notice PDF attached to a `notice.published` WhatsApp message.
  *
- * Unlike receipts and report cards, this PDF is the same for every
+ * Unlike bills and receipts, this PDF is the same for every
  * recipient and its notice is immutable once published, so it is rendered
  * once and reused: the bytes come from the notice's cached object
  * (`schools/{schoolId}/notices/{noticeId}-{pageSize}.pdf`, decision D9, laid
  * out at the notice's pinned page size), which also
  * backs the staff and Cadet Portal downloads. A publication to thousands of
- * students therefore converts one PDF, not thousands.
+ * students therefore converts one PDF, not thousands; the object key is the
+ * document's `shareKey`, so it is also uploaded to WhatsApp once and the
+ * media ID reused for every other recipient.
  *
  * `available` is always true: a notice needs no selected school template
  * (a plain notice falls back to the built-in default design, a template
@@ -45,7 +47,12 @@ export function createNoticeDocumentSource(db: Database = defaultDb): WhatsAppDo
       if (await disabledFeatureOf(db, schoolId, 'notice.published')) return null;
       try {
         const bytes = await readNoticePdf(db, published);
-        return { bytes, mimeType: 'application/pdf', templateRevisionId: notice.templateRevisionId };
+        return {
+          bytes,
+          mimeType: 'application/pdf',
+          templateRevisionId: notice.templateRevisionId,
+          shareKey: noticePdfKey(published.schoolId, published.id, published.pageSize),
+        };
       } catch (error) {
         if (error instanceof ORPCError && error.status >= 400 && error.status < 500) return null;
         throw error;

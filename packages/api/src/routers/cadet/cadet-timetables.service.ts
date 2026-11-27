@@ -4,17 +4,13 @@ import { examClassTable, examTimetableTable } from '@campuspilot/db/schema/exam'
 import { schoolSessionTable } from '@campuspilot/db/schema/session';
 import { sessionConfigSchema } from '@campuspilot/db/schema/jsonb/session-config';
 import { studentTable } from '@campuspilot/db/schema/student';
-import { env } from '@campuspilot/env/server';
-import { getS3Client } from '@campuspilot/s3/client';
-import { HeadObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { and, count, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 
 import { rpcError } from '../../errors';
 import { createNextPageCursor, createPaginatedResult, resolvePaginationInput } from '../../paginations';
-import { buildDocumentContexts } from '../school/document/document.context';
-import { combineDocuments, convertDocumentPdf, renderDocuments } from '../school/document/document.render';
 import { getSelectedDocumentTemplate } from '../school/document/document.selected-template';
 import { documentDownloadUrl } from '../school/document/document.storage';
+import { ensureExamTimetablePdfStored } from '../school/exam/exam-timetable.pdf';
 import type { CadetScope } from './cadet-notices.service';
 
 /**
@@ -167,48 +163,15 @@ export async function getCadetTimetable(db: DatabaseExecutor, cadet: CadetScope,
   };
 }
 
-async function objectExists(key: string) {
-  try {
-    await getS3Client().send(new HeadObjectCommand({ Bucket: env.S3_BUCKET, Key: key }));
-    return true;
-  } catch (error) {
-    const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
-    if (status === 404 || (error as { name?: string }).name === 'NotFound') return false;
-    throw error;
-  }
-}
-
-/** Renders in progress in this process, so concurrent first requests convert once. */
-const pdfInFlight = new Map<string, Promise<void>>();
-
 /**
- * A five-minute download URL of the timetable's PDF, rendered with the
- * school's selected Timetable template exactly as staff generate it (all
- * classes) and cached under a key that names the timetable, its publication
- * number and the template revision. A published timetable is frozen, so that
- * key fully identifies the document; a re-publication or a template change
- * renders a new object. The letterhead (name, logo) is the school's as it was
- * when the PDF was first rendered. NOT_FOUND when no template is selected.
+ * A five-minute download URL of the timetable's PDF: the publication's
+ * cached PDF (`ensureExamTimetablePdfStored`, rendered on first use with the
+ * school's selected Timetable template and shared with the WhatsApp
+ * attachment). NOT_FOUND when no template is selected.
  */
 export async function getCadetTimetableDownload(db: Database, cadet: CadetScope, key: TimetableKey) {
   const timetable = await publishedTimetable(db, cadet, key);
   const template = await getSelectedDocumentTemplate(db, { schoolId: cadet.schoolId, documentType: 'timetable' });
-  const objectKey = `schools/${cadet.schoolId}/exam-timetables/${timetable.id}-${timetable.publicationCount}-${template.row.id}.pdf`;
-  if (!(await objectExists(objectKey))) {
-    let pending = pdfInFlight.get(objectKey);
-    if (!pending) {
-      pending = (async () => {
-        const data = await db.transaction(
-          (tx) => buildDocumentContexts(tx, cadet.schoolId, { documentType: 'timetable', sessionId: key.sessionId, examSlug: key.examSlug }),
-          { isolationLevel: 'repeatable read', accessMode: 'read only' },
-        );
-        const html = combineDocuments(renderDocuments(template.content, data.contexts), 'timetable', template.row.pageSize);
-        const bytes = await convertDocumentPdf(html, 'timetable');
-        await getS3Client().send(new PutObjectCommand({ Bucket: env.S3_BUCKET, Key: objectKey, Body: bytes, ContentType: 'application/pdf' }));
-      })().finally(() => pdfInFlight.delete(objectKey));
-      pdfInFlight.set(objectKey, pending);
-    }
-    await pending;
-  }
+  const objectKey = await ensureExamTimetablePdfStored(db, timetable, template);
   return { url: await documentDownloadUrl(objectKey, `${timetable.examName} timetable`), expiresIn: 300 };
 }

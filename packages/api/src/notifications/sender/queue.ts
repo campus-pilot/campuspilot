@@ -115,7 +115,7 @@ async function deliveryFeatureDisabled(db: DatabaseExecutor, deliveryId: string)
     .limit(1);
   if (!row || !isNotificationType(row.type)) return false;
   if ((await disabledFeatureOf(db, row.schoolId, row.type)) !== null) return true;
-  return (await disabledChannelFeatureOf(db, row.schoolId, row.channel)) !== null;
+  return (await disabledChannelFeatureOf(db, row.schoolId, row.type, row.channel)) !== null;
 }
 
 /**

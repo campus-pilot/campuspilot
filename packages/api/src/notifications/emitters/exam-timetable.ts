@@ -87,7 +87,7 @@ export async function previewTimetableDelivery(db: DatabaseExecutor, scope: Time
   const recipients = await resolveAdmissionRecipients(db, scope.schoolId, roster.map((row) => row.admissionId));
   return {
     staffRecipientCount: staff.length,
-    cadetForecast: forecastDeliveries('exam.timetable_published', await schoolDeliveryFacts(db, scope.schoolId), recipients),
+    cadetForecast: forecastDeliveries('exam.timetable_published', await schoolDeliveryFacts(db, scope.schoolId, 'exam.timetable_published'), recipients),
   };
 }
 
@@ -118,6 +118,8 @@ export async function notifyTimetablePublished(
           examName: timetable.examName,
           admissionId: student.admissionId,
           studentName: student.name,
+          timetableId: timetable.id,
+          publicationNumber: timetable.publicationNumber,
         },
       }) satisfies NotifyInput<'exam.timetable_published'>,
   );
