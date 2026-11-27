@@ -57,12 +57,25 @@ export type NavGroup = {
   label: string;
 };
 
+/** Full-width link along the bottom of a menu panel ("View all features"). */
+export type NavFooterLink = {
+  description: string;
+  href: string;
+  label: string;
+};
+
 export type NavMenu = {
   groups: readonly NavGroup[];
   id: string;
   label: string;
   /** Shows the dark question-paper spotlight card beside the link groups. */
   spotlight: boolean;
+  footer?: NavFooterLink;
+  /**
+   * Whether the site footer lists this menu as a column. The Features menu does
+   * not: its links already appear under Product there.
+   */
+  inFooter: boolean;
 };
 
 const productGroups: readonly NavGroup[] = [
@@ -108,6 +121,29 @@ const solutionGroups: readonly NavGroup[] = [
   },
 ];
 
+/** Every `/features/:slug` page, so the Features menu is the complete list. */
+const featureGroups: readonly NavGroup[] = [
+  {
+    label: "Run the school",
+    items: [
+      { href: "/features/admissions", label: "Admissions", description: "Enquiry to student record", icon: UserPlus, motion: "plus" },
+      { href: "/features/academics", label: "Academics", description: "Sessions, classes and teachers", icon: GraduationCap, motion: "toss" },
+      { href: "/features/billing", label: "Finance & fees", description: "Bills, receipts and ledgers", icon: IndianRupee, motion: "flip" },
+      { href: "/features/examinations", label: "Examinations", description: "Marks, approvals, report cards", icon: ClipboardCheck, motion: "wiggle" },
+      { href: "/features/dashboards", label: "Dashboards", description: "The session at a glance", icon: ChartColumn, motion: "bars" },
+    ],
+  },
+  {
+    label: "Create and share",
+    items: [
+      { href: "/features/question-papers", label: "Question papers", description: "Handwritten draft to paper", icon: FilePenLine, motion: "write" },
+      { href: "/features/documents", label: "Documents", description: "Branded outputs from records", icon: FileText, motion: "lift" },
+      { href: "/features/notices", label: "Notices & notifications", description: "App, WhatsApp and push alerts", icon: Megaphone, motion: "bounce" },
+      { href: "/features/student-portal", label: "Student & family access", description: "Each student sees their own", icon: UsersRound, motion: "rise" },
+    ],
+  },
+];
+
 const resourceGroups: readonly NavGroup[] = [
   {
     label: "Learn",
@@ -126,13 +162,20 @@ const resourceGroups: readonly NavGroup[] = [
 ];
 
 export const navMenus: readonly NavMenu[] = [
-  { id: "product", label: "Product", groups: productGroups, spotlight: true },
-  { id: "solutions", label: "Solutions", groups: solutionGroups, spotlight: false },
-  { id: "resources", label: "Resources", groups: resourceGroups, spotlight: false },
+  { id: "product", label: "Product", groups: productGroups, spotlight: true, inFooter: true },
+  { id: "solutions", label: "Solutions", groups: solutionGroups, spotlight: false, inFooter: true },
+  { id: "resources", label: "Resources", groups: resourceGroups, spotlight: false, inFooter: true },
+  {
+    id: "features",
+    label: "Features",
+    groups: featureGroups,
+    spotlight: false,
+    inFooter: false,
+    footer: { href: "/features", label: "View all features", description: "Every module and how they connect" },
+  },
 ];
 
 /** Plain links shown beside the dropdown triggers. */
 export const navLinks = [
-  { href: "/features", label: "Features" },
   { href: "/ai-ready", label: "AI-ready" },
 ] as const;

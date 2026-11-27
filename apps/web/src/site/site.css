@@ -498,6 +498,47 @@ body {
   line-height: 1.4;
 }
 
+/* "View all" row along the bottom of a menu panel (Features menu). */
+/* Fixed tracks: the absolutely positioned wrapper would otherwise shrink the panel and stack the groups. */
+.cp-menu-panel.has-footer {
+  display: grid;
+  grid-template-columns: repeat(2, 256px);
+}
+
+.cp-menu-footer {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 4px 4px 0;
+  padding: 12px;
+  border-top: 1px solid var(--cp-line);
+  border-radius: 0 0 11px 11px;
+  color: var(--cp-ink);
+  text-decoration: none;
+  transition: background-color 0.2s ease;
+}
+
+.cp-menu-footer:hover,
+.cp-menu-footer:focus-visible {
+  border-radius: 11px;
+  background: var(--cp-soft);
+}
+
+.cp-menu-footer > svg {
+  width: 16px;
+  height: 16px;
+  color: var(--cp-subtle);
+  transition: transform 0.25s var(--cp-ease), color 0.2s ease;
+}
+
+.cp-menu-footer:hover > svg,
+.cp-menu-footer:focus-visible > svg {
+  color: var(--cp-ink);
+  transform: translateX(3px);
+}
+
 /* Spotlight card in the Product menu */
 .cp-spotlight {
   position: relative;
@@ -2182,6 +2223,22 @@ body {
     border-bottom: 1px solid var(--cp-line);
   }
 
+  .cp-mobile-view-all {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 8px 4px;
+    color: var(--cp-accent);
+    font-size: 14px;
+    font-weight: 550;
+    text-decoration: none;
+  }
+
+  .cp-mobile-view-all svg {
+    width: 15px;
+    height: 15px;
+  }
+
   .cp-mobile-group[open] .cp-mobile-links {
     animation: cp-fade-up 0.35s var(--cp-ease) both;
   }
@@ -3373,5 +3430,278 @@ a.cp-login-row:hover .cp-login-row-arrow {
   .cp-login-dialog,
   .cp-login-dialog::backdrop {
     transition: none;
+  }
+}
+
+/* ----------------------------------------------------------- demo player */
+
+/*
+ * Narrated product demo (`site/demo/demo-player.tsx`): cover → language
+ * choice → video. A 16:9 frame in the console-card style; the video keeps
+ * native controls and the narration switch sits top right.
+ */
+.cp-demo {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid var(--cp-line);
+  border-radius: 18px;
+  background: var(--cp-ink);
+  box-shadow: 0 30px 60px -32px rgb(0 0 0 / 0.35), 0 2px 6px rgb(0 0 0 / 0.05);
+  isolation: isolate;
+}
+
+.cp-demo > img,
+.cp-demo > video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: var(--cp-bg);
+}
+
+.cp-demo > video {
+  object-fit: contain;
+  background: #000;
+}
+
+.cp-demo-cover {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: linear-gradient(180deg, rgb(17 17 16 / 0) 55%, rgb(17 17 16 / 0.34));
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.cp-demo-cover:hover {
+  background-color: rgb(17 17 16 / 0.08);
+}
+
+.cp-demo-cover:focus-visible {
+  outline-offset: -4px;
+  border-radius: 18px;
+}
+
+.cp-demo-play {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: var(--cp-primary);
+  box-shadow: 0 12px 30px -8px rgb(120 50 0 / 0.55), inset 0 1px 0 rgb(255 255 255 / 0.2);
+  transition: transform 0.3s var(--cp-ease), background-color 0.2s ease;
+}
+
+/* Soft ring that breathes outwards, like the pill dot. */
+.cp-demo-play::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+  border: 2px solid color-mix(in oklch, var(--cp-primary) 55%, transparent);
+  border-radius: 50%;
+  animation: cp-demo-ring 2.4s ease-out infinite;
+}
+
+.cp-demo-play svg {
+  width: 26px;
+  height: 26px;
+  margin-left: 3px;
+  fill: currentColor;
+}
+
+.cp-demo-cover:hover .cp-demo-play {
+  background: var(--cp-primary-hover);
+  transform: scale(1.06);
+}
+
+.cp-demo-meta {
+  position: absolute;
+  bottom: 14px;
+  left: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border-radius: 11px;
+  background: rgb(17 17 16 / 0.72);
+  text-align: left;
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+.cp-demo-meta b {
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.cp-demo-meta small {
+  color: rgb(255 255 255 / 0.7);
+  font-size: 12px;
+}
+
+.cp-demo-choose {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 16px;
+  background: rgb(17 17 16 / 0.62);
+  color: #fff;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  animation: cp-fade-up 0.3s var(--cp-ease) both;
+}
+
+.cp-demo-choose p {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 550;
+  letter-spacing: -0.01em;
+}
+
+.cp-demo-langs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
+.cp-demo-langs .cp-btn {
+  min-width: 128px;
+}
+
+.cp-demo-langs .cp-btn svg {
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+}
+
+.cp-demo-langs .cp-btn:hover svg {
+  transform: none;
+}
+
+.cp-demo-cancel {
+  padding: 4px 8px;
+  border: 0;
+  background: none;
+  color: rgb(255 255 255 / 0.7);
+  font: 500 13px/1.2 var(--cp-font);
+  cursor: pointer;
+}
+
+.cp-demo-cancel:hover {
+  color: #fff;
+}
+
+.cp-demo-switch {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgb(17 17 16 / 0.72);
+  opacity: 0.85;
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  transition: opacity 0.2s ease;
+}
+
+.cp-demo:hover .cp-demo-switch,
+.cp-demo-switch:focus-within {
+  opacity: 1;
+}
+
+.cp-demo-switch button {
+  height: 28px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: rgb(255 255 255 / 0.72);
+  font: 550 12.5px/1 var(--cp-font);
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.cp-demo-switch button:hover {
+  color: #fff;
+}
+
+.cp-demo-switch button[aria-pressed="true"] {
+  background: #fff;
+  color: var(--cp-ink);
+}
+
+/* Buttons on the dark overlays take a white focus ring; the cover keeps the ink one. */
+:is(.cp-demo-choose, .cp-demo-switch) button:focus-visible {
+  outline-color: #fff;
+}
+
+@keyframes cp-demo-ring {
+  0% {
+    opacity: 0.9;
+    transform: scale(0.9);
+  }
+
+  100% {
+    opacity: 0;
+    transform: scale(1.25);
+  }
+}
+
+@media (max-width: 640px) {
+  .cp-demo {
+    border-radius: 14px;
+  }
+
+  .cp-demo-play {
+    width: 56px;
+    height: 56px;
+  }
+
+  .cp-demo-play svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .cp-demo-meta {
+    bottom: 10px;
+    left: 10px;
+    padding: 6px 10px;
+  }
+
+  .cp-demo-choose {
+    gap: 10px;
+  }
+
+  .cp-demo-langs .cp-btn {
+    min-width: 0;
+    height: 36px;
+  }
+
+  .cp-demo-switch {
+    top: 8px;
+    right: 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cp-demo-play::after,
+  .cp-demo-choose {
+    animation: none;
   }
 }
