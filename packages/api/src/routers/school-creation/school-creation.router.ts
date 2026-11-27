@@ -8,6 +8,7 @@ import {
   readSchoolCreationStatus,
   requestLargerSchoolLimit,
 } from "../../school-creation/school-creation.service";
+import { withDefaultDocumentTemplates } from "../school/document/document.default-templates";
 import {
   createOwnSchoolInputSchema,
   createOwnSchoolOutputSchema,
@@ -61,14 +62,21 @@ export const schoolCreationRouter = {
     .output(createOwnSchoolOutputSchema)
     .handler(async ({ context, input }) => {
       try {
-        return await context.db.transaction((transaction) =>
-          createOwnSchool(transaction, {
-            userId: context.session.user.id,
-            name: input.name,
-            location: input.location,
-            registrationNo: input.registrationNo || null,
-            now: new Date(),
-          }),
+        // The default templates' objects are removed when the transaction fails.
+        return await withDefaultDocumentTemplates((uploads) =>
+          context.db.transaction((transaction) =>
+            createOwnSchool(
+              transaction,
+              {
+                userId: context.session.user.id,
+                name: input.name,
+                location: input.location,
+                registrationNo: input.registrationNo || null,
+                now: new Date(),
+              },
+              uploads,
+            ),
+          ),
         );
       } catch (error) {
         throw toRpcError(error);

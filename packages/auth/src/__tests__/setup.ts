@@ -17,6 +17,7 @@ process.env.CORS_ORIGIN = 'http://localhost:3001';
 process.env.S3_BUCKET = 'campuspilot';
 process.env.S3_REGION = 'us-east-1';
 process.env.GOTENBERG_URL = 'http://localhost:8781';
+process.env.PANDOC_URL = 'http://localhost:8783';
 process.env.OPA_URL = 'http://localhost:8181';
 process.env.RESTATE_ADMIN_URL = 'http://localhost:9070';
 process.env.RESTATE_FABRIC_URL = 'http://localhost:8080';

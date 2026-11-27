@@ -2,12 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@campuspilot/db";
 import { admissionTable } from "@campuspilot/db/schema/admission";
 import { artifactTable } from "@campuspilot/db/schema/artifact";
+import { documentGenerationJobTable } from "@campuspilot/db/schema/document-generation-job";
 import { studentTable } from "@campuspilot/db/schema/student";
 import { schoolSessionTable } from "@campuspilot/db/schema/session";
 import { and, eq } from "drizzle-orm";
 import { PDFDocument } from "pdf-lib";
 import { createFinanceConfig, createFinanceIdempotencyKey } from "../../../../test/finance/factories";
 import { createFinanceScenario, type FinanceScenario } from "../../../../test/finance/scenario";
+import { generateDocumentNow } from "../../../../test/documents";
 import { createTestAdmission, createTestStudent } from "../../../../test/fixtures";
 import { buildFinanceDocumentContexts } from "./finance-document.context";
 import { createReceiptDocumentSource } from "../../../notifications/documents/receipt";
@@ -281,7 +283,7 @@ describe("immutable finance document contexts", () => {
     };
     await expect(scenario.actors.teacher.client.school.generateDocument(input)).rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(scenario.actors.platformAdmin.client.school.generateDocument(input)).rejects.toMatchObject({ code: "FORBIDDEN" });
-    const generated = await scenario.actors.accountant.client.school.generateDocument(input);
+    const generated = await generateDocumentNow(scenario.actors.accountant.client, input);
     expect(generated.artifact).toMatchObject({ documentType: "receipt", studentCount: 0, financeSource: { kind: "receipt" } });
     const downloadInput = { schoolId: scenario.school.id, artifactId: generated.artifact.id, documentType: "receipt" as const };
     const signed = await scenario.actors.platformAdmin.client.school.getDocumentDownload(downloadInput);
@@ -311,6 +313,13 @@ describe("immutable finance document contexts", () => {
     const detail = await scenario.actors.accountant.client.school.getBillingRun({ schoolId: scenario.school.id, sessionId: scenario.activeSession.id, billRunId: run.id, page: 1, limit: 20 });
     expect(detail.bills.items).toHaveLength(1);
     const bill = detail.bills.items[0]!;
+    // A billing-run bill carries the period its run recorded, as date parts; an ordinary bill is no Bill due.
+    const runContext = await buildFinanceDocumentContexts(db, scenario.school.id, { documentType: "bill", sessionId: scenario.activeSession.id, billRunId: run.id });
+    expect(runContext.contexts[0]).toMatchObject({
+      bill: { period: { cadence: "monthly", start: { iso: "2026-10-01" }, end: { iso: "2026-10-31" } } },
+      billDue: null,
+      credits: [],
+    });
     const selected = await scenario.actors.accountant.client.school.selectMarketplaceTemplate({ schoolId: scenario.school.id, documentType: "bill", slug: "bill-default", expectedRevisionId: null });
     expect(selected.artifact.pageSize).toBe("half");
     const input = { schoolId: scenario.school.id, source: { documentType: "bill" as const, sessionId: scenario.activeSession.id, billRunId: run.id }, templateRevisionId: selected.artifact.id };
@@ -326,7 +335,7 @@ describe("immutable finance document contexts", () => {
     expect(after.html).toContain(scenario.admission.name);
     expect(after.html).not.toContain(renamed);
 
-    const generated = await scenario.actors.accountant.client.school.generateDocument(input);
+    const generated = await generateDocumentNow(scenario.actors.accountant.client, input);
     expect(generated.artifact.pageSize).toBe("half");
     expect(generated.artifact.financeSource).toEqual({ kind: "bill", admissionIds: [scenario.admission.id], billIds: [bill.id], billRunId: run.id });
     const signed = await scenario.actors.accountant.client.school.getDocumentDownload({ schoolId: scenario.school.id, artifactId: generated.artifact.id, documentType: "bill" });
@@ -461,7 +470,7 @@ describe("immutable finance document contexts", () => {
     expect(receiptPreview.html).toContain("Amount returned");
     expect(receiptPreview.html).toContain(refund.refundNumber);
     expect(receiptPreview.html).not.toContain("PAYMENT RECEIPT");
-    const receipt = await scenario.actors.accountant.client.school.generateDocument(receiptInput);
+    const receipt = await generateDocumentNow(scenario.actors.accountant.client, receiptInput);
     const receiptDownload = await scenario.actors.accountant.client.school.getDocumentDownload({ schoolId: scenario.school.id, artifactId: receipt.artifact.id, documentType: "receipt" });
     await expectA4Pdf(receiptDownload.url, 1);
 
@@ -472,7 +481,7 @@ describe("immutable finance document contexts", () => {
     expect(statementPreview.html).toContain(payment.receiptNumber);
     expect(statementPreview.html).toContain(refund.refundNumber);
     expect(statementPreview.reviewHash).toMatch(/^[a-f0-9]{64}$/);
-    const statement = await scenario.actors.accountant.client.school.generateDocument({ schoolId: scenario.school.id, source: { ...statementSource, expectedReviewHash: statementPreview.reviewHash! }, templateRevisionId: statementTemplate.artifact.id });
+    const statement = await generateDocumentNow(scenario.actors.accountant.client, { schoolId: scenario.school.id, source: { ...statementSource, expectedReviewHash: statementPreview.reviewHash! }, templateRevisionId: statementTemplate.artifact.id });
     const statementDownload = await scenario.actors.accountant.client.school.getDocumentDownload({ schoolId: scenario.school.id, artifactId: statement.artifact.id, documentType: "statement" });
     await expectA4Pdf(statementDownload.url, 1);
   });
@@ -491,5 +500,7 @@ describe("immutable finance document contexts", () => {
     expect(preview.reviewHash).toMatch(/^[a-f0-9]{64}$/);
     await post("statement-stale-second");
     await expect(scenario.actors.accountant.client.school.generateDocument({ schoolId: scenario.school.id, source: { ...source, expectedReviewHash: preview.reviewHash! }, templateRevisionId: selected.artifact.id })).rejects.toMatchObject({ code: "CONFLICT" });
+    // Refused at start: no job was queued.
+    expect(await db.select().from(documentGenerationJobTable).where(eq(documentGenerationJobTable.schoolId, scenario.school.id))).toHaveLength(0);
   });
 });

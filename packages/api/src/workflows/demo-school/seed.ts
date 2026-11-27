@@ -241,17 +241,36 @@ const questionPaperSeedSchema = z
     }
   });
 
+/**
+ * Demo quick papers (docs/question-papers.md "Quick papers in a school"):
+ * papers not tied to an exam plan, printed with the school's template. Their
+ * content is a built-in worked example; their details (what the template
+ * prints) are named here, the class being the placed demo class's label.
+ */
+const quickPaperSeedSchema = z.object({
+  key: slugSchema,
+  /** Which built-in example is version 1. */
+  example: z.enum(['hindi-maths', 'english-science']),
+  subjectName: z.string().min(1).max(160),
+  examName: z.string().min(1).max(160),
+  maxMarks: z.number().int().min(1).max(1000),
+  classFrom: z.enum(['seniormost', 'juniormost']),
+  savedDaysAgo: z.number().int().min(1).max(120),
+});
+
 const questionPapersSeedSchema = z
   .object({
     /** Local wall-clock hours of the back-dated upload and save times. */
     localHours: z.object({ uploaded: z.number().int().min(0).max(23), saved: z.number().int().min(0).max(23) }),
     papers: z.array(questionPaperSeedSchema).min(1),
+    quickPapers: z.array(quickPaperSeedSchema),
   })
   .superRefine((value, context) => {
     if (value.localHours.saved <= value.localHours.uploaded) {
       context.addIssue({ code: 'custom', path: ['localHours'], message: 'A version saved on the day of the upload is saved after it.' });
     }
-    if (new Set(value.papers.map((paper) => paper.key)).size !== value.papers.length) {
+    const keys = [...value.papers, ...value.quickPapers].map((paper) => paper.key);
+    if (new Set(keys).size !== keys.length) {
       context.addIssue({ code: 'custom', path: ['papers'], message: 'Question paper keys must be unique' });
     }
   });

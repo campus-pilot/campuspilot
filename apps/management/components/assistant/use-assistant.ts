@@ -1,5 +1,6 @@
 'use client';
 
+import type { AssistantEditorSource } from '@campuspilot/assistant-contract/template-editing';
 import type { AssistantAttachmentRef, AssistantMessageSeed } from '@campuspilot/assistant-contract/attachments';
 import {
   assistantConversationAttention,
@@ -535,12 +536,21 @@ export function useSendAssistantMessage(schoolId: string, surface: AssistantSurf
    * it (in the order shown; only their ids go to the server); `seed` names the
    * screen a new conversation starts from and is valid only without a
    * `conversationId`; `shareWithPaper` shares that new conversation with the
-   * seed's question paper; `tier` picks Fast or Pro for this message.
+   * seed's question paper; `tier` picks Fast or Pro for this message;
+   * `editorSource` is the template editor's unsaved source, when the model
+   * does not hold it yet (docs/document-system.md).
    */
   const send = (
     text: string,
     conversationId: string | null,
-    extras: { attachments?: AssistantAttachmentRef[]; seed?: AssistantMessageSeed | null; shareWithPaper?: boolean; screen?: boolean; tier?: AssistantModelTier } = {},
+    extras: {
+      attachments?: AssistantAttachmentRef[];
+      seed?: AssistantMessageSeed | null;
+      shareWithPaper?: boolean;
+      screen?: boolean;
+      tier?: AssistantModelTier;
+      editorSource?: AssistantEditorSource | null;
+    } = {},
   ) => {
     const clientRequestId = crypto.randomUUID();
     return mutation
@@ -554,6 +564,7 @@ export function useSendAssistantMessage(schoolId: string, surface: AssistantSurf
         ...(extras.attachments?.length ? { attachments: extras.attachments } : {}),
         ...(extras.seed && !conversationId ? { seed: extras.seed, shareWithPaper: extras.shareWithPaper ?? false } : {}),
         ...(extras.tier === 'pro' ? { tier: 'pro' as const } : {}),
+        ...(extras.editorSource ? { editorSource: extras.editorSource } : {}),
       })
       .catch((error: unknown) => {
         // The composer marks the missing files and keeps the words, so no failed copy of the message stays whose Retry would fail the same way.

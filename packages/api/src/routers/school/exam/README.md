@@ -61,10 +61,11 @@ legacy plan was deleted).
   the shared removal guard passes; these rows never block a removal themselves.
   `deleteClass` is a CONFLICT with a clear reason while the class takes part in
   any exam (instead of a foreign key error); take it out of the exam first.
-- `updateExamClasses` needs only the exam plan **update** permission although
-  it creates and deletes plans: changing the classes is one edit of the
-  existing plan, and every role holding it also holds plan create and delete
-  (`grants.rego`). If those grants ever diverge, revisit this.
+- `updateExamClasses` needs the exam plan **update** permission, plus
+  `CREATE_EXAM_PLAN` when the change creates any plan (an added class or a
+  ticked subject) and `DELETE_EXAM_PLAN` when it deletes any (a removed class
+  with plans or an unticked subject), checked for the input's school once the
+  change is known. Today every role with update holds both (`grants.rego`).
 - Reads that list an exam's classes use the row: `getExamContext.classes` (the
   timetable editor's columns) lists only classes taking part (none before the
   plan exists); `listExamClasses` lists classes taking part that have plans;
@@ -82,6 +83,85 @@ legacy plan was deleted).
 - Migration 0076 backfills the rows once from what existed: classes with
   plans, plus the timetable columns of every exam (with or without plans), so
   existing timetables keep rendering their columns.
+
+## Subjects offered in an exam
+
+Subjects live on the class (`class.config.subjects`). Every subject states where
+it is offered, `attachment` (migration 0082 backfilled `{ kind: 'school' }`):
+
+- `{ kind: 'school' }`: a classroom subject, offered in every examination.
+- `{ kind: 'exam', exams: [{ sessionId, examSlug }] }`: added from an
+  examination and offered only there. `exams` holds exactly one exam today; it
+  is a list so reuse by later exams is a relaxation of `.length(1)` with no data
+  migration. Never read `exams[0]`: ask `isSubjectOfferedInExam`
+  (`packages/db/src/schema/jsonb/class-config.ts`).
+
+Whether a subject takes part in an exam stays the existence of its `exam_plan`
+row. Every place that offers a class's subjects for an exam uses
+`isSubjectOfferedInExam` / `subjectsOfferedInExam`: the plan preview, generation
+and `updateExamClasses` (`prepareExamPlan`), legacy `createExamPlan` (refuses a
+subject of another exam), timetable validation, and `getExamContext`. Question
+papers need a plan of that exam, class, subject and mode
+(`resolvePaperScope`), so a subject of another exam never reaches them.
+`listClasses.subjectCount` (and the classroom's "No subjects" warning) counts
+classroom subjects only.
+
+`generateExamPlan` and `updateExamClasses` take an optional `subjects` map
+(class ID → chosen slugs, at least one each, at most 500 classes): a joining
+class left out plans every offered subject, so existing callers are unchanged.
+The preview says per subject whether it has its plan (`planned`). In
+`updateExamClasses` a class that keeps taking part may be in the map too: a
+chosen subject without a plan gets one (same status, marks and modes rules as
+an added class) and a planned subject left out loses it, refused while that
+plan has saved results, the class has question papers for the subject, or a
+timetable (draft or published) schedules it; chat conversations shared to its
+papers are unshared. Shared attendance/activity assessments and remarks belong
+to the student and the exam, not a subject, so they do not block it. A kept
+class left out of the map keeps its plans. The configuration version covers
+every class's offered subjects and `planned`, so a choice made on a stale review
+is refused as a changed review. An invalid subject blocks only when it would get
+a plan.
+
+Subject procedures (`class/class-subject.service.ts`), all locking the active
+session FOR SHARE and then the class row FOR UPDATE:
+
+- `addClassSubject` (`UPDATE_CLASS_CONFIGURATION`) merges one subject (CONFLICT
+  for a slug the class has). Exam-only (`attachment.kind = 'exam'`) also needs
+  `CREATE_EXAM_PLAN`; the exam must be in the active session, not completed and
+  not released to the Cadet Portal; when its plan exists and the class takes
+  part, the subject's plan is created in the same transaction. A classroom
+  subject gets a plan in every exam the class takes part in whose plan exists
+  and that can still change; exams that cannot change are skipped. When at least
+  one plan would be created the caller must hold `CREATE_EXAM_PLAN` too, else
+  FORBIDDEN: plans are never created without it, and never skipped because of
+  the caller's role. New plans follow `updateExamClasses`: 100 marks, the
+  subject's modes, `active` once the exam started, otherwise `draft`.
+- `moveClassSubjectToClassroom` makes an exam-only subject a classroom subject,
+  under the same plan-creation and permission rule.
+- `updateClassSubject` changes one subject's name and modes and optionally its
+  slug. A new slug is a rename (the key moves with its attachment, no plans are
+  created, no exam permission needed), refused while the subject has any plan.
+  `removeClassSubject` removes one subject, refused while it has any plan. Both
+  change one key, so a subject added meanwhile is never overwritten.
+- `updateClassConfiguration` (whole configuration) keeps every existing
+  subject's attachment (sending a different one is BAD_REQUEST), treats every
+  new subject as a classroom subject under the same rule, and refuses leaving
+  out a subject that has plans. It cannot express a rename: a changed slug is a
+  removal plus a new subject (use `updateClassSubject`). `createClass` stores
+  only classroom subjects.
+- Lock order of every subject change: the active session FOR SHARE, its
+  `exam_lifecycle` rows FOR SHARE, then the class row FOR UPDATE (the order
+  legacy `createExamPlan` takes them in).
+- Reads: `class.config` is read through `readStoredClassConfig` (the column's
+  `fromDriver`), so a subject saved without `attachment` (before 0082, or by
+  the previous release during the rollout) reads as a classroom subject. The
+  `subject-attachment-backfill` data migration stores it explicitly after the
+  rollout; a platform admin can request it again.
+- Removing an exam (`deleteExam`, an exam dropped or its slug changed through
+  `updateSession`, `deleteSession`) drops it from every attached subject's
+  `exams` in the same transaction; a subject left with none is removed
+  (`detachExamsFromSubjects`). An exam with plans cannot be removed, so such a
+  subject never has plans.
 
 ## Lifecycle and student-wide API
 
@@ -239,7 +319,15 @@ or replaces a grid; `deleteExamTimetable` removes it. Columns are ordered, uniqu
 IDs of classes taking part, so the plan must exist first (before it only a grid
 without columns is accepted). Rows have stable unique IDs, real ISO dates, local `HH:mm` times
 and an end time strictly after the start time. Cells allow null, one subject/mode,
-or a nonempty array of subject/mode pairs configured for that class. Duplicate
+or a nonempty array of subject/mode pairs of subjects that have their plan in
+this exam for that class, with a mode of that plan (an offered subject left out
+of the plan cannot be scheduled, so a cell never outlives a subject that is
+removed or renamed). `getExamContext` lists only those subjects, each with
+its plan's modes (`modeConfig` slugs, percentage and maximum marks, named from
+the class subject where it still has the mode), so the editor offers exactly
+what is accepted. `deleteExamPlan` and unticking a subject in
+`updateExamClasses` are refused while the timetable schedules that subject for
+the class. Duplicate
 pairs and overlapping slots for a class are rejected. A completed plan freezes
 the exam's shared timetable until that plan is reopened.
 

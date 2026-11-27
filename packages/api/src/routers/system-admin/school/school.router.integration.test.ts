@@ -11,6 +11,12 @@ import {
   createTestSchool,
   type UserSession,
 } from '../../../../test/fixtures';
+import { selectedTemplateSlugs } from '../../../../test/documents';
+import { DEFAULT_DOCUMENT_TEMPLATE_SLUGS } from '../../school/document/document.catalog';
+import { HeadObjectCommand } from '@aws-sdk/client-s3';
+import { artifactTable, schoolDocumentTemplateTable } from '@campuspilot/db/schema/artifact';
+import { env } from '@campuspilot/env/server';
+import { getS3Client } from '@campuspilot/s3/client';
 
 describe('systemAdmin.school Router Integration', () => {
   let adminSession: UserSession;
@@ -45,6 +51,8 @@ describe('systemAdmin.school Router Integration', () => {
       // A new school is not suspended.
       expect(created.suspendedAt).toBeNull();
       expect(created.suspendedReason).toBeNull();
+      // Every new school starts with the CampusPilot Standard templates selected.
+      expect(await selectedTemplateSlugs(created.id)).toEqual(DEFAULT_DOCUMENT_TEMPLATE_SLUGS);
     });
 
     it('rejects invalid slug format with validation error', async () => {
@@ -285,6 +293,28 @@ describe('systemAdmin.school Router Integration', () => {
       await expect(client.systemAdmin.deleteSchool({ id: school.id })).resolves.toMatchObject({ id: school.id });
       expect(await db.select().from(schoolFeatureFlagTable).where(eq(schoolFeatureFlagTable.schoolId, school.id))).toEqual([]);
       await expect(client.systemAdmin.getSchool({ id: school.id })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('deletes a new school with its default templates, and refuses one with a generated document', async () => {
+      const client = createTestClient(adminSession);
+      const created = await client.systemAdmin.addSchool({ slug: `school-delete-${randomUUID().toLowerCase()}`, name: 'Short-lived School', location: 'Pune', tier: 'plus' });
+      const templates = await db.select().from(artifactTable).where(eq(artifactTable.schoolId, created.id));
+      expect(templates.length).toBeGreaterThan(0);
+      await expect(client.systemAdmin.deleteSchool({ id: created.id })).resolves.toMatchObject({ id: created.id });
+      expect(await db.select().from(artifactTable).where(eq(artifactTable.schoolId, created.id))).toEqual([]);
+      expect(await db.select().from(schoolDocumentTemplateTable).where(eq(schoolDocumentTemplateTable.schoolId, created.id))).toEqual([]);
+      for (const template of templates)
+        await expect(getS3Client().send(new HeadObjectCommand({ Bucket: env.S3_BUCKET, Key: template.s3Key }))).rejects.toMatchObject({ $metadata: { httpStatusCode: 404 } });
+
+      // A school with real data (here a generated PDF) still cannot be deleted, and keeps its templates.
+      const used = await client.systemAdmin.addSchool({ slug: `school-used-${randomUUID().toLowerCase()}`, name: 'Used School', location: 'Pune', tier: 'plus' });
+      const [revision] = await db.select().from(artifactTable).where(eq(artifactTable.schoolId, used.id)).limit(1);
+      await db.insert(artifactTable).values({
+        schoolId: used.id, kind: 'pdf', documentType: 'id_card', name: 'Student IDs', s3Key: `schools/${used.id}/documents/${randomUUID()}.pdf`,
+        contentType: 'application/pdf', byteSize: 1, sha256: 'a'.repeat(64), templateRevisionId: revision!.id, sessionId: 'session', createdBy: adminSession.user.id,
+      });
+      await expect(client.systemAdmin.deleteSchool({ id: used.id })).rejects.toBeDefined();
+      expect(await db.select().from(schoolDocumentTemplateTable).where(eq(schoolDocumentTemplateTable.schoolId, used.id))).not.toEqual([]);
     });
 
     it('returns NOT_FOUND when deleting non-existent school', async () => {

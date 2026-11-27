@@ -19,10 +19,16 @@ export function timetableSchema(context: ExamContextDto) {
         Object.entries(row.cells).forEach(([classId, cell]) =>
           (cell === null ? [] : Array.isArray(cell) ? cell : [cell]).forEach(
             (pair, pairIndex) => {
-              const subject = context.classes.find(
+              // The context lists each planned subject with its plan's
+              // modes, which is exactly what the server accepts.
+              const subjects = context.classes.find(
                 (item) => item.id === classId,
-              )?.subjects[pair.subjectSlug];
-              if (!subject?.examModes[pair.modeSlug])
+              )?.subjects;
+              const subject =
+                subjects && Object.hasOwn(subjects, pair.subjectSlug)
+                  ? subjects[pair.subjectSlug]
+                  : undefined;
+              if (!subject || !Object.hasOwn(subject.examModes, pair.modeSlug))
                 ctx.addIssue({
                   code: 'custom',
                   path: [

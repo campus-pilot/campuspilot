@@ -2,8 +2,6 @@
 
 import type { ReactNode } from 'react';
 import { useParams, usePathname } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
-import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import {
   ManagementShell,
   type ManagementShellState,
@@ -13,14 +11,10 @@ import {
   type ManagementPageDescriptor,
 } from '@/components/management-route';
 import type { SchoolRouteParams } from '@/components/school-route';
-import {
-  useSchoolSessions,
-  useStoredSchoolSessionId,
-} from '@/components/session-selection';
+import { useSchoolShellSessions } from '@/components/session-selection';
 import { SchoolDocumentHead } from '@/components/school-document-head';
 import { RealSchoolOnly } from '@/components/personal-space/school-kind-gates';
 import { SessionSwitcher } from '@/components/session-switcher';
-import { orpc } from '@/lib/orpc';
 import { useSchoolFeatureCheck } from '@/components/require-feature';
 import { settingsNavigation } from '@/components/settings-navigation';
 import { schoolSettingsPage } from './_route';
@@ -78,28 +72,9 @@ function SchoolSettingsShell({
   const pathname = usePathname();
   const routeParams = useParams();
   const schoolId = String(routeParams.schoolId ?? '');
-  const storedSessionId = useStoredSchoolSessionId(schoolId);
   const page = pages.find((candidate) => candidate.matches(pathname));
   const hasFeature = useSchoolFeatureCheck(schoolId);
-  const sessionPermissionQuery = useQuery(
-    orpc.authorization.checkPermissions.queryOptions({
-      input: {
-        permissions: [
-          {
-            action: SCHOOL_ACTIONS.LIST_SESSIONS,
-            resource: { kind: 'school', schoolId },
-          },
-        ],
-      },
-    }),
-  );
-  const sessionsQuery = useSchoolSessions(
-    schoolId,
-    sessionPermissionQuery.data?.results[0] === true,
-  );
-  const sessions = sessionsQuery.data ?? [];
-  const activeSessionId = sessions.find((session) => session.isActive)?.id;
-  const selectedSessionId = storedSessionId ?? activeSessionId;
+  const { canListSessions, sessions, hasNoSessions, activeSessionId, selectedSessionId } = useSchoolShellSessions(schoolId);
   const params = {
     schoolId,
     sessionId: String(routeParams.sessionId ?? ''),
@@ -112,7 +87,7 @@ function SchoolSettingsShell({
     },
     navigation: settingsNavigation({
       schoolId,
-      canViewSessions: sessionPermissionQuery.data?.results[0] === true,
+      canViewSessions: canListSessions,
       has: hasFeature,
       activeSessionId,
       selectedSessionId,
@@ -123,7 +98,7 @@ function SchoolSettingsShell({
         schoolId={schoolId}
         selectedSessionId={selectedSessionId}
         sessions={sessions}
-        hasNoSessions={sessionsQuery.isSuccess && sessions.length === 0}
+        hasNoSessions={hasNoSessions}
       />
     ),
     navbarActions: resolveManagementPageActions(page, params),

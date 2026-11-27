@@ -8,6 +8,7 @@ import {
   examQuestionPaperJobTable,
   examQuestionPaperTable,
   examQuestionPaperVersionTable,
+  type QuestionPaperPrintedDetails,
 } from '@campuspilot/db/schema/exam-question-paper';
 import { encodedImageBytes } from '@campuspilot/assistant-contract/attachments';
 import {
@@ -24,7 +25,7 @@ import { convertDocumentPdf } from '../document/document.render';
 import { assertPersonalSpaceStorageRoom, assertStandaloneVersionRoom } from '../../../personal-space/personal-space.storage';
 import { documentDownloadUrl, persistDocumentObject } from '../document/document.storage';
 import { attachmentFigureIds, attachmentFigureProblems, chatFiguresOf, convertAttachmentFigures, isAttachmentFigureId, type ChatFigures } from './question-paper.attachments';
-import { buildQuestionPaperContext } from './question-paper.context';
+import { buildPaperContext, currentQuickPaperPrintedDetails } from './question-paper.print-context';
 import { conversationRefOf, isPaperChat, type PaperConversationRef } from './question-paper.conversations';
 import { createMathRenderer, renderMathSpans } from './question-paper.math';
 import {
@@ -35,24 +36,30 @@ import {
   type PaperRow,
   type VersionRow,
 } from './question-paper.records';
-import { estimatedBodyBytes, figureIdsToPlaceholders } from './question-paper.body';
+import { estimatedBodyBytes, figureIdsToPlaceholders, fragmentFigureIds } from './question-paper.body';
 import { assertCopySourceAllowed, copySourceFigures, copySourceNotFoundError, storedFigureIds } from './question-paper.copy';
 import type { PaperKey } from './question-paper.dto';
 import {
+  loadFigureAssets,
   QUESTION_PAPER_BODY_MAX_BYTES,
   QUESTION_PAPER_FIGURES_MAX_BYTES,
   readPinnedQuestionPaperTemplate,
   renderQuestionPaperBody,
   renderQuestionPaperDocument,
+  renderQuestionPaperTemplate,
   renderStandaloneQuestionPaperDocument,
+  renderStandaloneQuestionPaperShell,
   selectedQuestionPaperTemplate,
 } from './question-paper.render';
+import { convertQuestionPaperDocx, DOCX_CONTENT_TYPE, sharedDocxConversion } from './question-paper.docx-convert';
+import { questionPaperDocxHtml } from './question-paper.docx-html';
 import { sanitizeQuestionPaperBody, type SanitizedQuestionPaperBody } from './question-paper.sanitize';
 import {
   assertResolvedPaperWritable,
   assertResolvedPaperWritableLocked,
   isStandalonePaper,
   paperSchoolIdOf,
+  printLayoutOf,
   type PaperScope,
   type ResolvedPaper,
 } from './question-paper.scope';
@@ -395,8 +402,34 @@ async function paperNamesOf(db: DatabaseExecutor, scope: ResolvedPaper): Promise
   };
 }
 
-/** The template a version prints with: a school template revision for an exam paper, the built-in shell (no revision) for a standalone one. */
-type PrintTemplate = { kind: 'exam'; revisionId: string; name: string; content: string } | { kind: 'standalone' };
+/**
+ * The template a version prints with: a school template revision for a paper
+ * that prints with its school's template (an exam paper, a quick paper), the
+ * built-in shell (no revision) for a `plain` one (`printLayoutOf`).
+ */
+type PrintTemplate = { kind: 'template'; revisionId: string; name: string; content: string } | { kind: 'plain' };
+
+/**
+ * The names a saved version's files carry: the details its heading printed
+ * for a quick paper's version (`printed_details`), so an old version is named
+ * as it prints; otherwise the paper's names ({@link paperNamesOf}).
+ */
+async function versionNamesOf(db: DatabaseExecutor, scope: ResolvedPaper, version: VersionRow): Promise<PaperNames> {
+  if (version.printedDetails) return { kind: 'standalone', details: version.printedDetails };
+  return paperNamesOf(db, scope);
+}
+
+/**
+ * The heading a new version of a quick paper prints and keeps
+ * (`printed_details`, `currentQuickPaperPrintedDetails`): the names and marks
+ * the save states, else the paper's as stored, with the school's active
+ * session. Null for any other paper: an exam paper prints its plan's facts, a
+ * plain paper carries its heading in its body.
+ */
+async function printedDetailsFor(db: DatabaseExecutor, scope: ResolvedPaper, stated: QuestionPaperDetails | undefined): Promise<QuestionPaperPrintedDetails | null> {
+  if (!isStandalonePaper(scope) || printLayoutOf(scope) !== 'school_template') return null;
+  return currentQuickPaperPrintedDetails(db, scope, stated);
+}
 
 /** The planned maximum marks a new version of this paper snapshots: the exam plan's, none for a standalone paper. */
 const planMaxMarksOf = (scope: ResolvedPaper): number | null => (isStandalonePaper(scope) ? null : scope.planMaxMarks);
@@ -540,14 +573,15 @@ async function assertStandaloneSaveRoom(db: DatabaseExecutor, scope: ResolvedPap
 
 /**
  * The template a new version of this paper prints with: the school's
- * currently selected question paper template for an exam paper (none
- * selected is PRECONDITION_FAILED), the built-in shell for a standalone one.
+ * currently selected question paper template for a paper that prints with
+ * it (none selected is PRECONDITION_FAILED), the built-in shell for a
+ * `plain` one.
  */
 async function printTemplateFor(db: DatabaseExecutor, scope: ResolvedPaper): Promise<PrintTemplate> {
-  if (isStandalonePaper(scope)) return { kind: 'standalone' };
-  const template = await selectedQuestionPaperTemplate(db, scope.key.schoolId);
+  if (printLayoutOf(scope) === 'plain') return { kind: 'plain' };
+  const template = await selectedQuestionPaperTemplate(db, paperSchoolIdOf(scope));
   if (!template) throw templateMissingError();
-  return { kind: 'exam', ...template };
+  return { kind: 'template', ...template };
 }
 
 /** CONFLICT unless the paper's `latest_version_no` is `expected` (no expectation: the AI job). An early look, not under the lock. */
@@ -642,21 +676,31 @@ export async function copyQuestionPaperVersion(
 
 /**
  * The HTML a version of this paper prints as: the school's template with the
- * exam's context for an exam paper, the built-in shell for a standalone one.
- * `planMaxMarks` is what the template's header shows (the version's own
- * snapshot when an old version is printed again).
+ * paper's context (`buildPaperContext`: an exam paper's plan facts, a quick
+ * paper's session and details), or the built-in shell for a `plain` paper.
+ * `planMaxMarks` is what an exam paper's header shows (the version's own
+ * snapshot when an old version is printed again); `printed` is a quick
+ * paper's heading to print (a save's, or a stored version's snapshot).
  */
 async function renderPaperDocument(
   db: DatabaseExecutor,
-  input: { scope: ResolvedPaper; template: PrintTemplate; body: Awaited<ReturnType<typeof renderQuestionPaperBody>>; versionNo: number; planMaxMarks: number | null; generatedAt?: Date },
+  input: {
+    scope: ResolvedPaper;
+    template: PrintTemplate;
+    body: Awaited<ReturnType<typeof renderQuestionPaperBody>>;
+    versionNo: number;
+    planMaxMarks: number | null;
+    printed?: QuestionPaperPrintedDetails;
+    generatedAt?: Date;
+  },
 ): Promise<string> {
   const { scope, template, body } = input;
-  if (isStandalonePaper(scope) || template.kind === 'standalone') {
-    if (!isStandalonePaper(scope) || template.kind !== 'standalone') throw new Error('A question paper and its print template are of different kinds.');
+  if (template.kind === 'plain' || printLayoutOf(scope) === 'plain') {
+    if (template.kind !== 'plain' || printLayoutOf(scope) !== 'plain') throw new Error('A question paper and its print template are of different layouts.');
     return renderStandaloneQuestionPaperDocument(body);
   }
   const context = await measure('qp.context', () =>
-    buildQuestionPaperContext(db, { ...scope, planMaxMarks: input.planMaxMarks ?? scope.planMaxMarks }, { versionNo: input.versionNo }, input.generatedAt),
+    buildPaperContext(db, scope, { versionNo: input.versionNo, planMaxMarks: input.planMaxMarks, printed: input.printed }, input.generatedAt),
   );
   return renderQuestionPaperDocument({ template, context, body });
 }
@@ -691,7 +735,12 @@ async function renderAndStore(
     paperId: paper?.id ?? null,
     html: checked.html,
   });
-  const html = await renderPaperDocument(db, { scope, template: input.template, body, versionNo, planMaxMarks });
+  // The details this save stores on the paper (a standalone paper's; `keep` stores none).
+  const details = isStandalonePaper(scope) && input.details && input.details !== 'keep' ? input.details : undefined;
+  // A quick paper's heading prints the details this very save states (its row's when the save keeps them), and the
+  // version keeps them, so it prints the same later (`printed_details`).
+  const printedDetails = await printedDetailsFor(db, scope, details);
+  const html = await renderPaperDocument(db, { scope, template: input.template, body, versionNo, planMaxMarks, printed: printedDetails ?? undefined });
   const pdf = await convertDocumentPdf(html, 'question_paper', input.signal);
   // A standalone paper's PDF is named after the details this very save states, or the paper's own when it keeps them.
   const names: PaperNames =
@@ -709,7 +758,7 @@ async function renderAndStore(
       s3Key: `schools/${schoolId}/documents/${artifactId}.pdf`,
       contentType: 'application/pdf',
       pageSize: 'full',
-      templateRevisionId: input.template.kind === 'exam' ? input.template.revisionId : null,
+      templateRevisionId: input.template.kind === 'template' ? input.template.revisionId : null,
       ...artifactScopeOf(scope),
       studentIds: [],
       studentCount: 0,
@@ -753,6 +802,7 @@ async function renderAndStore(
       await tx.insert(examQuestionPaperVersionTable).values({
         paperId: locked.id,
         paperKind: locked.kind,
+        paperPrintLayout: locked.printLayout,
         schoolId,
         versionNo,
         contentHtml: checked.html,
@@ -763,14 +813,14 @@ async function renderAndStore(
         sourceConversationId: source.kind === 'agent' ? source.conversationId : null,
         sourceVersionId: source.kind === 'copy' ? source.sourceVersionId : null,
         planMaxMarks,
+        printedDetails,
         warnings: checked.notices,
-        templateRevisionId: input.template.kind === 'exam' ? input.template.revisionId : null,
+        templateRevisionId: input.template.kind === 'template' ? input.template.revisionId : null,
         pdfArtifactId: artifact.id,
         createdBy: input.userId,
       });
-      // A standalone paper's details are not revisioned: this save's details replace all four, in this transaction
+      // A standalone paper's details are not revisioned: this save's details replace all five, in this transaction
       // (`keep`: a version that states none leaves them as they are).
-      const details = isStandalonePaper(scope) && input.details && input.details !== 'keep' ? input.details : null;
       await tx
         .update(examQuestionPaperTable)
         .set({
@@ -782,6 +832,7 @@ async function renderAndStore(
                 detailsClassName: details.className,
                 detailsSubjectName: details.subjectName,
                 detailsExamName: details.examName,
+                detailsMaxMarks: details.maxMarks,
               }
             : {}),
         })
@@ -825,19 +876,27 @@ export async function renderStoredVersionHtml(
   const body = await renderQuestionPaperBody(db, { schoolId, paperId: version.paperId, html: version.contentHtml });
   // The maximum marks are the saved fact (`plan_max_marks`), not the plan as it is today: an edited plan must not change
   // an old version's preview or a restored PDF. Class, subject, mode and exam names still come from the live scope.
-  const html = await renderPaperDocument(db, { scope, template, body, versionNo: version.versionNo, planMaxMarks: version.planMaxMarks, generatedAt });
-  return { html, templateName: template.kind === 'exam' ? template.name : null };
+  const html = await renderPaperDocument(db, {
+    scope,
+    template,
+    body,
+    versionNo: version.versionNo,
+    planMaxMarks: version.planMaxMarks,
+    printed: version.printedDetails ?? undefined,
+    generatedAt,
+  });
+  return { html, templateName: template.kind === 'template' ? template.name : null };
 }
 
 /**
  * The template a stored version prints with again: the revision it pinned
- * (an exam paper), or the built-in shell (a standalone paper, whose versions
- * pin none: `exam_question_paper_version_template_check`).
+ * (a paper that prints with its school's template), or the built-in shell (a
+ * `plain` paper, whose versions pin none: `exam_question_paper_version_template_check`).
  */
 async function pinnedPrintTemplateOf(db: DatabaseExecutor, scope: ResolvedPaper, version: VersionRow): Promise<PrintTemplate> {
-  if (isStandalonePaper(scope)) return { kind: 'standalone' };
-  if (version.templateRevisionId === null) throw new Error(`Exam question paper version ${version.id} has no template revision.`);
-  return { kind: 'exam', ...(await readPinnedQuestionPaperTemplate(db, scope.key.schoolId, version.templateRevisionId)) };
+  if (printLayoutOf(scope) === 'plain') return { kind: 'plain' };
+  if (version.templateRevisionId === null) throw new Error(`Question paper version ${version.id} has no template revision.`);
+  return { kind: 'template', ...(await readPinnedQuestionPaperTemplate(db, paperSchoolIdOf(scope), version.templateRevisionId)) };
 }
 
 /** A concurrent download stored a PDF for the same version first; this one is discarded. */
@@ -881,8 +940,19 @@ export async function downloadVersionPdf(
   input: { scope: ResolvedPaper; version: VersionRow; userId: string; signal?: AbortSignal },
 ): Promise<{ url: string; fileName: string }> {
   const s3Key = await storedVersionPdfKey(db, input);
-  const fileName = downloadFileName(await paperNamesOf(db, input.scope), input.version.versionNo);
+  const fileName = downloadFileName(await versionNamesOf(db, input.scope, input.version), input.version.versionNo);
   return { url: await documentDownloadUrl(s3Key, fileName), fileName: `${fileName}.pdf` };
+}
+
+/** The format a version is downloaded in: its PDF (the default), or an editable Word file. */
+export type VersionDownloadFormat = 'pdf' | 'docx';
+
+/** A short-lived download URL for a version in the format asked for ({@link downloadVersionPdf}, {@link downloadVersionDocx}). */
+export function downloadVersion(
+  db: Database,
+  input: { scope: ResolvedPaper; version: VersionRow; userId: string; format: VersionDownloadFormat; signal?: AbortSignal },
+): Promise<{ url: string; fileName: string }> {
+  return input.format === 'docx' ? downloadVersionDocx(db, input) : downloadVersionPdf(db, input);
 }
 
 /** Prints the version again and stores the PDF as its artifact; answers with the new object's key. */
@@ -895,7 +965,7 @@ async function restoreVersionPdf(
   const { html } = await renderStoredVersionHtml(db, scope, version);
   const pdf = await convertDocumentPdf(html, 'question_paper', input.signal);
   const artifactId = generateId('artifact');
-  const name = artifactName(await paperNamesOf(db, scope), version.versionNo);
+  const name = artifactName(await versionNamesOf(db, scope, version), version.versionNo);
   const s3Key = `schools/${schoolId}/documents/${artifactId}.pdf`;
   await persistDocumentObject(
     db,
@@ -925,6 +995,133 @@ async function restoreVersionPdf(
         .where(and(eq(examQuestionPaperVersionTable.id, version.id), stillWithout))
         .returning({ id: examQuestionPaperVersionTable.id });
       if (updated.length === 0) throw new PdfAlreadyStoredError();
+    },
+  );
+  return s3Key;
+}
+
+/** A concurrent download stored a Word file for the same version first; this one is discarded. */
+class DocxAlreadyStoredError extends Error {}
+
+/**
+ * The storage key of a version's Word (.docx) file (docs/question-papers.md
+ * "Word download"). It is made on the version's FIRST Word download, from the
+ * same inputs as its PDF (the stored fragment, the paper's own figures, the
+ * pinned template revision or the standalone shell), stored as an artifact
+ * of kind `docx` and reused by every later download. A Word file whose
+ * artifact was deleted (the pointer is then null) is made again. Two first
+ * downloads racing keep the first file and discard the second, like
+ * {@link storedVersionPdfKey}.
+ *
+ * A download is a read (a suspended school or a personal space past its
+ * trial can still download), and making the file is part of answering it, as
+ * restoring a removed PDF is. Concurrent first downloads of one version share
+ * one conversion in this process, within one deadline, at most two
+ * conversions at a time (`sharedDocxConversion`). In a personal space the file counts toward the
+ * storage quota like the version's PDF: a full space is refused
+ * (`PERSONAL_SPACE_STORAGE_FULL`) before anything is converted, and again in
+ * the transaction that records it.
+ */
+export async function storedVersionDocxKey(
+  db: Database,
+  input: { scope: ResolvedPaper; version: VersionRow; userId: string; signal?: AbortSignal },
+): Promise<string> {
+  const { scope } = input;
+  let version = input.version;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (version.docxArtifactId) {
+      const [artifact] = await db
+        .select({ s3Key: artifactTable.s3Key, status: artifactTable.status })
+        .from(artifactTable)
+        .where(and(eq(artifactTable.id, version.docxArtifactId), eq(artifactTable.schoolId, paperSchoolIdOf(scope))))
+        .limit(1);
+      if (artifact?.status === 'ready') return artifact.s3Key;
+    }
+    const current = version;
+    // Early look: a full personal space is refused before any conversion (any other school has no quota).
+    await assertPersonalSpaceStorageRoom(db, { schoolId: paperSchoolIdOf(scope), addedBytes: 0, lock: false });
+    const made = await sharedDocxConversion(current.id, input.signal, (deadline) =>
+      makeVersionDocx(db, { scope, version: current, userId: input.userId, deadline }),
+    ).catch((error: unknown) => {
+      if (error instanceof DocxAlreadyStoredError) return null;
+      throw error;
+    });
+    if (made) return made;
+    version = await getVersion(db, version.paperId, version.versionNo);
+  }
+  throw rpcError.conflict('The Word file of this version is being prepared. Try again.');
+}
+
+/** A short-lived download URL for a version's Word file ({@link storedVersionDocxKey}), named like its PDF. */
+export async function downloadVersionDocx(
+  db: Database,
+  input: { scope: ResolvedPaper; version: VersionRow; userId: string; signal?: AbortSignal },
+): Promise<{ url: string; fileName: string }> {
+  const s3Key = await storedVersionDocxKey(db, input);
+  const fileName = downloadFileName(await versionNamesOf(db, input.scope, input.version), input.version.versionNo);
+  return { url: await documentDownloadUrl(s3Key, fileName, 'docx'), fileName: `${fileName}.docx` };
+}
+
+/**
+ * The rendered template document of a stored version with the body slot still
+ * in place, exactly as its PDF prints around the body: the pinned revision with
+ * the version's own context (an exam paper), or the built-in shell (a
+ * standalone paper).
+ */
+async function storedVersionTemplateHtml(db: DatabaseExecutor, scope: ResolvedPaper, version: VersionRow): Promise<string> {
+  const template = await pinnedPrintTemplateOf(db, scope, version);
+  if (template.kind === 'plain') return renderStandaloneQuestionPaperShell();
+  const context = await measure('qp.context', () =>
+    buildPaperContext(db, scope, { versionNo: version.versionNo, planMaxMarks: version.planMaxMarks, printed: version.printedDetails ?? undefined }),
+  );
+  return measure('qp.document.render', () => renderQuestionPaperTemplate(template.content, context));
+}
+
+/** Converts the version to Word and stores the file as its artifact; answers with the new object's key. `deadline` ends the whole of it. */
+async function makeVersionDocx(
+  db: Database,
+  input: { scope: ResolvedPaper; version: VersionRow; userId: string; deadline: AbortSignal },
+): Promise<string> {
+  const { scope, version } = input;
+  const schoolId = paperSchoolIdOf(scope);
+  const template = await storedVersionTemplateHtml(db, scope, version);
+  const figures = await measure('qp.figures.load', () =>
+    loadFigureAssets(db, { schoolId, paperId: version.paperId, figureIds: fragmentFigureIds(version.contentHtml) }),
+  );
+  const html = measure('qp.docx.html', () => questionPaperDocxHtml({ fragment: version.contentHtml, figures, template }));
+  const docx = await convertQuestionPaperDocx(html, input.deadline);
+  input.deadline.throwIfAborted();
+  const artifactId = generateId('artifact');
+  const s3Key = `schools/${schoolId}/documents/${artifactId}.docx`;
+  await persistDocumentObject(
+    db,
+    {
+      id: artifactId,
+      schoolId,
+      kind: 'docx',
+      documentType: 'question_paper',
+      name: artifactName(await versionNamesOf(db, scope, version), version.versionNo),
+      s3Key,
+      contentType: DOCX_CONTENT_TYPE,
+      pageSize: 'full',
+      templateRevisionId: version.templateRevisionId,
+      ...artifactScopeOf(scope),
+      studentIds: [],
+      studentCount: 0,
+      createdBy: input.userId,
+    },
+    docx,
+    async (tx, artifact) => {
+      await assertPersonalSpaceStorageRoom(tx, { schoolId, addedBytes: artifact.byteSize, lock: true });
+      const stillWithout = version.docxArtifactId
+        ? eq(examQuestionPaperVersionTable.docxArtifactId, version.docxArtifactId)
+        : isNull(examQuestionPaperVersionTable.docxArtifactId);
+      const updated = await tx
+        .update(examQuestionPaperVersionTable)
+        .set({ docxArtifactId: artifact.id })
+        .where(and(eq(examQuestionPaperVersionTable.id, version.id), stillWithout))
+        .returning({ id: examQuestionPaperVersionTable.id });
+      if (updated.length === 0) throw new DocxAlreadyStoredError();
     },
   );
   return s3Key;

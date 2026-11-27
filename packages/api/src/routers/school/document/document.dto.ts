@@ -23,8 +23,39 @@ export const documentTypeSchema = z.enum([
   "statement",
   "notice",
   "question_paper",
+  "bill_due",
 ]);
 export type DocumentType = z.infer<typeof documentTypeSchema>;
+
+/**
+ * Document types printed with another type's template: a Bill due is a bill
+ * for one admission as of a chosen date, printed with the school's selected
+ * `bill` template revision. Such a type has its own history, jobs and
+ * permissions, but no template, marketplace designs or Settings page of its
+ * own, so every template procedure refuses it (`templateDocumentTypeSchema`).
+ */
+export const BORROWED_TEMPLATE_DOCUMENT_TYPES = ["bill_due"] as const satisfies readonly DocumentType[];
+/** The types that have school templates (every type but those in {@link BORROWED_TEMPLATE_DOCUMENT_TYPES}). */
+export const templateDocumentTypeSchema = documentTypeSchema.exclude(BORROWED_TEMPLATE_DOCUMENT_TYPES);
+export type TemplateDocumentType = z.infer<typeof templateDocumentTypeSchema>;
+/**
+ * Which template type a document of each type is printed with: its own,
+ * except a Bill due, which uses the selected `bill` revision. Exhaustive, so a
+ * new type decides explicitly.
+ */
+export const DOCUMENT_TEMPLATE_TYPE = {
+  report_card: "report_card",
+  id_card: "id_card",
+  admit_card: "admit_card",
+  timetable: "timetable",
+  bill: "bill",
+  receipt: "receipt",
+  statement: "statement",
+  notice: "notice",
+  question_paper: "question_paper",
+  bill_due: "bill",
+} as const satisfies Record<DocumentType, TemplateDocumentType>;
+export const templateTypeOf = (type: DocumentType): TemplateDocumentType => DOCUMENT_TEMPLATE_TYPE[type];
 
 /**
  * The school feature each document type belongs to (docs/feature-flags.md).
@@ -39,17 +70,20 @@ export const DOCUMENT_TYPE_FEATURE = {
   bill: "studentManagement",
   receipt: "studentManagement",
   statement: "studentManagement",
+  bill_due: "studentManagement",
   notice: "notices",
   // The question paper template belongs to the AI assistant's feature (D26).
   question_paper: "assistant",
 } as const satisfies Record<DocumentType, SchoolFeatureKey>;
 
 /** Document types whose content is finance data; each has its own permissions. */
-export const FINANCE_DOCUMENT_TYPES: ReadonlySet<DocumentType> = new Set<DocumentType>([
+export const FINANCE_DOCUMENT_TYPE_LIST = [
   "bill",
   "receipt",
   "statement",
-]);
+  "bill_due",
+] as const satisfies readonly DocumentType[];
+export const FINANCE_DOCUMENT_TYPES: ReadonlySet<DocumentType> = new Set<DocumentType>(FINANCE_DOCUMENT_TYPE_LIST);
 
 export const isFinanceDocumentType = (type: DocumentType) =>
   FINANCE_DOCUMENT_TYPES.has(type);
@@ -63,7 +97,7 @@ export const isFinanceDocumentType = (type: DocumentType) =>
  */
 export const TEMPLATE_ONLY_DOCUMENT_TYPES = ["notice", "question_paper"] as const satisfies readonly DocumentType[];
 export type TemplateOnlyDocumentType = (typeof TEMPLATE_ONLY_DOCUMENT_TYPES)[number];
-export type AcademicDocumentType = Exclude<DocumentType, "bill" | "receipt" | "statement" | TemplateOnlyDocumentType>;
+export type AcademicDocumentType = Exclude<DocumentType, (typeof FINANCE_DOCUMENT_TYPE_LIST)[number] | TemplateOnlyDocumentType>;
 /**
  * The feature every document **generated** through `previewDocument` /
  * `generateDocument` belongs to. Those procedures accept the generator types
@@ -104,7 +138,7 @@ const halfPageDocumentTypes = new Set<DocumentType>(
  * layout.
  */
 function validateTemplatePageSize(
-  value: { documentType: DocumentType; pageSize: DocumentTemplatePageSize },
+  value: { documentType: TemplateDocumentType; pageSize: DocumentTemplatePageSize },
   context: z.RefinementCtx,
 ) {
   if (value.pageSize === "half" && value.documentType === "notice") {
@@ -141,11 +175,13 @@ export const DOCUMENT_LABELS: Record<DocumentType, string> = {
   statement: "Account statements",
   notice: "Notices",
   question_paper: "Question papers",
+  bill_due: "Bills due",
 };
 const id = z.string().trim().min(1).max(100);
 export const schoolScopeSchema = z.object({ schoolId: id });
+/** Template procedures name a type that has templates; a Bill due is printed with the bill template. */
 export const templateScopeSchema = schoolScopeSchema.extend({
-  documentType: documentTypeSchema,
+  documentType: templateDocumentTypeSchema,
 });
 export const templateContentSchema = z
   .string()
@@ -183,6 +219,15 @@ export const artifactDtoSchema = z.object({
     z.object({ kind: z.literal("bill"), admissionIds: z.array(z.string()), billIds: z.array(z.string()), billRunId: z.string().nullable() }),
     z.object({ kind: z.literal("receipt"), admissionIds: z.array(z.string()), transactions: z.array(z.object({ kind: z.enum(["payment", "refund"]), id: z.string() })) }),
     z.object({ kind: z.literal("statement"), currency: z.string(), throughDate: z.string(), timeZone: z.string(), accounts: z.array(z.object({ admissionId: z.string(), highWaterSequence: z.string() })) }),
+    z.object({
+      kind: z.literal("bill_due"),
+      currency: z.string(),
+      throughDate: z.string(),
+      timeZone: z.string(),
+      period: z.object({ cadence: z.enum(["monthly", "quarterly", "yearly"]), startDate: z.string(), endDate: z.string() }),
+      /** `highWaterSequence` is null for an account with no ledger fact through the date. */
+      accounts: z.array(z.object({ admissionId: z.string(), highWaterSequence: z.string().nullable() })),
+    }),
   ]).nullable(),
   generationOptions: documentGenerationOptionsSchema,
   createdBy: z.string(),
@@ -227,7 +272,7 @@ export const selectTemplateSchema = templateScopeSchema.extend({
 });
 export const marketplaceItemSchema = z.object({
   slug: z.string(),
-  documentType: documentTypeSchema,
+  documentType: templateDocumentTypeSchema,
   name: z.string(),
   description: z.string(),
   pageSize: documentTemplatePageSizeSchema,
@@ -260,30 +305,173 @@ function validateNoticePrintSize(
       message: "A print size can be previewed for Notice designs only.",
     });
 }
+/**
+ * The academic session a template preview takes the school's data from
+ * (`document.preview-context.ts`): the management app sends the session
+ * selected in its sidebar. It must be one of the school's sessions
+ * (NOT_FOUND otherwise). Omitted, the school's active session is used, else
+ * its latest by start year; a school without sessions previews sample data.
+ */
+const previewSessionIdSchema = id
+  .optional()
+  .describe("Session whose data fills the preview (school.listSessions); the school's active session, else its latest, when omitted.");
 export const previewTemplateSchema = templateScopeSchema
   .extend({
     content: templateContentSchema,
     pageSize: documentTemplatePageSizeSchema.default("full"),
     printSize: noticePrintSizeSchema,
+    sessionId: previewSessionIdSchema,
   })
   .superRefine(validateTemplatePageSize)
   .superRefine(validateNoticePrintSize);
-export const marketplaceTemplateInputSchema = templateScopeSchema
-  .extend({ slug: z.string().min(1).max(100), printSize: noticePrintSizeSchema })
+/**
+ * One saved revision of a school template (an immutable `artifact` of kind
+ * `template`), as the template editor's revision history lists it.
+ * `revisionNo` counts the type's revisions oldest first (1, 2, …) from their
+ * creation order; it is a label, never an identifier: `revisionId` is.
+ * `selected` is its own fact (the school's selection pointer names it), never
+ * inferred from being the newest: an imported or reselected design can be
+ * selected while a newer revision exists.
+ */
+export const templateRevisionSchema = z.object({
+  revisionId: z.string(),
+  revisionNo: z.number().int().positive(),
+  name: z.string(),
+  pageSize: documentTemplatePageSizeSchema,
+  marketplaceSlug: z.string().nullable(),
+  createdAt: z.string(),
+  /** Who saved it, as named now; null when that account no longer exists. */
+  createdByName: z.string().nullable(),
+  selected: z.boolean(),
+});
+export type TemplateRevision = z.infer<typeof templateRevisionSchema>;
+export const listTemplateRevisionsSchema = createListInputSchema({ ...templateScopeSchema.shape });
+export const listTemplateRevisionsOutputSchema = createPaginatedOutputSchema(templateRevisionSchema);
+export const templateRevisionInputSchema = templateScopeSchema.extend({
+  revisionId: id.describe("A revisionId from listDocumentTemplateRevisions (an art_… id)."),
+});
+export const templateRevisionOutputSchema = z.object({
+  revision: templateRevisionSchema,
+  content: z.string(),
+});
+/**
+ * A saved revision previewed as its PDF, named by its id: the server reads
+ * its source, so someone who may only read the school's templates previews
+ * what was saved, never source of their own (that preview,
+ * `previewDocumentTemplatePdf`, is for those who may change templates).
+ */
+export const previewTemplateRevisionPdfSchema = templateRevisionInputSchema
+  .extend({ printSize: noticePrintSizeSchema, sessionId: previewSessionIdSchema })
   .superRefine(validateNoticePrintSize);
+/**
+ * A template the assistant proposes in the template editor's chat. Only the
+ * source: the name and the paper footprint stay the editor's own fields, and
+ * the check does not depend on them (a save checks the source against the
+ * type's sample, whatever its footprint).
+ */
+export const validateTemplateDraftSchema = templateScopeSchema.extend({
+  content: templateContentSchema.describe(
+    "The COMPLETE template (HTML with Handlebars bindings) as the editor should hold it, never a fragment or a diff. Call learn_document_template_editing first.",
+  ),
+});
+/**
+ * The verdict on a proposed template. It never echoes the source (the caller
+ * has it); `draftId` names it in the conversation and is null when invalid.
+ * Kept short (one or two problem lines) so the chat's stored copy of the
+ * result, cut at 4,000 characters, is always whole.
+ */
+export const validateTemplateDraftOutputSchema = z.object({
+  valid: z.boolean(),
+  problems: z.array(z.string()).describe("Why the template cannot be saved; fix them and validate again. Empty when valid."),
+  draftId: z.string().nullable(),
+  characters: z.number().int(),
+});
+export const templateEditingGuideOutputSchema = z.object({
+  documentType: templateDocumentTypeSchema,
+  rules: z.string(),
+  workflow: z.array(z.string()),
+  contextHelp: z.string(),
+});
+/**
+ * A preview as its PDF, base64-encoded: a template preview is a few synthetic
+ * pages under a page cap (`TEMPLATE_PREVIEW_LIMITS`), so the bytes travel in
+ * the procedure's JSON result.
+ */
+export const previewTemplatePdfOutputSchema = z.object({ pdfBase64: z.string() });
+export const marketplaceTemplateInputSchema = templateScopeSchema
+  .extend({ slug: z.string().min(1).max(100), printSize: noticePrintSizeSchema, sessionId: previewSessionIdSchema })
+  .superRefine(validateNoticePrintSize);
+/**
+ * The parts of a template preview's context that can come from the school's
+ * own data. Each part is decided on its own (`document.preview-context.ts`).
+ */
+export const templatePreviewPartSchema = z.enum(["school", "session", "student", "exam", "results", "timetable", "finance"]);
+export type TemplatePreviewPart = z.infer<typeof templatePreviewPartSchema>;
+/**
+ * Where one part of a preview's context came from: the school's own data,
+ * or the sample, with why: the caller may not read that data
+ * (`not_permitted`), the school does not have the feature it belongs to
+ * (`feature_off`), or the school has no such data (`no_data`).
+ */
+export const templatePreviewPartSourceSchema = z.discriminatedUnion("source", [
+  z.object({ source: z.literal("school") }),
+  z.object({ source: z.literal("sample"), reason: z.enum(["not_permitted", "feature_off", "no_data"]) }),
+]);
+export type TemplatePreviewPartSource = z.infer<typeof templatePreviewPartSourceSchema>;
+export const templatePreviewContextInputSchema = templateScopeSchema.extend({ sessionId: previewSessionIdSchema });
+/**
+ * The context a template of the type is previewed with, as the previews
+ * render it, except that every image (the school logo, a student photo) is
+ * `TEMPLATE_PREVIEW_IMAGE_MARKER` (or null when none is printed) instead of
+ * its data URI, which can be megabytes.
+ */
+export const templatePreviewContextOutputSchema = z.object({
+  /** The session the data was taken from; null when the school has none or the caller may not read it. */
+  sessionId: z.string().nullable(),
+  parts: z.partialRecord(templatePreviewPartSchema, templatePreviewPartSourceSchema),
+  context: z.record(z.string(), z.unknown()),
+});
+/** What an image field of a returned preview context holds instead of its data URI. */
+export const TEMPLATE_PREVIEW_IMAGE_MARKER = "[image]";
 export const previewOutputSchema = z.object({
+  /** The sample: the first documents, enough to fill two physical sheets. */
   html: z.string(),
+  /** Students the whole selection includes (0 for timetables); finance documents count documents. */
   studentCount: z.number().int(),
+  /** Documents the whole selection resolves to. */
+  documentCount: z.number().int(),
+  /** Documents rendered in `html` (the first ones, in print order). */
+  sampleCount: z.number().int(),
   warnings: z.array(z.string()),
+  /** Statements and Bills due only: the hash generation must present, over the whole selection. */
   reviewHash: z.string().nullable(),
 });
 
+/**
+ * The most documents one export may hold: explicit students, bill IDs,
+ * receipt transactions and statement admissions, and every whole-class,
+ * whole-examination or billing-run selection once resolved. Generation runs
+ * as a batched job in the worker (docs/document-system.md "Generation jobs"),
+ * so the bound is the job's, not one request's.
+ */
+export const MAX_DOCUMENT_SOURCE_ITEMS = 1_500;
 const examSlug = id.describe("Exam slug from school.listExams.");
 const selection = {
   sessionId: id,
   classId: id,
-  studentIds: z.array(id).min(1).max(500).optional(),
+  studentIds: z.array(id).min(1).max(MAX_DOCUMENT_SOURCE_ITEMS).optional(),
 };
+/** The hash a previewed statement or Bill due returned; required by generation, omitted by preview. */
+const reviewHashSchema = z.string().regex(/^[a-f0-9]{64}$/).optional();
+/**
+ * Who a Bill due is for, each an explicit choice: every student enrolled in
+ * the session, every student of one class in it, or chosen admissions.
+ */
+export const billDueRecipientsSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("session") }).strict(),
+  z.object({ kind: z.literal("class"), classId: id }).strict(),
+  z.object({ kind: z.literal("admissions"), admissionIds: z.array(id).min(1).max(MAX_DOCUMENT_SOURCE_ITEMS) }).strict(),
+]);
 /** IDs remain independent inputs. The server verifies their school, session,
  * class and enrollment relationships instead of trusting a UI selection.
  */
@@ -319,7 +507,7 @@ export const documentSourceSchema = z.discriminatedUnion("documentType", [
   z.object({
     documentType: z.literal("bill"),
     sessionId: id,
-    billIds: z.array(id).min(1).max(500).optional(),
+    billIds: z.array(id).min(1).max(MAX_DOCUMENT_SOURCE_ITEMS).optional(),
     billRunId: id.optional(),
   }).strict().superRefine((source, context) => {
     if (Boolean(source.billIds) === Boolean(source.billRunId)) context.addIssue({ code: "custom", message: "Choose bill IDs or one complete billing run." });
@@ -327,7 +515,7 @@ export const documentSourceSchema = z.discriminatedUnion("documentType", [
   z.object({
     documentType: z.literal("receipt"),
     sessionId: id,
-    transactions: z.array(z.object({ kind: z.enum(["payment", "refund"]), id })).min(1).max(500),
+    transactions: z.array(z.object({ kind: z.enum(["payment", "refund"]), id })).min(1).max(MAX_DOCUMENT_SOURCE_ITEMS),
     /** Session Documents uses this explicit policy for its payment-only bulk
      * picker. Contextual payment/refund regeneration intentionally omits it. */
     selectionPolicy: z.literal("posted_unreversed_payments").optional(),
@@ -346,10 +534,22 @@ export const documentSourceSchema = z.discriminatedUnion("documentType", [
   z.object({
     documentType: z.literal("statement"),
     sessionId: id,
-    admissionIds: z.array(id).min(1).max(500),
+    admissionIds: z.array(id).min(1).max(MAX_DOCUMENT_SOURCE_ITEMS),
     throughDate: z.string().date(),
     /** Required by generation after preview; preview omits it. */
-    expectedReviewHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+    expectedReviewHash: reviewHashSchema,
+  }).strict(),
+  /**
+   * A Bill due: one bill per admission as of `throughDate` (a local date in
+   * the session's finance time zone), for the billing period containing it.
+   * A future date is accepted; the date must fall in the session.
+   */
+  z.object({
+    documentType: z.literal("bill_due"),
+    sessionId: id,
+    throughDate: z.string().date(),
+    recipients: billDueRecipientsSchema,
+    expectedReviewHash: reviewHashSchema,
   }).strict(),
 ]).superRefine((source, context) => {
   const ids = source.documentType === "bill"
@@ -358,7 +558,9 @@ export const documentSourceSchema = z.discriminatedUnion("documentType", [
       ? source.transactions.map(({ kind, id: value }) => `${kind}:${value}`)
       : source.documentType === "statement"
         ? source.admissionIds
-        : "studentIds" in source ? source.studentIds ?? [] : [];
+        : source.documentType === "bill_due"
+          ? source.recipients.kind === "admissions" ? source.recipients.admissionIds : []
+          : "studentIds" in source ? source.studentIds ?? [] : [];
   if (new Set(ids).size !== ids.length) context.addIssue({ code: "custom", message: "Document source IDs must be unique." });
 });
 export type DocumentSource = z.infer<typeof documentSourceSchema>;
@@ -389,7 +591,7 @@ export const listArtifactsSchema = createListInputSchema({
         filters.documentDomain &&
         filters.documentDomain !== "all"
       ) {
-        const finance = ["bill", "receipt", "statement"].includes(filters.documentType);
+        const finance = FINANCE_DOCUMENT_TYPES.has(filters.documentType);
         if ((filters.documentDomain === "finance") !== finance) {
           context.addIssue({ code: "custom", message: "Document type does not belong to the selected domain.", path: ["documentType"] });
         }
@@ -412,3 +614,57 @@ export const artifactScopeSchema = schoolScopeSchema.extend({
   artifactId: id,
   documentType: documentTypeSchema,
 });
+
+export const documentGenerationJobStatusSchema = z.enum(["queued", "running", "succeeded", "failed"]);
+/**
+ * A PDF generation job (docs/document-system.md "Generation jobs"). Its
+ * outcome is read here, never from the request that started it: the PDF is
+ * created in the background, and `artifactId` is set once it succeeded.
+ */
+export const documentGenerationJobDtoSchema = z.object({
+  id: z.string(),
+  schoolId: z.string(),
+  sessionId: z.string(),
+  documentType: documentTypeSchema,
+  status: documentGenerationJobStatusSchema,
+  name: z.string(),
+  /** Documents the selection had when the job was requested. */
+  documentCount: z.number().int(),
+  /** Documents the PDF prints, known once the worker prepared the job (null before). */
+  printedDocumentCount: z.number().int().nullable(),
+  warnings: z.array(z.string()),
+  /** Null until the documents are split into batches. */
+  batchCount: z.number().int().nullable(),
+  batchesDone: z.number().int(),
+  /** Set when `status` is `succeeded`: the PDF's artifact (download it with getDocumentDownload). */
+  artifactId: z.string().nullable(),
+  /** Set when `status` is `failed`: a stable code and a message to show. */
+  errorCode: z.string().nullable(),
+  errorMessage: z.string().nullable(),
+  createdAt: z.string(),
+  startedAt: z.string().nullable(),
+  completedAt: z.string().nullable(),
+});
+export type DocumentGenerationJobDto = z.infer<typeof documentGenerationJobDtoSchema>;
+export const generateDocumentOutputSchema = z.object({
+  jobId: z.string(),
+  job: documentGenerationJobDtoSchema,
+});
+/** The job is addressed with its document type, so the permission is checked before the lookup (as for artifacts). */
+export const documentJobScopeSchema = schoolScopeSchema.extend({
+  jobId: id,
+  documentType: documentTypeSchema,
+});
+/**
+ * Failed jobs stay listed this long after they ended; queued and running
+ * jobs are always listed, and a job that succeeded is listed as its PDF.
+ */
+export const DOCUMENT_JOB_FAILED_LISTED_DAYS = 7;
+/** Newest first, with the id as the tie-breaker; the only order offered. */
+export const listDocumentJobsSchema = createListInputSchema({
+  ...schoolScopeSchema.shape,
+  sessionId: id,
+  /** Which permission and type family to list, as for listDocumentArtifacts. */
+  documentDomain: z.enum(["academic", "finance", "all"]),
+});
+export const listDocumentJobsOutputSchema = createPaginatedOutputSchema(documentGenerationJobDtoSchema);

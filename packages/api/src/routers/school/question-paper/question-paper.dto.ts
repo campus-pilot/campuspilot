@@ -109,6 +109,18 @@ export const versionNoInputSchema = paperKeySchema.extend({
   versionNo: z.number().int().min(1).describe('A version number from listQuestionPaperVersions.'),
 });
 
+/**
+ * The format a version is downloaded in. PDF by default, so callers that send
+ * no format keep getting the PDF; `docx` is an editable Word file made from the
+ * same version (docs/question-papers.md "Word download").
+ */
+export const downloadFormatSchema = z
+  .enum(['pdf', 'docx'])
+  .default('pdf')
+  .describe('pdf (default): the printed PDF. docx: an editable Word file of the same version; edits made in Word are not saved back.');
+
+export const downloadInputSchema = versionNoInputSchema.extend({ format: downloadFormatSchema });
+
 export const getQuestionPaperInputSchema = paperKeySchema.extend({
   versionNo: z.number().int().min(1).optional().describe('A saved version; the latest when omitted.'),
 });
@@ -533,4 +545,5 @@ export const previewOutputSchema = z.object({
 export const previewDraftOutputSchema = previewOutputSchema.extend({
   problems: z.array(z.string()),
 });
+/** A five-minute download URL and the file name it saves under (`.pdf` or `.docx`, by the format asked for). */
 export const downloadOutputSchema = z.object({ url: z.url(), fileName: z.string(), expiresIn: z.number().int() });

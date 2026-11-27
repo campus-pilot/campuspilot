@@ -287,6 +287,11 @@ export const billingBillDtoSchema = z.object({
 });
 
 export const billingRunDetailDtoSchema = billingRunDtoSchema.extend({
+  /**
+   * When the run's latest bill takes effect (its ledger fact), null for a run
+   * without bills. A reversal of the run may not take effect before it.
+   */
+  latestBillEffectiveAt: z.date().nullable(),
   configSnapshot: z.record(z.string(), z.unknown()),
   inputSnapshot: z.record(z.string(), z.unknown()),
   bills: createPaginatedOutputSchema(billingBillDtoSchema),

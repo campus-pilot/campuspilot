@@ -6,7 +6,8 @@ import {
   SCHOOL_ACTIONS,
   type PermissionCheck,
 } from '@campuspilot/api/routers/authorization/authorization.dto';
-import type { DocumentType } from '@campuspilot/api/routers/school/document/document.dto';
+import type { activeTemplateSchema, DocumentType, TemplateDocumentType } from '@campuspilot/api/routers/school/document/document.dto';
+import type { z } from 'zod';
 import {
   DocumentButton,
   DocumentNotice,
@@ -15,20 +16,14 @@ import { RequirePermissions } from '@/components/require-permissions';
 import { orpc } from '@/lib/orpc';
 export { SCHOOL_ACTIONS };
 export type DocumentScope = { schoolId: string; sessionId: string };
+/** A school template's scope: a type with templates of its own (a Bill due is printed with the bill template). */
 export type DocumentTemplateScope = {
   schoolId: string;
-  documentType: DocumentType;
+  documentType: TemplateDocumentType;
 };
-export const isFinanceDocumentType = (type: DocumentType) =>
-  type === 'bill' || type === 'receipt' || type === 'statement';
-export const templateReadAction = (type: DocumentType) =>
-  isFinanceDocumentType(type)
-    ? SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES
-    : SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES;
-export const templateManageAction = (type: DocumentType) =>
-  isFinanceDocumentType(type)
-    ? SCHOOL_ACTIONS.MANAGE_FINANCE_DOCUMENT_TEMPLATES
-    : SCHOOL_ACTIONS.MANAGE_DOCUMENT_TEMPLATES;
+/** The school's selected template revision, as `getActiveDocumentTemplate` returns it. */
+export type ActiveTemplate = z.infer<typeof activeTemplateSchema>;
+export { templateManageAction, templateReadAction } from './template-permissions';
 type SchoolDocumentAction = Extract<
   PermissionCheck,
   { resource: { kind: 'school' } }
@@ -95,10 +90,16 @@ export function DocumentLoading() {
 export function useDocumentCache() {
   const cache = useQueryClient();
   return {
+    /** The selected revision and the revision history (a save or an import adds a revision). */
     templates: (scope: DocumentTemplateScope) =>
-      cache.invalidateQueries({
-        queryKey: orpc.school.getActiveDocumentTemplate.key({ input: scope }),
-      }),
+      Promise.all([
+        cache.invalidateQueries({
+          queryKey: orpc.school.getActiveDocumentTemplate.key({ input: scope }),
+        }),
+        cache.invalidateQueries({
+          queryKey: orpc.school.listDocumentTemplateRevisions.key(),
+        }),
+      ]),
     artifacts: (schoolId: string) =>
       cache.invalidateQueries({
         queryKey: orpc.school.listDocumentArtifacts.key({

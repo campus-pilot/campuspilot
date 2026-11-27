@@ -36,15 +36,33 @@ ${QUESTION_PAPER_TEMPLATE_PRINTS_RULES}
 /**
  * The output section of a standalone paper's job (docs/personal-space.md): the
  * fragment, then the paper's details as one fenced JSON block, which the job
- * takes out before the fragment is read (`splitQuestionPaperDetails`).
+ * takes out before the fragment is read (`splitQuestionPaperDetails`). The
+ * block's shape is the same for both layouts; what the details are used for
+ * is not: a plain paper's are data only (its fragment carries the heading), a
+ * quick paper's are what the school's template prints in its heading
+ * ({@link QUICK_OUTPUT_SECTION}).
  */
-const STANDALONE_OUTPUT_SECTION = `Output
+const detailsOutputSection = (use: string) => `Output
 - The HTML fragment, then on its own lines one fenced block labelled ${QUESTION_PAPER_DETAILS_FENCE} with the paper's details as one JSON object, and nothing else: no commentary, no sentence before, between or after them, no Markdown. An answer that is not HTML (an apology, an explanation) is rejected.
 - The details block is exactly:
 \`\`\`${QUESTION_PAPER_DETAILS_FENCE}
-{"schoolName": "...", "className": "...", "subjectName": "...", "examName": "..."}
+{"schoolName": "...", "className": "...", "subjectName": "...", "examName": "...", "maxMarks": 80}
 \`\`\`
-- Each value is the name as the paper itself prints it (the school's name, the class, the subject, the examination such as "Half Yearly Examination 2026"), copied from the fragment you wrote, or null when the paper does not state it. Never invent one. They are data only: they are not printed.`;
+- ${use}
+- maxMarks is the paper's maximum marks as a whole number, exactly as the photographed paper states it, or null when it states none. Never add up the questions' marks to get it.`;
+const STANDALONE_OUTPUT_SECTION = detailsOutputSection(
+  'Each name is as the paper itself prints it (the school\'s name, the class, the subject, the examination such as "Half Yearly Examination 2026"), copied from the fragment you wrote, or null when the paper does not state it. Never invent one. They are data only: they are not printed.',
+);
+/**
+ * A quick paper's output section (a standalone paper of a real school,
+ * docs/question-papers.md "Quick papers in a school"): the school's template
+ * prints the class, subject, examination and maximum marks from these
+ * details, so they are read from the photographed paper, not from the
+ * fragment (which leaves out what the template prints).
+ */
+const QUICK_OUTPUT_SECTION = detailsOutputSection(
+  'Each name is as the photographed paper prints it (the school\'s name, the class, the subject, the examination such as "Half Yearly Examination 2026"), or null when the paper does not state it. Never invent one. The school\'s template prints the class, subject, examination and maximum marks in the heading from these values, so read them from the photographed paper even when your fragment leaves those lines out.',
+);
 
 /**
  * Where a standalone paper prints: on a plain page with nothing of its own,
@@ -77,10 +95,20 @@ ${QUESTION_PAPER_TEMPLATE_PRINTS_RULES}`;
  * This is the prompt of a job without teacher's instructions; see
  * {@link QUESTION_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT} for the other.
  */
-/** The two sections that differ between an exam paper's prompts and a standalone paper's; every other line is shared. */
+/**
+ * The two sections that differ between an exam paper's prompts, a standalone
+ * paper's on a plain page and a quick paper's (a standalone paper printed with
+ * the school's template: the exam paper's template section with the details
+ * block); every other line is shared.
+ */
 type PaperSections = { output: string; template: string };
 const EXAM_PAPER_SECTIONS: PaperSections = { output: OUTPUT_SECTION, template: TEMPLATE_SECTION };
 const STANDALONE_PAPER_SECTIONS: PaperSections = { output: STANDALONE_OUTPUT_SECTION, template: STANDALONE_TEMPLATE_SECTION };
+const QUICK_PAPER_SECTIONS: PaperSections = {
+  output: QUICK_OUTPUT_SECTION,
+  template: `${TEMPLATE_SECTION}
+- In those lines a value in square brackets, such as [class], [subject], [examination] or [maximum marks], stands for that detail of this paper: the template prints it from your details block. A line with one prints that fact, so do not write it in the fragment.`,
+};
 
 const plainJobPrompt = (figuresSection: string, vocabulary: string, sections: PaperSections = EXAM_PAPER_SECTIONS) => `${QUESTION_PAPER_NO_MOTION_RULE}
 
@@ -150,14 +178,29 @@ export const STANDALONE_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT = instructedJobPrompt
 export const STANDALONE_PAPER_JOB_REDRAW_SYSTEM_PROMPT = plainJobPrompt(REDRAW_FIGURES_SECTION, QUESTION_PAPER_REDRAW_VOCABULARY_RULES, STANDALONE_PAPER_SECTIONS);
 export const STANDALONE_PAPER_JOB_INSTRUCTED_REDRAW_SYSTEM_PROMPT = instructedJobPrompt(REDRAW_FIGURES_SECTION, QUESTION_PAPER_REDRAW_VOCABULARY_RULES, STANDALONE_PAPER_SECTIONS);
 
+/** The four prompts of a quick paper's job: the exam paper's text with the details block of a standalone paper. */
+export const QUICK_PAPER_JOB_SYSTEM_PROMPT = plainJobPrompt(PLACEHOLDER_FIGURES_SECTION, QUESTION_PAPER_VOCABULARY_RULES, QUICK_PAPER_SECTIONS);
+export const QUICK_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT = instructedJobPrompt(PLACEHOLDER_FIGURES_SECTION, QUESTION_PAPER_VOCABULARY_RULES, QUICK_PAPER_SECTIONS);
+export const QUICK_PAPER_JOB_REDRAW_SYSTEM_PROMPT = plainJobPrompt(REDRAW_FIGURES_SECTION, QUESTION_PAPER_REDRAW_VOCABULARY_RULES, QUICK_PAPER_SECTIONS);
+export const QUICK_PAPER_JOB_INSTRUCTED_REDRAW_SYSTEM_PROMPT = instructedJobPrompt(REDRAW_FIGURES_SECTION, QUESTION_PAPER_REDRAW_VOCABULARY_RULES, QUICK_PAPER_SECTIONS);
+
 /**
  * The system prompt of a job: the plain transcription one or the variant when
  * the job has instructions, each with figures as placeholders, or redrawn when
  * the job runs on the figure route; and each for an exam paper or, with
- * `standalone`, for a standalone paper (which writes its own heading and
- * returns its details).
+ * `standalone`, for a standalone paper (which returns its details): on a
+ * plain page it writes its own heading; with `schoolTemplate` too (a quick
+ * paper of a real school) the school's template prints the heading, as for an
+ * exam paper.
  */
-export function questionPaperJobSystemPrompt(instructions: string | null, options: { redrawFigures?: boolean; standalone?: boolean } = {}): string {
+export function questionPaperJobSystemPrompt(
+  instructions: string | null,
+  options: { redrawFigures?: boolean; standalone?: boolean; schoolTemplate?: boolean } = {},
+): string {
+  if (options.standalone && options.schoolTemplate) {
+    if (options.redrawFigures) return instructions === null ? QUICK_PAPER_JOB_REDRAW_SYSTEM_PROMPT : QUICK_PAPER_JOB_INSTRUCTED_REDRAW_SYSTEM_PROMPT;
+    return instructions === null ? QUICK_PAPER_JOB_SYSTEM_PROMPT : QUICK_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT;
+  }
   if (options.standalone) {
     if (options.redrawFigures) return instructions === null ? STANDALONE_PAPER_JOB_REDRAW_SYSTEM_PROMPT : STANDALONE_PAPER_JOB_INSTRUCTED_REDRAW_SYSTEM_PROMPT;
     return instructions === null ? STANDALONE_PAPER_JOB_SYSTEM_PROMPT : STANDALONE_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT;
@@ -190,8 +233,12 @@ export const FIGURE_DECISION_THRESHOLD = 0.2;
  */
 export type GenerationFacts = ExamGenerationFacts | StandaloneGenerationFacts;
 
-/** A standalone paper has no plan: only the (empty) lines its plain page prints. */
-export type StandaloneGenerationFacts = { kind: 'standalone'; templatePrints: TemplatePrints };
+/**
+ * A standalone paper has no plan: only the lines printed around it, two empty
+ * lists on a plain page, the school template's lines for a quick paper (null
+ * when they are not known, as for an exam paper).
+ */
+export type StandaloneGenerationFacts = { kind: 'standalone'; templatePrints: TemplatePrints | null };
 
 /** The facts of the plan that a page-reading model can use, none of them personal. */
 export type ExamGenerationFacts = {

@@ -10,14 +10,16 @@ import { orpc } from '@/lib/orpc';
 import { personalPapersHref } from './personal-space-model';
 
 /**
- * The way to a personal space from the "not part of a school yet" page
- * (docs/personal-space.md): offered only while the server says this person
- * may create one (`personalSpace.getStatus`, refusal null: a linked Google
- * account, no school at all, not a demo login, none yet). Creating it opens
- * its papers. Shown beside the school creation panel; nothing while the
- * answer loads or when it is refused.
+ * Whether this person may create their personal space now and the creation
+ * itself (docs/personal-space.md), shared by the "not part of a school yet"
+ * page and the school switcher. Offered only while the server says so
+ * (`personalSpace.getStatus`, refusal null: a linked Google account, not a
+ * demo login, none ever; belonging to a school does not matter), so
+ * `mayCreate` is false while the answer loads or when it is refused.
+ * Creating it opens its papers. `onCreated` runs before the navigation, for
+ * a caller that closes its own surface.
  */
-export function CreatePersonalSpace() {
+export function useCreatePersonalSpace({ onCreated }: { onCreated?: () => void } = {}) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const status = useQuery(orpc.personalSpace.getStatus.queryOptions());
@@ -26,12 +28,25 @@ export function CreatePersonalSpace() {
       onSuccess: async ({ schoolId }) => {
         // `all`: the cached list is read again whether or not a screen shows it, so the space's access check finds it.
         await queryClient.invalidateQueries({ queryKey: orpc.school.listMySchools.key(), refetchType: 'all' });
+        // The status now refuses (`already_has_one`), so no surface keeps offering a second space.
+        await queryClient.invalidateQueries({ queryKey: orpc.personalSpace.getStatus.key() });
         storeSchoolId(schoolId);
+        onCreated?.();
         router.push(personalPapersHref(schoolId));
       },
     }),
   );
-  if (status.data?.refusal !== null) return null;
+  return { mayCreate: status.data?.refusal === null, create };
+}
+
+/**
+ * The way to a personal space from the "not part of a school yet" page,
+ * shown beside the school creation panel while {@link useCreatePersonalSpace}
+ * offers one; nothing otherwise.
+ */
+export function CreatePersonalSpace() {
+  const { mayCreate, create } = useCreatePersonalSpace();
+  if (!mayCreate) return null;
   return (
     <div className="flex w-full max-w-md flex-col items-center gap-3 rounded-xl border bg-card p-5 text-center">
       <span className="grid size-10 place-items-center rounded-xl bg-muted">

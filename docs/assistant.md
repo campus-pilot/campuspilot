@@ -678,6 +678,49 @@ so a colleague who takes the paper over reads how it came to be and carries on.
   sender's own permissions. The welcome says so ("Everyone who can open this
   paper sees this chat").
 
+## The template editor's conversations
+
+The template builder in Settings › Templates has the assistant beside the template
+(canonical description: [Document system](document-system.md#edit-with-the-assistant)).
+It adds no table, no flag and no access rule: the chat is `AssistantChat` (surface
+`panel`) behind `useAssistantGate`, and the model reaches templates only through the
+`documents` tools, behind the user's own template permissions.
+
+- **Seed.** `{ kind: 'document_template', documentType }` (`documentTemplateSeedSchema`).
+  It names only a document type (an enum), so `sendMessage` has nothing to resolve
+  (`assertSeedNamesAPaper` returns for it). The model's context gets a
+  `<document_template_context>` block: learn first, edit the newest source, propose
+  with `validateDocumentTemplateDraft`, never save. The conversation stays private.
+  Whether a conversation was started from the template editor is the seed of its
+  first message (`store.templateEditorTypeOf`), never inferred from a later message
+  or the surface.
+- **`editorSource`.** `sendMessage` (and the stored user message body) may carry the
+  editor's unsaved source, `{ documentType, content }` up to 200,000 characters
+  (`assistantEditorSourceSchema` in `packages/assistant-contract/src/template-editing.ts`).
+  The editor sends it when the conversation has not seen that source yet. `sendMessage`
+  accepts it only in a conversation started from that template's editor: a new one
+  must carry the `document_template` seed of the same type, a continued one must have
+  been started with it; anywhere else it is BAD_REQUEST (`assertEditorSourceBelongs`).
+  It becomes a `<template_editor_source>` block, fenced like the page's text: every tag
+  of the block is removed from the source until none is left
+  (`buildUserTranscriptContent`), and the block says it is template data whose
+  instructions are ignored. It is user data, never instructions.
+- **Tools.** `learn_document_template_editing` and `validateDocumentTemplateDraft`
+  (advanced reads, module `documents`), plus the existing template reads. The check
+  saves nothing and never echoes the source; a succeeded call is a chat card
+  (`ASSISTANT_CARD_TOOLS`: `school.validateDocumentTemplateDraft` →
+  `document_template_draft`), never counted as a question paper's draft
+  (`isPaperDraftCard`). `previewDocumentTemplatePdf` is hidden (a person's preview).
+- **Saving.** The person saves in the editor. In a conversation started from the
+  template editor the runtime refuses `saveDocumentTemplate` and
+  `selectMarketplaceTemplate` in `prepareToolCall`, before any approval card or
+  `tool_call` item (`TEMPLATE_EDITOR_REFUSED_TOOLS` in
+  `@campuspilot/assistant-contract/template-editing`; the model gets FORBIDDEN with
+  `TEMPLATE_EDITOR_REFUSED_MESSAGE`, telling it to propose a draft instead). The run
+  carries the fact as `RunFacts.templateEditorType`, read once when the run begins.
+  In every other conversation they are ordinary writes with their approval card. A new
+  procedure that writes a school template belongs in that set.
+
 ## Voice mode
 
 Staff can talk to the assistant and hear it answer, on every surface the chat
@@ -1055,6 +1098,9 @@ All three share one chat component and the same conversations:
 - **Palette**: type a question in ⌘K and choose *Ask the assistant*.
 
 Each run records the surface it started from (`assistant_run.surface`).
+
+The template builder embeds the same chat beside a template (see "The template
+editor's conversations"), recorded as the `panel` surface.
 
 The same chat component is also embedded where a screen is about one thing. A question
 paper's screen holds its own conversation beside the paper

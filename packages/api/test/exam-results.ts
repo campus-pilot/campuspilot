@@ -53,7 +53,7 @@ export async function createSubjectClass(schoolId: string, label: string, subjec
     subjects: Object.fromEntries(
       Object.entries(subjects).map(([slug, name]) => [
         slug,
-        { name, books: [], examModes: { written: { name: 'Written', percentage: 100 } } },
+        { name, attachment: { kind: 'school' as const }, books: [], examModes: { written: { name: 'Written', percentage: 100 } } },
       ]),
     ),
   };

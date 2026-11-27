@@ -1,5 +1,5 @@
 {
-  "id": "1b73fbbc-9013-4775-a67c-cb387f05f1bb",
+  "id": "29513c5b-85f0-49b7-9714-7cdb7f18a93e",
   "prevId": "56e35fed-0ee4-4a51-9064-5547b1030955",
   "version": "7",
   "dialect": "postgresql",
@@ -7664,6 +7664,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "docx_artifact_id": {
+          "name": "docx_artifact_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_by": {
           "name": "created_by",
           "type": "text",
@@ -7735,6 +7741,21 @@
           "columns": [
             {
               "expression": "pdf_artifact_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "exam_question_paper_version_docx_idx": {
+          "name": "exam_question_paper_version_docx_idx",
+          "columns": [
+            {
+              "expression": "docx_artifact_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -7833,6 +7854,19 @@
           "tableTo": "artifact",
           "columnsFrom": [
             "pdf_artifact_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "exam_question_paper_version_docx_artifact_id_artifact_id_fk": {
+          "name": "exam_question_paper_version_docx_artifact_id_artifact_id_fk",
+          "tableFrom": "exam_question_paper_version",
+          "tableTo": "artifact",
+          "columnsFrom": [
+            "docx_artifact_id"
           ],
           "columnsTo": [
             "id"
@@ -15604,87 +15638,6 @@
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
-    },
-    "public.whatsapp_media_upload": {
-      "name": "whatsapp_media_upload",
-      "schema": "",
-      "columns": {
-        "phone_number_id": {
-          "name": "phone_number_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "share_key": {
-          "name": "share_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "school_id": {
-          "name": "school_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "media_id": {
-          "name": "media_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "uploaded_at": {
-          "name": "uploaded_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {
-        "whatsapp_media_upload_school_id_idx": {
-          "name": "whatsapp_media_upload_school_id_idx",
-          "columns": [
-            {
-              "expression": "school_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "whatsapp_media_upload_school_id_school_id_fk": {
-          "name": "whatsapp_media_upload_school_id_school_id_fk",
-          "tableFrom": "whatsapp_media_upload",
-          "tableTo": "school",
-          "columnsFrom": [
-            "school_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "whatsapp_media_upload_phone_number_id_share_key_pk": {
-          "name": "whatsapp_media_upload_phone_number_id_share_key_pk",
-          "columns": [
-            "phone_number_id",
-            "share_key"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
     }
   },
   "enums": {
@@ -15693,7 +15646,8 @@
       "schema": "public",
       "values": [
         "template",
-        "pdf"
+        "pdf",
+        "docx"
       ]
     },
     "public.artifact_status": {

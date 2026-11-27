@@ -59,9 +59,11 @@ describe('anthropic adapter (must match the Claude-only build)', () => {
     // from its visible text, with no tool call. Then: the block holds the
     // whole page's text, with the part on screen marked. Then: the facts block
     // says the assistant fills in the conversation's schoolId, so the model
-    // never passes one (docs/personal-space.md).
+    // never passes one (docs/personal-space.md). Then: a question paper that
+    // belongs to no examination is a quick paper, written with the quick paper
+    // tools (docs/question-papers.md "Quick papers in a school").
     const system = JSON.stringify(buildAnthropicSystem(buildAssistantPrompt(facts)));
-    expect(createHash('sha256').update(system).digest('hex').slice(0, 16)).toMatchInlineSnapshot(`"1bef68a94cbc1fbe"`);
+    expect(createHash('sha256').update(system).digest('hex').slice(0, 16)).toMatchInlineSnapshot(`"a0704b79b277c8a6"`);
   });
 
   it('defers advanced tools behind tool search and labels writes', () => {

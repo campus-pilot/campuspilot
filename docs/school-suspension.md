@@ -59,6 +59,14 @@ refused with its own error.
 | Cadet Portal procedures | `cadetProcedure` refuses every procedure that is not a read (turning notifications on for a device, marking notifications read). Sign-in and every read keep working. |
 | Cadet actions on `cadetLoginProcedure` (turning a device's notifications off) | Not held, for the reason they are not held by the `cadet` feature: they only undo something on the student's own device, and sign-out uses them. |
 
+A deliberate exception for a read: downloading a question paper version is a
+read, and when the version has no stored file in the format asked for (its PDF
+was removed, or it is the version's first Word download) the download makes the
+file and stores it as an artifact, also for a suspended school or one without a
+plan, like restoring a removed PDF (see [Question papers](question-papers.md#word-download)).
+Nothing the school's people wrote changes; the stored file is derived from a
+version that already exists.
+
 Not affected: signing in and out, a person's own account (password, profile),
 and anything a platform administrator does through the `systemAdmin`
 procedures (decided from the procedure's explicit `platformAdministration`
@@ -136,6 +144,11 @@ One permanent warning explains why.
 - A new Cadet procedure that changes data is covered by `cadetProcedure`.
   Put it on `cadetLoginProcedure` only if a student must still be able to do
   it in a suspended school, and say why.
+- A PDF generation job (docs/document-system.md "Generation jobs") is refused
+  at start like any write. One already accepted re-checks the school's write
+  access when the worker claims it: a school suspended (or left without a
+  plan) meanwhile gets no PDF, and the job fails with `school_suspended` (or
+  `no_plan`) and the same message as the refusal.
 - A background job that changes a school's data on its own schedule is not
   held today (there is none that staff do not start). If one is added, decide
   explicitly whether it runs for a suspended school and for a school without

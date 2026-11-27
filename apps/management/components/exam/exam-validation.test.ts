@@ -37,9 +37,9 @@ const context: ExamContextDto = {
       maths: {
         name: 'Mathematics',
         examModes: {
-          written: { name: 'Written', percentage: 80 },
-          practical: { name: 'Practical', percentage: 20 },
-          oral: { name: 'Oral', percentage: 0 },
+          written: { name: 'Written', percentage: 80, maxMarks: 80 },
+          practical: { name: 'Practical', percentage: 20, maxMarks: 20 },
+          oral: { name: 'Oral', percentage: 0, maxMarks: 0 },
         },
       },
     },

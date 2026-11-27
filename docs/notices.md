@@ -313,11 +313,12 @@ marketplace `notice-compact` designs adapt with `notice--{{print.size}}` /
 **both** sizes against the sample and the longest notice, and the catalog
 tests do the same for every bundled design, so a plain notice never fails to
 print at the size it chose with a built-in or marketplace design. Settings ›
-Templates › Notice and the marketplace detail page of a Notice design preview
-it at either size (the same "Preview as" control and options, in
-`notice-print-size-preview.ts`;
-`previewDocumentTemplate` and `getMarketplaceTemplate` take an optional
-`printSize`, refused for every other type).
+Templates › Notice and the marketplace's Notice designs (on the page and in the
+full-screen preview) preview it at either size (the same "Preview as" control and
+options, in `notice-print-size-preview.ts`; `previewDocumentTemplate`,
+`previewDocumentTemplatePdf`, `getMarketplaceTemplate` and
+`previewMarketplaceTemplatePdf` take an optional `printSize`, refused for every
+other type).
 
 ### Security contract
 

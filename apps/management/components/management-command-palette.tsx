@@ -45,14 +45,6 @@ import { confirmNavigation } from '@/lib/navigation-guard';
 import { getAdmissionPhotoUrl } from '@/lib/admission-photo';
 import { AskAssistantCommand, PaletteAssistantView } from './assistant/assistant-palette';
 import { useAllExams, type ExamSearchItem } from './exam/use-all-exams';
-import {
-  QuestionPaperPickerHeader,
-  QuestionPaperPickerResults,
-} from './question-paper/question-paper-palette';
-import {
-  pickerEmptyMessage,
-  type QuestionPaperPickerStep,
-} from './question-paper/question-paper-list-model';
 import { CommandRow } from './command-row';
 import { paletteItemClassName, ProviderStatus } from './command-palette-status';
 import { RequireFeature, useSchoolFeatureCheck } from './require-feature';
@@ -685,9 +677,6 @@ export function ManagementCommandPalette({
   const [assistantConversationId, setAssistantConversationId] = useState<
     string | null
   >(null);
-  /** The question paper picker's step while it is open (the "Question papers" command), else null. */
-  const [questionPaperPicker, setQuestionPaperPicker] =
-    useState<QuestionPaperPickerStep | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const hasFeature = useSchoolFeatureCheck(schoolId);
   const commands = createManagementCommandRegistry({
@@ -707,17 +696,6 @@ export function ManagementCommandPalette({
     setIsStudentSearchDebouncing(false);
     setSelectedAdmission(undefined);
     setAssistantConversationId(null);
-    setQuestionPaperPicker(null);
-  }
-
-  /** Empties the search, as when the picker moves to another step. */
-  function clearQuery() {
-    changeQuery('', (value) => form.setFieldValue('query', value));
-  }
-
-  function pickerBack(step: QuestionPaperPickerStep) {
-    setQuestionPaperPicker(step.step === 'class' ? { step: 'exam' } : null);
-    clearQuery();
   }
 
   function changeOpen(nextOpen: boolean) {
@@ -813,23 +791,11 @@ export function ManagementCommandPalette({
             <form.Field name="query">
               {(field) => (
                 <>
-                  {questionPaperPicker ? (
-                    <QuestionPaperPickerHeader
-                      step={questionPaperPicker}
-                      onBack={() => pickerBack(questionPaperPicker)}
-                    />
-                  ) : null}
                   <CommandInput
                     autoFocus
                     maxLength={200}
                     value={field.state.value}
-                    placeholder={
-                      questionPaperPicker
-                        ? questionPaperPicker.step === 'exam'
-                          ? 'Search examinations…'
-                          : 'Search classes…'
-                        : `${searchScope}…`
-                    }
+                    placeholder={`${searchScope}…`}
                     onValueChange={(value) =>
                       changeQuery(value, field.handleChange)
                     }
@@ -853,11 +819,7 @@ export function ManagementCommandPalette({
           )}
           <CommandList className="max-h-[min(32rem,65vh)] px-0.5 pb-0.5">
             <CommandEmpty>
-              {questionPaperPicker ? (
-                <form.Subscribe selector={(state) => state.values.query}>
-                  {(query) => pickerEmptyMessage(questionPaperPicker, query)}
-                </form.Subscribe>
-              ) : studentSearch && isStudentSearchDebouncing
+              {studentSearch && isStudentSearchDebouncing
                 ? 'Searching students…'
                 : remoteQuery
                   ? studentSearch ? 'No matching actions or students.' : 'No matching actions.'
@@ -874,22 +836,6 @@ export function ManagementCommandPalette({
                   changeOpen(false);
                 }}
               />
-            ) : questionPaperPicker && sessionId ? (
-              <form.Subscribe selector={(state) => state.values.query}>
-                {(query) => (
-                  <QuestionPaperPickerResults
-                    schoolId={schoolId}
-                    sessionId={sessionId}
-                    step={questionPaperPicker}
-                    query={query}
-                    onPickExam={(exam) => {
-                      setQuestionPaperPicker({ step: 'class', exam });
-                      clearQuery();
-                    }}
-                    navigate={navigate}
-                  />
-                )}
-              </form.Subscribe>
             ) : (
               <form.Subscribe selector={(state) => state.values.query}>
                 {(query) => {
@@ -913,14 +859,7 @@ export function ManagementCommandPalette({
                                 key={command.id}
                                 value={`navigation:${command.id}`}
                                 disabled={disabled}
-                                onSelect={() => {
-                                  if (command.kind === 'navigate') {
-                                    void navigate(command.destination(context));
-                                    return;
-                                  }
-                                  setQuestionPaperPicker({ step: 'exam' });
-                                  clearQuery();
-                                }}
+                                onSelect={() => void navigate(command.destination(context))}
                               >
                                 <CommandRow
                                   icon={command.icon}
@@ -964,13 +903,7 @@ export function ManagementCommandPalette({
             )}
           </CommandList>
           <div className="border-t px-3 py-2 text-[11px] text-muted-foreground">
-            {selectedAdmission
-              ? 'Choose action'
-              : questionPaperPicker
-                ? questionPaperPicker.step === 'exam'
-                  ? 'Choose an examination'
-                  : 'Choose a class'
-                : searchScope}
+            {selectedAdmission ? 'Choose action' : searchScope}
           </div>
         </Command>
         )}

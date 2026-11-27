@@ -28,6 +28,8 @@ import { loadDemoJob, startDemoJob, type DemoJobSnapshot } from './job-store';
 import { buildDemoPlan } from './plan';
 import { DemoSeedError, createSeedContext, seedStaffMember } from './steps';
 import { runDemoSeedSteps } from './workflow';
+import { selectedTemplateSlugs } from '../../../test/documents';
+import { DEFAULT_DOCUMENT_TEMPLATE_SLUGS } from '../../routers/school/document/document.catalog';
 
 /** Mid-December: the first term is completed, the second active, the annual ready. */
 const AS_OF = '2026-12-20T06:30:00.000Z';
@@ -90,6 +92,8 @@ describe('demo school seed steps (2 classes, without Restate)', () => {
       'monthly:2026-09', 'monthly:2026-10', 'monthly:2026-11', 'monthly:2026-12',
     ]);
     expect(result.counts).toMatchObject({ staff: 5, classes: 2, students: plannedStudents, templates: 9 });
+    // A demo starts with the same templates as every new school, plus the built-in Notice design.
+    expect(await selectedTemplateSlugs(job.schoolId)).toEqual({ ...DEFAULT_DOCUMENT_TEMPLATE_SLUGS, notice: 'notice-default' });
     expect(result.counts.bills).toBeGreaterThan(plannedStudents * 8);
     expect(BigInt(result.amounts.collectedMinor)).toBeGreaterThan(0n);
 
@@ -165,7 +169,13 @@ describe('demo school seed steps (2 classes, without Restate)', () => {
     // although the demo keeps the assistant feature off.
     expect(plan.questionPapers.map((paper) => paper.key)).toEqual(['mathematics-hindi']);
     const seededPapers = await db.select().from(examQuestionPaperTable).where(eq(examQuestionPaperTable.schoolId, job.schoolId));
-    expect(seededPapers.map((paper) => [paper.examSlug, paper.subjectSlug, paper.modeSlug, paper.latestVersionNo, paper.pageRevision])).toEqual([['annual-examination', 'mathematics', 'written', 1, 2]]);
+    expect(
+      seededPapers.filter((paper) => paper.kind === 'exam').map((paper) => [paper.examSlug, paper.subjectSlug, paper.modeSlug, paper.latestVersionNo, paper.pageRevision]),
+    ).toEqual([['annual-examination', 'mathematics', 'written', 1, 2]]);
+    // Its quick papers too, in no session, printed with the school's template and stating their planned details.
+    const quickPapers = seededPapers.filter((paper) => paper.kind === 'standalone');
+    expect(quickPapers.map((paper) => [paper.printLayout, paper.sessionId, paper.latestVersionNo]).sort()).toEqual(plan.quickPapers.map(() => ['school_template', null, 1]));
+    expect(quickPapers.map((paper) => paper.detailsSubjectName).sort()).toEqual(plan.quickPapers.map((paper) => paper.details.subjectName).sort());
 
     // Seed steps call the real posting and release procedures, so every bill,
     // payment and billing run emitted its notification event, and every

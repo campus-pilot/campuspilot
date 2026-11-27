@@ -25,7 +25,9 @@ import {
   assistantRunTable,
   assistantTranscriptEntryTable,
   type AssistantItemBody,
+  type AssistantUserMessageBody,
 } from '@campuspilot/db/schema/assistant';
+import type { TemplateDocumentType } from '@campuspilot/assistant-contract/template-editing';
 import type { ModelPrices } from './runtime/providers/config';
 import type { ModelProviderId } from './runtime/providers/types';
 import { publishAssistantEvent } from './events';
@@ -360,6 +362,26 @@ export async function findConversation(
     .where(eq(assistantConversationTable.id, conversationId))
     .limit(1);
   return row ?? null;
+}
+
+/**
+ * The document type of the template editor a conversation was started from,
+ * or null when it was started anywhere else. "Started from" is the seed of
+ * its first user message (the screen a new conversation is started from,
+ * `AssistantUserMessageBody.seed`), its own stored fact: it is never inferred
+ * from later messages, drafts or the surface. The template editor's rules
+ * (its `editorSource` and the refused template writes,
+ * `TEMPLATE_EDITOR_REFUSED_TOOLS`) apply only to such a conversation.
+ */
+export async function templateEditorTypeOf(db: AssistantExecutor, conversationId: string): Promise<TemplateDocumentType | null> {
+  const [first] = await db
+    .select({ body: assistantItemTable.body })
+    .from(assistantItemTable)
+    .where(and(eq(assistantItemTable.conversationId, conversationId), eq(assistantItemTable.kind, 'user_message')))
+    .orderBy(asc(assistantItemTable.position))
+    .limit(1);
+  const seed = first ? (first.body as AssistantUserMessageBody).seed : undefined;
+  return seed?.kind === 'document_template' ? seed.documentType : null;
 }
 
 export async function insertRun(

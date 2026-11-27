@@ -72,11 +72,11 @@ async function lockOnboarding(transaction: DatabaseExecutor, schoolId: string) {
 }
 
 /** The subjects of one class, each with the single Written mode (`ONBOARDING_SUBJECT_EXAM_MODES`). */
-function subjectsConfig(names: readonly string[]): ClassConfig {
+export function subjectsConfig(names: readonly string[]): ClassConfig {
   const slugs = onboardingSubjectSlugs(names);
   return {
     subjects: Object.fromEntries(
-      names.map((name, index) => [slugs[index]!, { name, books: [], examModes: structuredClone(ONBOARDING_SUBJECT_EXAM_MODES) }]),
+      names.map((name, index) => [slugs[index]!, { name, books: [], examModes: structuredClone(ONBOARDING_SUBJECT_EXAM_MODES), attachment: { kind: 'school' as const } }]),
     ),
   };
 }

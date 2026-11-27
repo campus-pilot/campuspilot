@@ -33,12 +33,7 @@ export type ManagementCommandContext = {
   firstTemplatePath?: string | null;
 };
 
-/**
- * A palette command. What choosing it does is its own field: `navigate`
- * goes to its `destination`; `question-paper-picker` opens the palette's
- * exam-then-class picker, which ends on an examination's Question paper tab
- * with the chosen class open.
- */
+/** A palette command: choosing it goes to its `destination`. */
 export type ManagementCommandDefinition = {
   id: string;
   label: string;
@@ -48,10 +43,8 @@ export type ManagementCommandDefinition = {
   defaultSuggestion: boolean;
   requiresSession?: boolean;
   wrap: (children: ReactNode) => ReactNode;
-} & (
-  | { kind: 'navigate'; destination: (context: ManagementCommandContext) => string }
-  | { kind: 'question-paper-picker' }
-);
+  destination: (context: ManagementCommandContext) => string;
+};
 
 /**
  * Each complete command is independently permission-composed. Session needs
@@ -75,17 +68,6 @@ export function createManagementCommandRegistry(
       </RequirePermissions>
     );
 
-  const permissionsWrap = (actions: (typeof SCHOOL_ACTIONS)[keyof typeof SCHOOL_ACTIONS][]) =>
-    (children: ReactNode) => (
-      <RequirePermissions
-        permissions={actions.map(
-          (action) => ({ action, resource: { kind: 'school', schoolId: context.schoolId } }) as PermissionCheck,
-        )}
-      >
-        {children}
-      </RequirePermissions>
-    );
-
   // A feature and a permission are separate gates; a command of a feature needs both.
   const studentManagementWrap = (inner: (children: ReactNode) => ReactNode) =>
     (children: ReactNode) => (
@@ -102,7 +84,6 @@ export function createManagementCommandRegistry(
       icon: UserRoundPlus,
       keywords: ['students', 'registration', 'enrolment'],
       defaultSuggestion: true,
-      kind: 'navigate',
       destination: ({ schoolId }) => schoolHref(schoolId, '/admission'),
       wrap: studentManagementWrap(permissionWrap(SCHOOL_ACTIONS.LIST_ADMISSIONS)),
     },
@@ -114,7 +95,6 @@ export function createManagementCommandRegistry(
       keywords: ['classes', 'sections', 'students'],
       defaultSuggestion: true,
       requiresSession: true,
-      kind: 'navigate',
       destination: ({ schoolId, sessionId }) =>
         sessionId
           ? schoolSessionHref(schoolId, sessionId, '/classroom')
@@ -129,7 +109,6 @@ export function createManagementCommandRegistry(
       keywords: ['exam', 'results', 'assessments'],
       defaultSuggestion: true,
       requiresSession: true,
-      kind: 'navigate',
       destination: ({ schoolId, sessionId }) =>
         sessionId
           ? schoolSessionHref(schoolId, sessionId, '/exam')
@@ -139,18 +118,18 @@ export function createManagementCommandRegistry(
     {
       id: 'question-papers',
       label: 'Question papers',
-      description: 'Choose an examination and a class',
+      description: "Open quick papers and the session's exam papers",
       icon: NotebookPen,
-      keywords: ['question paper', 'papers', 'exam paper', 'ai'],
+      keywords: ['question paper', 'papers', 'quick paper', 'exam paper', 'ai'],
       defaultSuggestion: false,
       requiresSession: true,
-      kind: 'question-paper-picker',
-      // Separate gates, each its own fact: the exams, the plans the tab
-      // reads, and the assistant (question papers belong to its feature).
+      destination: ({ schoolId, sessionId }) =>
+        sessionId ? schoolSessionHref(schoolId, sessionId, '/question-papers') : schoolHref(schoolId),
+      // Separate gates, each its own fact, as the sidebar entry: creating quick
+      // papers (the command is for the people who write papers), and the
+      // assistant (question papers belong to its feature).
       wrap: (children) =>
-        permissionsWrap([SCHOOL_ACTIONS.READ_EXAMS, SCHOOL_ACTIONS.READ_EXAM_PLANS])(
-          <AssistantAccess schoolId={context.schoolId}>{children}</AssistantAccess>,
-        ),
+        permissionWrap(SCHOOL_ACTIONS.MANAGE_STANDALONE_PAPERS)(<AssistantAccess schoolId={context.schoolId}>{children}</AssistantAccess>),
     },
     {
       id: 'settings',
@@ -159,7 +138,6 @@ export function createManagementCommandRegistry(
       icon: Settings,
       keywords: ['school', 'configuration', 'preferences'],
       defaultSuggestion: false,
-      kind: 'navigate',
       destination: ({ schoolId }) => schoolHref(schoolId, '/settings'),
       wrap: permissionWrap(SCHOOL_ACTIONS.READ_DETAILS),
     },
@@ -175,7 +153,6 @@ export function createManagementCommandRegistry(
             icon: WandSparkles,
             keywords: ['documents', 'report cards', 'question paper', 'design'],
             defaultSuggestion: false,
-            kind: 'navigate' as const,
             destination: ({ schoolId, firstTemplatePath }: ManagementCommandContext) =>
               schoolHref(schoolId, firstTemplatePath ?? '/settings'),
             wrap: permissionWrap(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES),

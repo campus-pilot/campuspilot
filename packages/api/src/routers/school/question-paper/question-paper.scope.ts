@@ -1,7 +1,7 @@
 import type { DatabaseExecutor, DatabaseTransaction } from '@campuspilot/db';
 import { classTable } from '@campuspilot/db/schema/class';
 import { examLifecycleTable, examPlanTable } from '@campuspilot/db/schema/exam';
-import { examQuestionPaperTable } from '@campuspilot/db/schema/exam-question-paper';
+import { examQuestionPaperTable, type QuestionPaperPrintLayout } from '@campuspilot/db/schema/exam-question-paper';
 import { ORPCError } from '@orpc/server';
 import { and, eq } from 'drizzle-orm';
 
@@ -172,16 +172,24 @@ export async function assertPaperWritableLocked(tx: DatabaseTransaction, key: Pa
 }
 
 /**
- * A standalone paper of a personal space (docs/personal-space.md), resolved:
- * the row exists, belongs to this school and is of kind `standalone`. It has
- * no exam plan behind it, so there is nothing to lock or check beyond the
- * paper row itself and the school's own read-only gate (`requireAuth`); its
- * details live on the row and are read where they are shown.
+ * A standalone paper, resolved (docs/personal-space.md, docs/question-papers.md
+ * "Quick papers in a school"): the row exists, belongs to this school and is of
+ * kind `standalone`. It has no exam plan behind it, so there is nothing to
+ * lock or check beyond the paper row itself and the school's own read-only
+ * gate (`requireAuth`); its details live on the row and are read where they
+ * are shown.
  */
 export type StandalonePaperScope = {
   kind: 'standalone';
   schoolId: string;
   paperId: string;
+  /**
+   * How the paper prints (`exam_question_paper.print_layout`), read with the
+   * row. Absent only in a scope a generation job journaled before quick
+   * papers existed, when every standalone paper was a personal space's plain
+   * one: {@link printLayoutOf} reads that as `plain`.
+   */
+  printLayout?: QuestionPaperPrintLayout;
 };
 
 /**
@@ -199,10 +207,62 @@ export const isStandalonePaper = (scope: ResolvedPaper): scope is StandalonePape
 /** The school a resolved paper belongs to. */
 export const paperSchoolIdOf = (scope: ResolvedPaper): string => (isStandalonePaper(scope) ? scope.schoolId : scope.key.schoolId);
 
-/** A standalone paper of this school, or NOT_FOUND (an exam paper's id, or another school's paper, is not found here). */
-export async function resolveStandalonePaper(db: DatabaseExecutor, input: { schoolId: string; paperId: string }): Promise<StandalonePaperScope> {
+/**
+ * How a resolved paper prints: an exam paper always with the school's
+ * template; a standalone paper as its row says (a scope journaled before the
+ * layout existed is a personal space's `plain` paper).
+ */
+export const printLayoutOf = (scope: ResolvedPaper): QuestionPaperPrintLayout =>
+  isStandalonePaper(scope) ? (scope.printLayout ?? 'plain') : 'school_template';
+
+/**
+ * Who may reach which standalone papers of a school: the papers the person
+ * created (`exam_question_paper.created_by`), and every one when they hold
+ * `school.standalone_paper.oversee`. Two facts read apart: the creator and the
+ * oversee decision (`standalonePaperReachOf` in the standalone router).
+ */
+export type StandalonePaperReach = { userId: string; oversee: boolean };
+
+/**
+ * A standalone paper of this school by its id, without any check of who
+ * asks: for trusted internal callers only (the generation job, which runs
+ * for a job a permitted person started). Everything a person or an agent
+ * calls goes through {@link resolveStandalonePaper}. NOT_FOUND for an exam
+ * paper's id or another school's paper.
+ */
+export async function findStandalonePaperScope(db: DatabaseExecutor, input: { schoolId: string; paperId: string }): Promise<StandalonePaperScope> {
+  const scope = await readStandalonePaper(db, input);
+  if (!scope) throw rpcError.notFound('Question paper');
+  return scope.scope;
+}
+
+/**
+ * A standalone paper of this school that the caller may reach
+ * ({@link StandalonePaperReach}), or NOT_FOUND: another person's paper is not
+ * found for someone without `oversee`, exactly like an unknown id, so its
+ * existence is not revealed. A paper whose creator was deleted
+ * (`created_by` null) is reached through `oversee` only.
+ */
+export async function resolveStandalonePaper(
+  db: DatabaseExecutor,
+  input: { schoolId: string; paperId: string },
+  reach: StandalonePaperReach,
+): Promise<StandalonePaperScope> {
+  const paper = await readStandalonePaper(db, input);
+  if (!paper || !(reach.oversee || (paper.createdBy !== null && paper.createdBy === reach.userId))) throw rpcError.notFound('Question paper');
+  return paper.scope;
+}
+
+async function readStandalonePaper(
+  db: DatabaseExecutor,
+  input: { schoolId: string; paperId: string },
+): Promise<{ scope: StandalonePaperScope; createdBy: string | null } | null> {
   const [paper] = await db
-    .select({ id: examQuestionPaperTable.id })
+    .select({
+      id: examQuestionPaperTable.id,
+      printLayout: examQuestionPaperTable.printLayout,
+      createdBy: examQuestionPaperTable.createdBy,
+    })
     .from(examQuestionPaperTable)
     .where(
       and(
@@ -212,8 +272,11 @@ export async function resolveStandalonePaper(db: DatabaseExecutor, input: { scho
       ),
     )
     .limit(1);
-  if (!paper) throw rpcError.notFound('Question paper');
-  return { kind: 'standalone', schoolId: input.schoolId, paperId: paper.id };
+  if (!paper) return null;
+  return {
+    scope: { kind: 'standalone', schoolId: input.schoolId, paperId: paper.id, printLayout: paper.printLayout },
+    createdBy: paper.createdBy,
+  };
 }
 
 /**

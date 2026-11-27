@@ -1,5 +1,6 @@
 import type { DatabaseExecutor } from "@campuspilot/db";
 import { schoolTable } from "@campuspilot/db/schema/school";
+import type { QuestionPaperPrintedDetails } from "@campuspilot/db/schema/exam-question-paper";
 import { eq } from "drizzle-orm";
 
 import { rpcError } from "../../../errors";
@@ -76,14 +77,8 @@ export async function buildQuestionPaperContext(
   paper: { versionNo: number | null },
   generatedAt: Date = new Date(),
 ): Promise<QuestionPaperContext> {
-  const [school] = await db
-    .select({ name: schoolTable.name, location: schoolTable.location, registrationNo: schoolTable.registrationNo, logoS3Key: schoolTable.logoS3Key })
-    .from(schoolTable)
-    .where(eq(schoolTable.id, scope.key.schoolId))
-    .limit(1);
-  if (!school) throw rpcError.notFound("School");
   return {
-    school: await buildSchoolDocumentContext(school),
+    school: await schoolBlockOf(db, scope.key.schoolId),
     session: { startYear: scope.sessionStartYear, endYear: scope.sessionEndYear },
     generatedAt: generatedAt.toISOString(),
     exam: { name: scope.examName, slug: scope.key.examSlug, order: scope.examOrder },
@@ -101,6 +96,108 @@ export async function buildQuestionPaperContext(
       direction: "ltr",
       versionNo: paper.versionNo,
       bodyHtml: QUESTION_PAPER_SLOT,
+    },
+  };
+}
+
+/** The school block every question paper context shares. */
+async function schoolBlockOf(db: DatabaseExecutor, schoolId: string): Promise<QuestionPaperContext["school"]> {
+  const [school] = await db
+    .select({ name: schoolTable.name, location: schoolTable.location, registrationNo: schoolTable.registrationNo, logoS3Key: schoolTable.logoS3Key })
+    .from(schoolTable)
+    .where(eq(schoolTable.id, schoolId))
+    .limit(1);
+  if (!school) throw rpcError.notFound("School");
+  return buildSchoolDocumentContext(school);
+}
+
+/**
+ * What a quick paper's heading prints: the shape a version keeps
+ * (`printed_details`): the paper's names and marks, and the session years.
+ */
+export type QuickPaperPrintedDetails = QuestionPaperPrintedDetails;
+
+/** The paper's own facts among {@link QuickPaperPrintedDetails}: the names and the maximum marks. */
+export type QuickPaperNamedDetails = Pick<QuickPaperPrintedDetails, "className" | "subjectName" | "examName" | "maxMarks">;
+
+/**
+ * The template context of a quick paper (a standalone paper of a real school
+ * that prints with the school's template; docs/question-papers.md "Quick
+ * papers in a school"). The same shape as an exam paper's, so every school
+ * template renders it:
+ *
+ * - `school`: the school, as for every document.
+ * - `session`: the printed session years. A quick paper belongs to no
+ *   session; a new print takes the school's active session
+ *   (`currentQuickPaperPrintedDetails`), a stored version its own snapshot.
+ * - the exam name, class name, subject name and `maxMarks` come from the
+ *   paper's details (the ones a save is about to store, or a version's
+ *   snapshot); a detail the paper does not state is an empty name, or null
+ *   marks.
+ * - A quick paper has no exam slug, order, subject slug or mode: those are
+ *   empty (`order` 0), never invented.
+ */
+export async function buildQuickPaperContext(
+  db: DatabaseExecutor,
+  input: { schoolId: string; printed: QuickPaperPrintedDetails; versionNo: number | null },
+  generatedAt: Date = new Date(),
+): Promise<QuestionPaperContext> {
+  const { printed } = input;
+  return {
+    school: await schoolBlockOf(db, input.schoolId),
+    session: { startYear: printed.sessionStartYear, endYear: printed.sessionEndYear },
+    generatedAt: generatedAt.toISOString(),
+    exam: { name: printed.examName ?? "", slug: "", order: 0 },
+    questionPaper: {
+      className: printed.className ?? "",
+      subjectName: printed.subjectName ?? "",
+      subjectSlug: "",
+      modeName: "",
+      modeSlug: "",
+      maxMarks: printed.maxMarks,
+      totalMarks: null,
+      timeAllowed: null,
+      language: null,
+      script: null,
+      direction: "ltr",
+      versionNo: input.versionNo,
+      bodyHtml: QUESTION_PAPER_SLOT,
+    },
+  };
+}
+
+/**
+ * A context as the template's printed lines are read for a quick paper
+ * (`readTemplatePrints`), not for a print: the same shape, except that a
+ * detail the paper does not state yet is shown by a placeholder in square
+ * brackets ("[class]", "[maximum marks]") instead of an empty value. A
+ * template that prints the maximum marks only when they are known
+ * (`{{#if questionPaper.maxMarks}}`) would otherwise hide that line, and an
+ * author who writes the paper's first version would print the marks again in
+ * the body, under the line the template adds once the details are saved.
+ */
+export type QuestionPaperPrintsContext = Omit<QuestionPaperContext, "questionPaper"> & {
+  questionPaper: Omit<QuestionPaperContext["questionPaper"], "maxMarks"> & { maxMarks: number | string | null };
+};
+
+/** The placeholders {@link withDetailPlaceholders} shows for details a quick paper does not state yet. */
+export const QUICK_PAPER_DETAIL_PLACEHOLDERS = {
+  className: "[class]",
+  subjectName: "[subject]",
+  examName: "[examination]",
+  maxMarks: "[maximum marks]",
+} as const;
+
+/** A quick paper's context with {@link QUICK_PAPER_DETAIL_PLACEHOLDERS} for every detail it does not state ({@link QuestionPaperPrintsContext}). */
+export function withDetailPlaceholders(context: QuestionPaperContext, details: QuickPaperNamedDetails): QuestionPaperPrintsContext {
+  return {
+    ...context,
+    exam: { ...context.exam, name: details.examName ?? QUICK_PAPER_DETAIL_PLACEHOLDERS.examName },
+    questionPaper: {
+      ...context.questionPaper,
+      className: details.className ?? QUICK_PAPER_DETAIL_PLACEHOLDERS.className,
+      subjectName: details.subjectName ?? QUICK_PAPER_DETAIL_PLACEHOLDERS.subjectName,
+      maxMarks: details.maxMarks ?? QUICK_PAPER_DETAIL_PLACEHOLDERS.maxMarks,
     },
   };
 }

@@ -75,11 +75,17 @@ management screens. It records the reference implementations, layout and feedbac
 conventions, mobile verification expectations, and examination redesign decisions.
 
 Before changing document generation, document history, school template settings,
-the template marketplace, or template rendering, read the canonical
+the template marketplace, template rendering, the default templates new schools
+start with, or Bill due, read the canonical
 [Document system guide](docs/document-system.md). It records the route ownership,
 permission boundaries, immutable template lifecycle, all-classroom timetable
 invariant, safe Handlebars contract, and the checks required when extending a
 document type or marketplace design.
+
+PDF generation through `generateDocument` is a batched job in the worker: the
+API validates, pins and queues it and never waits; read "Generation jobs" and
+"Images as conversion assets" in the document system guide before changing
+generation, batching, image handling in documents or the CSP of converted HTML.
 
 Before implementing or redesigning a workflow, inspect existing screens with the
 same behavior (admission/staff tables, classroom/admission workspaces and student
@@ -144,7 +150,10 @@ Cadet visibility rule, and the checklist for extending notices.
 ## Question papers
 
 Before changing anything question-paper-related (the `exam_question_paper_*`
-tables, `routers/school/question-paper` and its MCP tools, the HTML fragment
+tables, `routers/school/question-paper` and its MCP tools, a school's quick
+papers (standalone papers of a real school, their `print_layout`, printed
+heading snapshot, details and `school.standalone_paper.oversee`), the Question papers page and
+its sidebar entry, the HTML fragment
 rules and limits in `packages/question-paper`, the `question_paper_body`
 sanitiser, the renderer and the `question_paper`
 document type and its template slot, the durable generation job in
@@ -155,9 +164,13 @@ model (a paper per class, subject and mode of an exam, immutable versions with a
 PDF each), the permission order and the `assistant` gate (there is no separate
 flag), the data model, the HTML fragment vocabulary, the sanitiser profile and its
 no-animation rule, the renderer contract with its deliberate CSP and
-post-sanitiser insertion exceptions, the job's steps and failure codes,
-how chat attachments, tools, drafts and context pruning work, and the checklist
-for extending papers.
+post-sanitiser insertion exceptions, the Word (.docx) download (made on a
+version's first Word download by the Pandoc service, `PANDOC_URL`, stored as a
+`docx` artifact, one way only), the job's steps and failure codes,
+how chat attachments, tools, drafts and context pruning work, quick papers
+(printed with the school's template, reached by their creator or with
+`oversee`, none of a personal space's limits, only with AI), the Question
+papers page, and the checklist for extending papers.
 
 ## Performance logs
 
@@ -181,6 +194,20 @@ routes and their proof-of-work, the `lead` table, the `LeadControl` /
 [Website leads](docs/leads.md). A submission must only depend on the lead
 insert; every side effect (the WhatsApp alert) is scheduled after commit and
 may fail without failing the request.
+
+## School Onboarding form
+
+Before changing the website's standalone `/onboarding` page, the public
+`/public/leads/school-onboarding` route, the `school_registration_request`
+table, its S3 files, its WhatsApp alert, the admin School onboarding page, or
+setting a school up from a submission (`school_setup`, the `SchoolSetup`
+workflow, `routers/system-admin/school-setup`, the setup wizard), read
+[School Onboarding form](docs/school-onboarding-form.md). The page is kept out
+of search on purpose (robots meta, `robots.txt`, `X-Robots-Tag`) and is linked
+from nowhere; uploads are bounded by type (sniffed from bytes) and size on the
+server, and the voice note's ten minutes by the recorder. Each setup step is
+one transaction that records its own completion; keep it that way when adding
+a step, so a retry never creates anything twice.
 
 ## School feature flags and subscription tiers
 
@@ -247,7 +274,8 @@ Before changing who gets a personal space (`school.kind = 'personal'`, the
 Google sign-up hook, `personalSpace.*`), the school kind gate (`schoolKinds`
 in procedure metadata, `requireAuth`, `assertSchoolKindServedByCaller`),
 standalone question papers (`exam_question_paper.kind = 'standalone'`, their
-details, procedures, plain shell and job branch), the personal space screens
+details, procedures, plain shell and job branch; a real school's are its quick
+papers, see the Question papers guide), the personal space screens
 in `apps/management`, or before letting another procedure serve personal
 spaces, read [Personal space](docs/personal-space.md). A procedure serves
 real schools only unless it says otherwise, reads included; the eligibility

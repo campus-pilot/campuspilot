@@ -1,0 +1,252 @@
+'use client';
+
+import { skipToken, useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { useSearchParams } from 'next/navigation';
+import { ArrowLeft, History } from 'lucide-react';
+import type { TemplateRevision } from '@campuspilot/api/routers/school/document/document.dto';
+import { OptionSelect } from '@campuspilot/components/option-select';
+import {
+  TemplateRevisionList,
+  TemplateRevisionNotice,
+  type TemplateRevisionView,
+} from '@campuspilot/components/documents/template-revisions';
+import { Button } from '@campuspilot/ui/components/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@campuspilot/ui/components/dialog';
+import { Skeleton } from '@campuspilot/ui/components/skeleton';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@campuspilot/ui/components/tooltip';
+
+import { orpc } from '@/lib/orpc';
+import { replaceSearchParam } from '@/lib/search-param';
+
+import { DocumentReadError, type DocumentTemplateScope } from './document-common';
+import { TemplateRevisionPdfPreview } from './template-pdf-preview';
+
+/** The select's value for the editor's own working copy (a revision id never looks like this). */
+const WORKING_COPY = 'working';
+
+export const revisionViewOf = (revision: TemplateRevision): TemplateRevisionView => ({ ...revision, createdAt: new Date(revision.createdAt) });
+
+/**
+ * The revision the preview shows instead of the working copy, from the
+ * editor's address (`?revision=<id>`, as the question paper studio keeps
+ * `?version=n`), so a reload or a shared link keeps it. Null: the working
+ * copy. The id is only a request: the server decides whether this school's
+ * template of this type has such a revision. Choosing one rewrites the
+ * address in place (`replaceSearchParam`): looking through revisions is not
+ * a trail for Back, and no navigation refetches the page.
+ */
+export function useRevisionParam() {
+  const search = useSearchParams();
+  const raw = search.get('revision');
+  const revisionId = raw && /^[A-Za-z0-9_-]{1,100}$/.test(raw) ? raw : null;
+  const setRevision = (next: string | null) => replaceSearchParam('revision', next);
+  return { revisionId, setRevision };
+}
+
+/** The newest revisions (one page), for the header's select; the history dialog pages through the rest. */
+function useRecentRevisions(scope: DocumentTemplateScope) {
+  return useQuery(orpc.school.listDocumentTemplateRevisions.queryOptions({ input: { ...scope, limit: 20 } }));
+}
+
+/** One revision with its source. A revision never changes, so it is read once. */
+export function useTemplateRevision(scope: DocumentTemplateScope, revisionId: string | null) {
+  return useQuery({
+    ...orpc.school.getDocumentTemplateRevision.queryOptions({ input: revisionId ? { ...scope, revisionId } : skipToken }),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+}
+
+/**
+ * Which revision is on screen, as the question paper studio's version
+ * select: the newest revisions, the one in use marked. The working copy is
+ * the editor's own, in the browser: until anything changes (a hand edit, a
+ * draft from the assistant, a restore) the editor shows the revision it
+ * opened on (`baseRevisionId`), so the select names that revision and
+ * choosing it is the editable view; once something changed, *Working copy
+ * (unsaved)* is an option of its own and the base revision opens read-only
+ * like any other. A revision opened from the
+ * history that is older than the listed ones is added so the select can
+ * name it. The history button (`AllRevisionsButton`) opens every revision.
+ */
+export function RevisionPicker({
+  scope,
+  revisionId,
+  baseRevisionId,
+  shown,
+  failed,
+  dirty,
+  onChange,
+}: {
+  scope: DocumentTemplateScope;
+  revisionId: string | null;
+  /** The revision the editor opened on, which an unchanged editor shows. */
+  baseRevisionId: string;
+  /** The revision on screen when it was read; it names the select's value when it is not among the newest. */
+  shown: TemplateRevision | undefined;
+  /** The revision asked for could not be read (an old or mistyped link). */
+  failed: boolean;
+  dirty: boolean;
+  onChange: (revisionId: string | null) => void;
+}) {
+  const recent = useRecentRevisions(scope);
+  const listed = recent.data?.items ?? [];
+  const revisions = shown && !listed.some((revision) => revision.revisionId === shown.revisionId) ? [...listed, shown] : listed;
+  // A revision asked for that the select cannot name yet (still loading, or not found) is an option of its own,
+  // so the select shows what the preview shows and choosing Working copy is a change that leaves it.
+  const unnamed = revisionId && !revisions.some((revision) => revision.revisionId === revisionId) ? revisionId : null;
+  // Unchanged, the editable view is the base revision itself, so it stands for the working copy.
+  const editable = dirty ? WORKING_COPY : baseRevisionId;
+  const options = [
+    ...(dirty ? [{ value: WORKING_COPY, label: 'Working copy (unsaved)' }] : []),
+    // Until the list has loaded, the unchanged editor's revision still has a name to show.
+    ...(!dirty && !revisions.some((revision) => revision.revisionId === baseRevisionId) ? [{ value: baseRevisionId, label: 'Current revision' }] : []),
+    ...revisions.map((revision) => ({ value: revision.revisionId, label: `Revision ${revision.revisionNo}${revision.selected ? ' (in use)' : ''}` })),
+    ...(unnamed ? [{ value: unnamed, label: failed ? 'Revision not found' : 'Loading revision…' }] : []),
+  ];
+  return (
+    <OptionSelect
+      value={revisionId ?? editable}
+      options={options}
+      onValueChange={(value) => onChange(value === editable ? null : value)}
+      triggerProps={{ 'aria-label': 'Revision', className: 'w-52 max-md:w-36' }}
+    />
+  );
+}
+
+/** Opens every revision (`RevisionHistoryDialog`): an icon button named by its tooltip, styled like the header's Marketplace. */
+export function AllRevisionsButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button type="button" variant="outline" size="icon" aria-label="All revisions" onClick={onClick}>
+          <History aria-hidden />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>All revisions</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** Every revision, a page at a time (read only while the dialog is open: its list is mounted then). */
+function RevisionHistoryList({ scope, shownRevisionId, onView }: { scope: DocumentTemplateScope; shownRevisionId: string | null; onView: (revisionId: string) => void }) {
+  const list = useInfiniteQuery(
+    orpc.school.listDocumentTemplateRevisions.infiniteOptions({
+      input: (page: number) => ({ ...scope, limit: 20, page }),
+      initialPageParam: 1,
+      getNextPageParam: ({ pagination }) => (pagination.currentPage < pagination.totalPages ? pagination.currentPage + 1 : undefined),
+    }),
+  );
+  // Held pages win over a failed refetch, so the list never blanks under the user.
+  if (list.data === undefined) {
+    return list.isPending ? <Skeleton className="h-28 w-full rounded-lg" /> : <DocumentReadError error={list.error} retry={list.refetch} />;
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <TemplateRevisionList revisions={list.data.pages.flatMap((page) => page.items.map(revisionViewOf))} shownRevisionId={shownRevisionId} onView={onView} />
+      {list.hasNextPage ? (
+        <Button type="button" variant="ghost" className="self-center" disabled={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()}>
+          {list.isFetchingNextPage ? 'Loading…' : 'Show older'}
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+/** Every saved revision in a dialog, as the studio's "All versions"; previewing one shows it beside the editor. */
+export function RevisionHistoryDialog({
+  scope,
+  open,
+  onOpenChange,
+  shownRevisionId,
+  onView,
+}: {
+  scope: DocumentTemplateScope;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  shownRevisionId: string | null;
+  onView: (revisionId: string) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Revisions</DialogTitle>
+          <DialogDescription>Every save is a new revision. Earlier ones are kept and can be previewed and restored.</DialogDescription>
+        </DialogHeader>
+        <div className="max-h-[60dvh] overflow-y-auto">
+          {open ? (
+            <RevisionHistoryList
+              scope={scope}
+              shownRevisionId={shownRevisionId}
+              onView={(revisionId) => {
+                onOpenChange(false);
+                onView(revisionId);
+              }}
+            />
+          ) : null}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** The way back from a revision the preview could not show (still loading, or not found). */
+function BackToWorkingCopy({ onClose }: { onClose: () => void }) {
+  return (
+    <Button type="button" variant="ghost" size="sm" className="self-start" onClick={onClose}>
+      <ArrowLeft data-icon="inline-start" aria-hidden /> Back to working copy
+    </Button>
+  );
+}
+
+/**
+ * An earlier revision in the preview pane: what it is (read-only) above its
+ * PDF, with Restore for someone who may change the template. Nothing here
+ * is editable: a revision is immutable. Its PDF is previewed by the
+ * revision's id (`TemplateRevisionPdfPreview`), and while it loads or when it
+ * cannot be read the way back to the working copy is offered all the same.
+ */
+export function RevisionPreview({
+  scope,
+  revisionId,
+  revision,
+  printSize,
+  onRestore,
+  onClose,
+}: {
+  scope: DocumentTemplateScope;
+  revisionId: string;
+  revision: ReturnType<typeof useTemplateRevision>;
+  /** Notice designs only: the print size to preview at (the same choice as the working copy's). */
+  printSize: 'full' | 'half';
+  onRestore?: (revision: { content: string; pageSize: 'full' | 'half' }) => void;
+  onClose: () => void;
+}) {
+  if (!revision.data) {
+    return (
+      <div className="flex h-full min-h-0 flex-col gap-3">
+        <BackToWorkingCopy onClose={onClose} />
+        {revision.isError ? <DocumentReadError error={revision.error} retry={revision.refetch} /> : <Skeleton className="min-h-0 w-full flex-1 rounded-xl" />}
+      </div>
+    );
+  }
+  const { content } = revision.data;
+  const { pageSize } = revision.data.revision;
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-3">
+      <TemplateRevisionNotice
+        revision={revisionViewOf(revision.data.revision)}
+        onRestore={onRestore ? () => onRestore({ content, pageSize }) : undefined}
+        onClose={onClose}
+      />
+      <div className="min-h-0 flex-1">
+        <TemplateRevisionPdfPreview
+          scope={scope}
+          revisionId={revisionId}
+          printSize={printSize}
+          label={`Revision ${revision.data.revision.revisionNo} preview`}
+        />
+      </div>
+    </div>
+  );
+}

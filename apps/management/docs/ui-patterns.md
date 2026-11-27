@@ -115,8 +115,7 @@ default for every operational list.
 
 ### Sidebar entries that open in place
 
-A sidebar entry that leads to a choice rather than a page (today the Academics
-group's **Question papers**: examination, then class) is an
+A sidebar entry that leads to a choice rather than a page is an
 `AppShellNavigationDisclosure`: pressing it folds app-owned content open under it
 instead of opening a popover. The same markup then works in the desktop sidebar and
 the mobile sheet (a popover beside the sheet has no room on a phone); the shell's
@@ -124,10 +123,28 @@ sidebar collapses off-canvas, so there is no icon-only state. The content is mou
 only while open, so its reads start then. Render it as a `SidebarMenuSub`; its links
 use `AppShellSidebarSubLink` and code that navigates calls
 `useAppShellCloseMobileSidebar` first, so the sheet closes either way. Long lists
-(classes) are cmdk lists with a search box; short ones (a session's examinations)
-are plain nested folds. Show loading, empty and read-error states in each list, gate
-the entry with the same permissions and features as the page it leads to, and leave
-it out when a fact it needs (the selected session) is missing.
+are cmdk lists with a search box; short ones are plain nested folds. Show loading,
+empty and read-error states in each list, gate the entry with the same permissions
+and features as the page it leads to, and leave it out when a fact it needs (the
+selected session) is missing. No entry uses it today: the Academics group's
+**Question papers** once folded open to examinations and their classes, and the
+product owner replaced it with a plain link to one page that lists the papers
+(below). Prefer a page with filters over a fold when people look for a record.
+
+### Question papers page
+
+`/sessions/<id>/question-papers` lists the school's quick papers (they belong to no
+session, so every session's page has them) and the session's exam papers in one table, the admission pattern: `TableSearchBar` and `TableFilterBar` (Type,
+Status, Exam, Class, Subject) over a compact `DataTable` with server pagination,
+**Create question paper** in the header. It opens on the Type filter set to Quick
+papers (`defaultFilters`), so the filter shows as set and can be cleared. Never call
+them "standalone" in the UI: they are **Quick papers**, the others **Exam papers**.
+A phone keeps the Paper column (with type, class and exam under it) and Status.
+A quick paper's screen is the personal space's `StandalonePaperWorkspace` at
+`/question-papers/<paperId>`, under the management shell with the "Question papers"
+breadcrumb as the way back. The sidebar entry and the palette command are shown only to
+people who may create quick papers (and use the assistant). See
+[Question papers](../../../docs/question-papers.md#the-question-papers-page).
 
 ## Empty states and configuration-driven creation
 
@@ -137,10 +154,36 @@ container with “No plans yet”, a short muted explanation, and Create plan.
 
 Create plan opens a concise review dialog. Summarize classes, enrolled student
 counts, subjects and modes, with a checkbox per class choosing whether it takes
-part in the examination (every class with subjects selected by default, Select
-all / Deselect all, at least one class required before Create is enabled). The
-same table edits the classes later from Settings ("Classes taking part"). Clicking a class row expands its subject/mode breakdown
+part in the examination (no class selected when the dialog opens, Select all /
+Deselect all, at least one class required: submitting none shows the field
+error). Each class's breakdown has a checkbox per subject, all checked by
+default; only checked subjects get a plan and the footer counts follow the
+choice. The same table edits the classes later from Settings ("Classes taking
+part"): there a class taking part shows which subjects have plans, so ticking
+or unticking a subject adds or removes its plan on save. A review remounted
+after a refetch carries only the person's own changes (classes added or
+removed, subjects ticked or unticked), applied to what is saved now, never a
+snapshot of their whole selection. Clicking a class row expands its subject/mode breakdown
 as a sub-table directly underneath it; do not add a separate all-classes accordion.
+
+Subjects can be added from the examination without leaving it. A class without
+subjects shows Add subject in its row, and every breakdown has Add subject
+(gated on `CREATE_EXAM_PLAN` and `UPDATE_CLASS_CONFIGURATION`). The dialog
+reuses the classroom subject fields (`SubjectFormFields`: name, slug generated
+from the name, exam modes) plus "Also add to the classroom", unchecked by
+default: the subject is then offered only in this examination. Adding the first
+subject of a class selects it; the review refetches and remounts its form, so
+the dialog carries the person's other changes into the new form
+(`applyPlanSelectionChanges`) instead of resetting them. In Settings, a subject added
+to a class taking part gets its plan at once. Classroom → Subjects marks an
+exam-only subject with "Only for <exam>" and offers Move to classroom.
+
+Create plan also offers Add classroom beside Select all / Deselect all (gated on
+`CREATE_CLASS`). It opens the same Add classroom dialog as Classrooms
+(`AddClassDialog`) and creates a school-wide class, never one that belongs to
+the examination. The review then refetches; the new class has no subjects, so it
+joins unselected with its Add subject control. Settings ("Classes taking part")
+does not offer it.
 Do not ask users to re-enter facts that already exist in session/class configuration.
 The server validates the reviewed configuration and creates the plans atomically.
 Reject a stale or invalid review without leaving partial plans behind.
@@ -344,7 +387,7 @@ the implementation and APIs in more detail.
   the two documents stay the content and their frames stay the same rectangle. On a phone a *Photos | Paper*
   switch above the frame swaps what it shows. Use this pattern when two documents are read against each
   other: one toggle, equal panes, no synchronised scrolling unless the two really map line for line. Heading, top-right overflow (All versions, Download latest
-  PDF, the ways to add a new version, Delete paper with an app confirmation), breadcrumbs for
+  PDF, Download latest as Word, the ways to add a new version, Delete paper with an app confirmation), breadcrumbs for
   navigation, no back button.
 - Uploading, reordering, deleting and generating are closed when the exam is
   completed (D43), when a generation is queued/running, or when the user can only
@@ -391,9 +434,11 @@ deliberate and must remain visible in future redesigns:
   document and Document history. Do not reintroduce template selection or editing
   there.
 - School-level Settings owns the selected template and custom HTML. The template
-  marketplace owns discovery, contextual preview, and import. A marketplace card's
-  Preview navigates to a dedicated detail route; Use template creates and selects
-  an immutable school revision.
+  marketplace owns discovery, contextual preview, and import. It is a section of
+  its own like Settings (its own sidebar: Back to settings, the school's document
+  types, only the open type expanded with its designs); each design has its own
+  address and page, and Use template creates and selects an immutable school
+  revision.
 - When a document type has no selected school template, register one stable
   school-scoped `AppShellAlert` per authorized academic/finance domain. Viewers may
   see the warning, while only users with the corresponding domain's template-
@@ -403,7 +448,7 @@ deliberate and must remain visible in future redesigns:
   Once selected, reveal that type's required fields and preview/generation flow.
 - Template editing is a split workspace on wide screens and a stacked workspace
   on small screens: collapsible Handlebars source first, sanitized sample preview
-  second. Edit with AI and Marketplace are peer actions in the page header.
+  second. Get edit prompt and Marketplace are peer actions in the page header.
 - The AI helper is a portable-prompt workflow. It must remain provider-neutral and
   local to the browser; it never calls an AI service or silently replaces template
   source.
@@ -418,7 +463,7 @@ deliberate and must remain visible in future redesigns:
 
 - The question paper template is settings-only and belongs to the `assistant`
   feature: settings route `/settings/templates/question-paper` (nav item behind
-  `RequireFeature assistant`), a marketplace type card offered only with that
+  `RequireFeature assistant`), a marketplace sidebar type offered only with that
   feature, no footprint control (full A4). No default design is shipped; the body
   slot is placed exactly once.
 

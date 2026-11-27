@@ -14,11 +14,12 @@ import {
 import { schoolTable } from "@campuspilot/db/schema/school";
 import { schoolSessionTable } from "@campuspilot/db/schema/session";
 import { studentTable } from "@campuspilot/db/schema/student";
-import { sessionConfigSchema } from "@campuspilot/db/schema/jsonb/session-config";
+import { sessionConfigSchema, type SessionConfig } from "@campuspilot/db/schema/jsonb/session-config";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { rpcError } from "../../../errors";
-import type { DocumentSource } from "./document.dto";
+import { MAX_DOCUMENT_SOURCE_ITEMS, type DocumentSource } from "./document.dto";
 import { documentImage } from "./document.storage";
+import { documentImageRef, type DocumentImageRef } from "./document.images";
 import { withReportModeLayout } from "./document.report-modes";
 import { gradeLabel, scorePercent } from "../exam/exam-scoring";
 import { shareableAttendance, shareableCoScholastics } from "../exam/exam-assessment-rules";
@@ -63,23 +64,231 @@ export function documentScheduleSlot(row: {
 }
 
 /**
+ * How a context builder hands images to the renderer (`document.images.ts`):
+ * - `embed` (the default): `data:` URIs read now, as every caller outside
+ *   generation jobs and previews expects (notifications, the Cadet Portal
+ *   timetable, tests);
+ * - `reference`: a {@link DocumentImageRef} per image and no image read at
+ *   all. Previews resolve the references of their sample only; a generation
+ *   job resolves them per batch into conversion assets.
+ */
+export type DocumentImageMode = "embed" | "reference";
+
+/** Options every document context builder accepts. */
+export type DocumentContextOptions = {
+  images?: DocumentImageMode;
+  /**
+   * The instant every document prints as `generatedAt`. A generation job
+   * passes the moment its request was accepted, so a retried or resumed
+   * job prints the same value; otherwise it is now.
+   */
+  generatedAt?: Date;
+};
+
+type SchoolIdentity = {
+  name: string;
+  location: string | null;
+  registrationNo: string | null;
+  logoS3Key: string | null;
+};
+
+/**
  * The `school` block every document context carries: public identity facts
  * and the logo embedded as a data URI (null without a logo). The one builder
  * for academic, finance and notice documents, so the block cannot drift
  * between them.
  */
-export async function buildSchoolDocumentContext(school: {
-  name: string;
-  location: string | null;
-  registrationNo: string | null;
-  logoS3Key: string | null;
-}) {
+export async function buildSchoolDocumentContext(school: SchoolIdentity) {
   return {
     name: school.name,
     location: school.location,
     registrationNo: school.registrationNo,
     logoUrl: await documentImage(school.logoS3Key),
   };
+}
+
+/**
+ * The same `school` block for a builder in `images` mode: embedded as
+ * {@link buildSchoolDocumentContext} does, or with the logo as a reference.
+ */
+export async function schoolDocumentContextFor(
+  school: SchoolIdentity,
+  images: DocumentImageMode = "embed",
+): Promise<{
+  name: string;
+  location: string | null;
+  registrationNo: string | null;
+  logoUrl: string | DocumentImageRef | null;
+}> {
+  if (images === "embed") return buildSchoolDocumentContext(school);
+  return {
+    name: school.name,
+    location: school.location,
+    registrationNo: school.registrationNo,
+    logoUrl: documentImageRef(school.logoS3Key),
+  };
+}
+
+type SchoolClassRow = typeof classTable.$inferSelect;
+type TimetableRow = NonNullable<(typeof examTimetableTable.$inferSelect)["config"]>["rows"][number];
+
+/** A timetable's slots in print order: date, then start time, then id. */
+export function sortedTimetableRows(rows: readonly TimetableRow[]): TimetableRow[] {
+  return [...rows].sort(
+    (a, b) =>
+      a.date.localeCompare(b.date) ||
+      a.startTime.localeCompare(b.startTime) ||
+      a.id.localeCompare(b.id),
+  );
+}
+
+/**
+ * The subjects one timetable slot schedules for one class, resolved to their
+ * configured names. A subject or mode that is no longer configured is a
+ * BAD_REQUEST (the timetable must be updated first). Shared by generation
+ * and template previews.
+ */
+export function timetableCellSubjects(
+  row: TimetableRow,
+  classId: string,
+  classMap: ReadonlyMap<string, Pick<SchoolClassRow, "config">>,
+) {
+  const cell = row.cells[classId];
+  return (cell ? (Array.isArray(cell) ? cell : [cell]) : []).map((entry) => {
+    const subject = classMap.get(classId)?.config.subjects[entry.subjectSlug];
+    if (!subject?.examModes[entry.modeSlug])
+      throw rpcError.badRequest(
+        "A timetable subject or mode is no longer configured. Update the timetable first.",
+      );
+    return {
+      ...entry,
+      subjectName: subject.name,
+      modeName: subject.examModes[entry.modeSlug]!.name,
+    };
+  });
+}
+
+/** The `exam` block of an examination document: its definition plus its lifecycle facts (null when unknown). */
+export function examDocumentContext(
+  exam: { slug: string; name: string; order: number },
+  lifecycle: Pick<typeof examLifecycleTable.$inferSelect, "status" | "startedAt" | "completedAt"> | undefined,
+) {
+  return {
+    ...exam,
+    status: lifecycle?.status ?? null,
+    startedAt: lifecycle?.startedAt?.toISOString() ?? null,
+    completedAt: lifecycle?.completedAt?.toISOString() ?? null,
+  };
+}
+
+/**
+ * The `student` block of a student document. The one builder for generation
+ * and template previews, so the block cannot drift between them. The photo
+ * is passed in as the caller's image mode produced it.
+ */
+export function studentDocumentIdentity(
+  row: {
+    admission: Pick<
+      typeof admissionTable.$inferSelect,
+      "name" | "admissionNo" | "dob" | "fatherName" | "motherName" | "address" | "phoneNo" | "whatsappNo"
+    >;
+    student: Pick<typeof studentTable.$inferSelect, "rollNo">;
+    className: string;
+    sectionName: string | null;
+  },
+  photoUrl: string | DocumentImageRef | null,
+) {
+  const { admission, student } = row;
+  return {
+    name: admission.name,
+    admissionNo: admission.admissionNo,
+    dob: admission.dob,
+    fatherName: admission.fatherName,
+    motherName: admission.motherName,
+    address: admission.address,
+    // Display form (`+91 98765 43210`); an unmigrated value is shown as stored.
+    phoneNo: formatPhoneNumberForDisplay(admission.phoneNo),
+    whatsappNo: admission.whatsappNo === null ? null : formatPhoneNumberForDisplay(admission.whatsappNo),
+    className: row.className,
+    sectionName: row.sectionName,
+    rollNo: student.rollNo?.toString() ?? null,
+    photoUrl,
+  };
+}
+
+/** Whether a result's marks are exactly the plan's modes, each within its maximum. */
+export function resultMarksMatchPlan(
+  marks: Readonly<Record<string, number>>,
+  modeConfig: Readonly<Record<string, { maxMarks: number }>>,
+) {
+  return (
+    Object.entries(modeConfig).every(
+      ([slug, mode]) => Object.hasOwn(marks, slug) && marks[slug]! <= mode.maxMarks,
+    ) && Object.keys(marks).every((slug) => Object.hasOwn(modeConfig, slug))
+  );
+}
+
+/**
+ * One subject of a report card from its plan and the student's marks. It
+ * checks nothing: generation validates the result against the plan first,
+ * and a template preview passes marks it made to fit the plan.
+ */
+export function reportCardSubject(input: {
+  plan: Pick<typeof examPlanTable.$inferSelect, "subjectSlug" | "totalMarks" | "modeConfig" | "totalWorkingDays">;
+  subject: { name: string; examModes: Record<string, { name: string }> };
+  result: Pick<typeof examResultTable.$inferSelect, "marks" | "daysAttended" | "coScholastics">;
+  config: Pick<SessionConfig, "gradingScale" | "coScholasticAreas">;
+}) {
+  const { plan, subject, result, config } = input;
+  const total = Object.values(result.marks).reduce((sum, mark) => sum + mark, 0);
+  const percentage = percent(total, plan.totalMarks);
+  return {
+    slug: plan.subjectSlug,
+    name: subject.name,
+    totalMarks: plan.totalMarks,
+    marks: result.marks,
+    modeConfig: Object.fromEntries(
+      Object.entries(plan.modeConfig).map(([slug, mode]) => [
+        slug,
+        { ...mode, name: subject.examModes[slug]?.name ?? slug },
+      ]),
+    ),
+    total,
+    percentage,
+    grade: documentGrade(percentage, config.gradingScale),
+    attendance:
+      result.daysAttended !== null && plan.totalWorkingDays !== null
+        ? {
+            daysAttended: result.daysAttended,
+            totalWorkingDays: plan.totalWorkingDays,
+            percentage: percent(result.daysAttended, plan.totalWorkingDays),
+          }
+        : null,
+    coScholastics: result.coScholastics
+      ? Object.fromEntries(
+          Object.entries(result.coScholastics).map(([slug, grade]) => [
+            slug,
+            { areaName: config.coScholasticAreas[slug]?.name ?? slug, grade },
+          ]),
+        )
+      : null,
+  };
+}
+
+/** A report card's totals over its subjects, graded with the session's scale. */
+export function reportCardTotals(
+  subjects: ReadonlyArray<{ total: number; totalMarks: number }>,
+  gradingScale: SessionConfig["gradingScale"],
+) {
+  const grandTotal = subjects.reduce((sum, s) => sum + s.total, 0);
+  const grandMaxMarks = subjects.reduce((sum, s) => sum + s.totalMarks, 0);
+  const overallPercentage = percent(grandTotal, grandMaxMarks);
+  return { grandTotal, grandMaxMarks, overallPercentage, overallGrade: documentGrade(overallPercentage, gradingScale) };
+}
+
+/** The session's grading scale as report cards print it: highest threshold first. */
+export function documentGradingScale(gradingScale: SessionConfig["gradingScale"]) {
+  return Object.fromEntries(Object.entries(gradingScale).sort(([, a], [, b]) => b.minScore - a.minScore));
 }
 
 /** Called inside a repeatable-read transaction. Every relationship is checked
@@ -90,8 +299,10 @@ export async function buildDocumentContexts(
   db: DatabaseExecutor,
   schoolId: string,
   source: DocumentSource,
+  options: DocumentContextOptions = {},
 ) {
-  if (source.documentType === "bill" || source.documentType === "receipt" || source.documentType === "statement") {
+  const images = options.images ?? "embed";
+  if (source.documentType === "bill" || source.documentType === "receipt" || source.documentType === "statement" || source.documentType === "bill_due") {
     throw rpcError.badRequest("Finance documents use the immutable finance context builder.");
   }
   const [school] = await db
@@ -170,7 +381,7 @@ export async function buildDocumentContexts(
         )
         .limit(1)
     : [];
-  const schoolContext = await buildSchoolDocumentContext(school);
+  const schoolContext = await schoolDocumentContextFor(school, images);
   const [lifecycle] = examSlug
     ? await db
         .select()
@@ -190,40 +401,12 @@ export async function buildDocumentContexts(
       startYear: session.sessionStartYear,
       endYear: session.sessionEndYear,
     },
-    exam: exam
-      ? {
-          ...exam,
-          status: lifecycle?.status ?? null,
-          startedAt: lifecycle?.startedAt?.toISOString() ?? null,
-          completedAt: lifecycle?.completedAt?.toISOString() ?? null,
-        }
-      : null,
-    generatedAt: new Date().toISOString(),
+    exam: exam ? examDocumentContext(exam, lifecycle) : null,
+    generatedAt: (options.generatedAt ?? new Date()).toISOString(),
   };
-  const sortedRows = [...(grid?.config.rows ?? [])].sort(
-    (a, b) =>
-      a.date.localeCompare(b.date) ||
-      a.startTime.localeCompare(b.startTime) ||
-      a.id.localeCompare(b.id),
-  );
-  const subjectsForCell = (
-    row: (typeof sortedRows)[number],
-    classId: string,
-  ) => {
-    const cell = row.cells[classId];
-    return (cell ? (Array.isArray(cell) ? cell : [cell]) : []).map((entry) => {
-      const subject = classMap.get(classId)?.config.subjects[entry.subjectSlug];
-      if (!subject?.examModes[entry.modeSlug])
-        throw rpcError.badRequest(
-          "A timetable subject or mode is no longer configured. Update the timetable first.",
-        );
-      return {
-        ...entry,
-        subjectName: subject.name,
-        modeName: subject.examModes[entry.modeSlug]!.name,
-      };
-    });
-  };
+  const sortedRows = sortedTimetableRows(grid?.config.rows ?? []);
+  const subjectsForCell = (row: TimetableRow, classId: string) =>
+    timetableCellSubjects(row, classId, classMap);
   if (source.documentType === "timetable") {
     if (!grid || !sortedRows.length)
       throw rpcError.badRequest(
@@ -379,16 +562,16 @@ export async function buildDocumentContexts(
       asc(admissionTable.name),
       asc(studentTable.id),
     )
-    .limit(501);
+    .limit(MAX_DOCUMENT_SOURCE_ITEMS + 1);
   if (source.studentIds && enrolled.length !== source.studentIds.length)
     throw rpcError.notFound("One or more selected enrolled students");
   if (!enrolled.length)
     throw rpcError.badRequest(
       "This selection has no registered students in the selected session.",
     );
-  if (enrolled.length > 500)
+  if (enrolled.length > MAX_DOCUMENT_SOURCE_ITEMS)
     throw rpcError.badRequest(
-      "Select up to 500 students per document request.",
+      `Select up to ${MAX_DOCUMENT_SOURCE_ITEMS.toLocaleString("en-IN")} students per document request.`,
     );
   const results = source.documentType === "report_card" && plans.length
     ? await db
@@ -443,6 +626,13 @@ export async function buildDocumentContexts(
   const assessmentByStudent = new Map(
     assessments.map((row) => [row.studentId, row]),
   );
+  // One lookup per student and plan instead of scanning every result for
+  // each (quadratic in the class size, seconds of blocked CPU at 1,500
+  // students). A student has at most one result per plan (unique).
+  const resultKey = (studentId: string, planId: string) => `${studentId}\u0000${planId}`;
+  const resultByStudentPlan = new Map(
+    results.map((result) => [resultKey(result.studentId, result.examPlanId), result]),
+  );
   const requiresAssessment =
     source.documentType === "report_card" &&
     ((source.reportSections.includeAttendance &&
@@ -479,13 +669,8 @@ export async function buildDocumentContexts(
     if (source.documentType === "report_card") {
       const marksApproved =
         studentPlans.length > 0 &&
-        studentPlans.every((plan) =>
-          results.some(
-            (result) =>
-              result.studentId === student.id &&
-              result.examPlanId === plan.id &&
-              result.approved,
-          ),
+        studentPlans.every(
+          (plan) => resultByStudentPlan.get(resultKey(student.id, plan.id))?.approved === true,
         );
       if (!marksApproved || (requiresAssessment && !assessment?.approved)) {
         if (source.resultPolicy === "approved_only" && !source.studentIds) {
@@ -497,33 +682,28 @@ export async function buildDocumentContexts(
         );
       }
     }
-    const identity = {
-      name: admission.name,
-      admissionNo: admission.admissionNo,
-      dob: admission.dob,
-      fatherName: admission.fatherName,
-      motherName: admission.motherName,
-      address: admission.address,
-      // Display form (`+91 98765 43210`); an unmigrated value is shown as stored.
-      phoneNo: formatPhoneNumberForDisplay(admission.phoneNo),
-      whatsappNo: admission.whatsappNo === null ? null : formatPhoneNumberForDisplay(admission.whatsappNo),
-      className: schoolClass.label,
-      sectionName: section?.label ?? null,
-      rollNo: student.rollNo?.toString() ?? null,
-      photoUrl: await documentImage(admission.photoS3Key),
-    };
-    embeddedBytes +=
-      (identity.photoUrl?.length ?? 0) + (schoolContext.logoUrl?.length ?? 0);
-    if (embeddedBytes > 20_000_000)
-      throw rpcError.badRequest(
-        "The selected photos exceed the document size limit. Select fewer students or use smaller photos.",
-      );
+    const identity = studentDocumentIdentity(
+      { admission, student, className: schoolClass.label, sectionName: section?.label ?? null },
+      images === "embed"
+        ? await documentImage(admission.photoS3Key)
+        : documentImageRef(admission.photoS3Key),
+    );
+    // Embedded images travel inside the one HTML document, so they share
+    // its limit. Referenced images are limited per conversion batch instead
+    // (`DOCUMENT_BATCH_IMAGE_MAX_BYTES`).
+    if (images === "embed") {
+      embeddedBytes +=
+        (typeof identity.photoUrl === "string" ? identity.photoUrl.length : 0) +
+        (typeof schoolContext.logoUrl === "string" ? schoolContext.logoUrl.length : 0);
+      if (embeddedBytes > 20_000_000)
+        throw rpcError.badRequest(
+          "The selected photos exceed the document size limit. Select fewer students or use smaller photos.",
+        );
+    }
     const subjects =
       source.documentType === "report_card"
         ? studentPlans.map((plan) => {
-            const result = results.find(
-              (r) => r.examPlanId === plan.id && r.studentId === student.id,
-            );
+            const result = resultByStudentPlan.get(resultKey(student.id, plan.id));
             if (!result?.approved)
               throw rpcError.badRequest(
                 `Approve every subject result for ${admission.name} before generating report cards.`,
@@ -533,70 +713,14 @@ export async function buildDocumentContexts(
               throw rpcError.badRequest(
                 "A report subject is no longer configured.",
               );
-            const modes = Object.entries(plan.modeConfig);
-            if (
-              modes.some(
-                ([slug, mode]) =>
-                  !Object.hasOwn(result.marks, slug) ||
-                  result.marks[slug]! > mode.maxMarks,
-              ) ||
-              Object.keys(result.marks).some(
-                (slug) => !Object.hasOwn(plan.modeConfig, slug),
-              )
-            )
+            if (!resultMarksMatchPlan(result.marks, plan.modeConfig))
               throw rpcError.badRequest(
                 `Marks for ${admission.name} do not match the subject plan.`,
               );
-            const total = Object.values(result.marks).reduce(
-              (sum, mark) => sum + mark,
-              0,
-            );
-            const percentage = percent(total, plan.totalMarks);
-            return {
-              slug: plan.subjectSlug,
-              name: subject.name,
-              totalMarks: plan.totalMarks,
-              marks: result.marks,
-              modeConfig: Object.fromEntries(
-                modes.map(([slug, mode]) => [
-                  slug,
-                  { ...mode, name: subject.examModes[slug]?.name ?? slug },
-                ]),
-              ),
-              total,
-              percentage,
-              grade: documentGrade(percentage, config.gradingScale),
-              attendance:
-                result.daysAttended !== null && plan.totalWorkingDays !== null
-                  ? {
-                      daysAttended: result.daysAttended,
-                      totalWorkingDays: plan.totalWorkingDays,
-                      percentage: percent(
-                        result.daysAttended,
-                        plan.totalWorkingDays,
-                      ),
-                    }
-                  : null,
-              coScholastics: result.coScholastics
-                ? Object.fromEntries(
-                    Object.entries(result.coScholastics).map(
-                      ([slug, grade]) => [
-                        slug,
-                        {
-                          areaName:
-                            config.coScholasticAreas[slug]?.name ?? slug,
-                          grade,
-                        },
-                      ],
-                    ),
-                  )
-                : null,
-            };
+            return reportCardSubject({ plan, subject, result, config });
           })
         : [];
-    const grandTotal = subjects.reduce((sum, s) => sum + s.total, 0);
-    const grandMaxMarks = subjects.reduce((sum, s) => sum + s.totalMarks, 0);
-    const overallPercentage = percent(grandTotal, grandMaxMarks);
+    const totals = reportCardTotals(subjects, config.gradingScale);
     // Shared assessment values are separate records. Never choose a subject's
     // legacy metadata as an exam-wide attendance or activity value.
     let attendance = null;
@@ -635,15 +759,8 @@ export async function buildDocumentContexts(
       student: identity,
       timetable,
       subjects,
-      grandTotal,
-      grandMaxMarks,
-      overallPercentage,
-      overallGrade: documentGrade(overallPercentage, config.gradingScale),
-      gradingScale: Object.fromEntries(
-        Object.entries(config.gradingScale).sort(
-          ([, a], [, b]) => b.minScore - a.minScore,
-        ),
-      ),
+      ...totals,
+      gradingScale: documentGradingScale(config.gradingScale),
       attendance,
       coScholastics,
       coScholasticAreas: Object.keys(config.coScholasticAreas).length

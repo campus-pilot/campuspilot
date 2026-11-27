@@ -3,11 +3,13 @@ import { ORPCError } from '@orpc/server';
 import { defaultTreeAdapter as tree, parse } from 'parse5';
 import type { DefaultTreeAdapterMap } from 'parse5';
 
-import { buildQuestionPaperContext, type QuestionPaperContext } from './question-paper.context';
+import type { QuestionPaperContext, QuestionPaperPrintsContext } from './question-paper.context';
 import { QUESTION_PAPER_TEMPLATE_PRINTS_LINE_CHARS, QUESTION_PAPER_TEMPLATE_PRINTS_LINES, type TemplatePrints } from './question-paper.dto';
 import { leanLines } from './question-paper.lean';
+import { buildPaperPrintsContext, isQuickPaperNoActiveSessionError } from './question-paper.print-context';
 import { renderQuestionPaperTemplate, selectedQuestionPaperTemplate } from './question-paper.render';
-import type { PaperScope } from './question-paper.scope';
+import { paperSchoolIdOf, printLayoutOf, type ResolvedPaper } from './question-paper.scope';
+import { STANDALONE_QUESTION_PAPER_PRINTS } from './question-paper.standalone-shell';
 
 /**
  * WHAT THE SCHOOL'S TEMPLATE PRINTS AROUND A PAPER, AS TEXT.
@@ -113,7 +115,7 @@ export function templatePrintsOf(renderedTemplateHtml: string): TemplatePrints |
  * renderer's own message. Reading a paper must keep working while its
  * school's template is broken. Any other error is a real failure and is thrown.
  */
-export function templatePrintsFor(templateContent: string, context: QuestionPaperContext): TemplatePrints | null {
+export function templatePrintsFor(templateContent: string, context: QuestionPaperContext | QuestionPaperPrintsContext): TemplatePrints | null {
   try {
     return templatePrintsOf(renderQuestionPaperTemplate(templateContent, context));
   } catch (error) {
@@ -126,15 +128,26 @@ export function templatePrintsFor(templateContent: string, context: QuestionPape
  * What the school's currently selected template prints around the body of
  * this paper (the template a save would print it with), or null when that is
  * not known: the school has selected no template, or the template does not
- * render for this paper ({@link templatePrintsFor}).
+ * render for this paper ({@link templatePrintsFor}). A `plain` paper (a
+ * personal space's) prints nothing around its body: two empty lists. A quick
+ * paper's lines are rendered with its current details, and a detail it does
+ * not state yet as a placeholder (`withDetailPlaceholders`: "[class]",
+ * "[maximum marks]"), so a line the template prints only for a known value
+ * still shows.
  *
  * `generatedAt` is the instant a template that prints the date shows; a
  * caller that must repeat the same lines later (the generation job) journals
  * the result instead of reading it twice.
  */
-export async function readTemplatePrints(db: DatabaseExecutor, scope: PaperScope, generatedAt: Date = new Date()): Promise<TemplatePrints | null> {
-  const template = await selectedQuestionPaperTemplate(db, scope.key.schoolId);
+export async function readTemplatePrints(db: DatabaseExecutor, scope: ResolvedPaper, generatedAt: Date = new Date()): Promise<TemplatePrints | null> {
+  if (printLayoutOf(scope) === 'plain') return STANDALONE_QUESTION_PAPER_PRINTS;
+  const template = await selectedQuestionPaperTemplate(db, paperSchoolIdOf(scope));
   if (!template) return null;
   // The version number of a paper that is being written is not known yet, exactly as in a draft preview.
-  return templatePrintsFor(template.content, await buildQuestionPaperContext(db, scope, { versionNo: null }, generatedAt));
+  // A quick paper of a school without an active session cannot print yet: its lines are not known.
+  const context = await buildPaperPrintsContext(db, scope, generatedAt).catch((error: unknown) => {
+    if (isQuickPaperNoActiveSessionError(error)) return null;
+    throw error;
+  });
+  return context ? templatePrintsFor(template.content, context) : null;
 }

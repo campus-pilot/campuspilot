@@ -21,7 +21,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@campuspilot/ui/components/dropdown-menu';
-import { Tabs, TabsList, TabsTrigger } from '@campuspilot/ui/components/tabs';
+import { ScrollableTabsList } from '@campuspilot/components/scrollable-tabs';
+import { Tabs, TabsTrigger } from '@campuspilot/ui/components/tabs';
 import { ExamNavigationLayout } from '@campuspilot/components/exam/exam-navigation-layout';
 import type { ExamContextDto } from '@campuspilot/api/routers/school/exam/exam.dto';
 import { CLASS_ACTIONS, SCHOOL_ACTIONS, type PermissionCheck } from '@campuspilot/api/routers/authorization/authorization.dto';
@@ -443,10 +444,7 @@ function WorkspaceLayout({
               if (item && await confirmNavigation()) router.push(item.href);
             }}
           >
-            {/* overflow-x-auto clips what hangs below the box: the active underline sits 1px under the triggers, so the list pads 1px to hold it.
-                The list's own height must be auto under the same `group-data-horizontal/tabs` variant as the shared h-8 it replaces (a plain h-auto loses to it);
-                at h-8 the 36px triggers overflow the list and the browser shows a scrollbar. */}
-            <TabsList variant="line" className="max-w-full justify-start overflow-x-auto pb-px group-data-horizontal/tabs:h-auto">
+            <ScrollableTabsList>
               {items.map((item) => (
                 <RequirePermissions
                   key={item.id}
@@ -458,7 +456,7 @@ function WorkspaceLayout({
                   </TabsTrigger>
                 </RequirePermissions>
               ))}
-            </TabsList>
+            </ScrollableTabsList>
           </Tabs>
         ) : null
       }

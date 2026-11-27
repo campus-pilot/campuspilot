@@ -1,6 +1,6 @@
 import { Button } from '@campuspilot/ui/components/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@campuspilot/ui/components/collapsible';
-import { ChevronDown, Download, FilePlus2 } from 'lucide-react';
+import { ChevronDown, FilePlus2 } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { AssistantViewFrame } from '../assistant/views/view-frame';
@@ -8,6 +8,7 @@ import { PlaceholderNote, RemovedList } from './paper-notices';
 import { removedSummary } from './paper-notices-model';
 import { summarizeProblems } from './paper-problems-model';
 import type { DraftCardFacts } from './chat-cards-model';
+import { VersionDownloadButtons, type VersionDownloadFormat } from './version-download';
 
 /**
  * Question paper cards inside a chat (decision D32): a draft the assistant
@@ -181,10 +182,11 @@ export type QuestionPaperVersionCardProps = {
   /** How many sanitiser notices the version was saved with (the API's `warningCount`); their text is in the preview. */
   removedCount: number;
   isLatest: boolean;
-  downloading: boolean;
+  /** The format being prepared for download, or null. */
+  downloading: VersionDownloadFormat | null;
   /** The Preview control (a trigger with its dialog). */
   preview: ReactNode;
-  onDownload: () => void;
+  onDownload: (format: VersionDownloadFormat) => void;
 };
 
 /** A saved version in the chat, with Preview and Download. Older versions can be previewed too. Its marks are not shown: the paper is HTML and nothing adds them up. */
@@ -211,9 +213,7 @@ export function QuestionPaperVersionCard({
         ) : null}
         <CardActions>
           {preview}
-          <Button type="button" variant="outline" size="sm" onClick={onDownload} disabled={downloading}>
-            <Download data-icon="inline-start" aria-hidden /> {downloading ? 'Preparing…' : 'Download PDF'}
-          </Button>
+          <VersionDownloadButtons size="sm" pending={downloading} onDownload={onDownload} />
         </CardActions>
       </div>
     </AssistantViewFrame>

@@ -1,11 +1,8 @@
 import { modeFilterSchema } from '@campuspilot/components/question-paper/question-paper-model';
-import { examStatusLabel } from '@/components/exam/exam-model';
-import { commandFuzzyScore } from '@/components/management-command-model';
 
 /**
- * Pure rules of the ways into an examination's Question paper tab: the
- * `class` parameter the tab's accordion keeps in the address, the stored mode
- * filter, and the command palette's exam-then-class picker.
+ * Pure rules of an examination's Question paper tab: the `class` parameter
+ * the tab's accordion keeps in the address, and the stored mode filter.
  */
 
 /**
@@ -92,43 +89,4 @@ export function parseStoredModeFilter(raw: string | null | undefined): string[] 
   } catch {
     return [];
   }
-}
-
-/** The command palette's question paper picker: an examination first, then one of its classes. */
-export type QuestionPaperPickerStep = { step: 'exam' } | { step: 'class'; exam: { slug: string; name: string } };
-
-/**
- * The line under an examination in the picker: its status, and "No plan
- * yet" when it has no subject plan (its Question paper tab does not exist
- * then, so the picker lists it disabled).
- */
-export function examPickerDescription(exam: { status: 'ready' | 'active' | 'completed' | null; planCount: number }): string {
-  const status = examStatusLabel(exam.status);
-  return exam.planCount > 0 ? status : `No plan yet · ${status}`;
-}
-
-/**
- * What the picker's list says when it shows nothing: there is nothing at
- * all, or nothing matches the search. The class step is reached only for an
- * examination with a plan (one without is disabled), so an empty class list
- * there means the server listed none the person may open.
- */
-export function pickerEmptyMessage(step: QuestionPaperPickerStep, query: string): string {
-  const searching = query.trim() !== '';
-  if (step.step === 'exam') return searching ? 'No matching examinations.' : 'No examinations in this session.';
-  return searching ? 'No matching classes.' : 'No classes you can open.';
-}
-
-/**
- * The items matching the search, best first, by the palette's fuzzy score
- * over `fields`. An empty search keeps every item in its given order (the
- * session's exam order, the server's class order).
- */
-export function rankByQuery<T>(items: readonly T[], query: string, fields: (item: T) => string[]): T[] {
-  if (!query.trim()) return [...items];
-  return items
-    .map((item, index) => ({ item, index, score: commandFuzzyScore(query, fields(item)) }))
-    .filter((entry): entry is { item: T; index: number; score: number } => entry.score !== null)
-    .sort((left, right) => right.score - left.score || left.index - right.index)
-    .map(({ item }) => item);
 }

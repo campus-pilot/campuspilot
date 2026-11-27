@@ -30,7 +30,7 @@ export const personalSpaceRouter = {
     .route({
       summary: 'Create my personal space',
       description:
-        'Create the personal space of the signed-in person: a space of their own for question papers, on the same trial a new school gets. Only for someone with a linked Google account who is not a member of any school and has none yet; refused with data.reason PERSONAL_SPACE_REFUSED otherwise. It does not use the school creation allowance.',
+        'Create the personal space of the signed-in person: a space of their own for question papers, on the same trial a new school gets. Only for someone with a linked Google account who has never had one, whether or not they belong to a school; refused with data.reason PERSONAL_SPACE_REFUSED otherwise. It does not use the school creation allowance.',
       tags: ['School'],
     })
     .meta({ mcp: { exposure: 'hidden', access: 'write', destructive: false, module: 'schools' } })

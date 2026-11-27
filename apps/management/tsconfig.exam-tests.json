@@ -16,6 +16,7 @@
     "components/session/session-save-model.ts",
     "components/session/session-save-model.test.ts",
     "components/assistant/assistant-gate-model.ts",
+    "components/school-page-breadcrumbs.tsx",
     "lib/navigation-guard.ts",
     "../../packages/**/*.ts",
     "../../packages/**/*.tsx"

@@ -114,8 +114,8 @@ describe('Cadet Portal release and teacher remarks (staff procedures)', () => {
       const planScope = { schoolId: scope.schoolId, sessionId: scope.sessionId, classId, examPlanId: plan!.id };
       await db.update(classTable).set({
         config: { subjects: {
-          maths: { name: 'Mathematics', books: [], examModes: { written: { name: 'Written', percentage: 100 } } },
-          english: { name: 'English', books: [], examModes: { written: { name: 'Written', percentage: 100 } } },
+          maths: { name: 'Mathematics', attachment: { kind: 'school' as const }, books: [], examModes: { written: { name: 'Written', percentage: 100 } } },
+          english: { name: 'English', attachment: { kind: 'school' as const }, books: [], examModes: { written: { name: 'Written', percentage: 100 } } },
         } },
       }).where(eq(classTable.id, classId));
       await expect(principal.school.createExamPlan({ ...scope, classId, subjectSlug: 'english' })).rejects.toThrowError(

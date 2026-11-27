@@ -42,8 +42,10 @@ function buttons(markup: string, label: string) {
   return [...markup.matchAll(/<button[^>]*>.*?<\/button>/g)].map(([tag]) => tag).filter((tag) => tag.includes(label));
 }
 
-test('the documents dialog offers "Download PDF" before any preview', () => {
+test('the documents dialog offers "Create PDF" before any preview', () => {
   // The button used to stay disabled until "Preview document" had been clicked.
+  // It starts a background job, so it reads "Create PDF" for everyone; the
+  // download is offered once the PDF is ready.
   const markup = renderToStaticMarkup(
     createElement(
       QueryClientProvider,
@@ -56,29 +58,18 @@ test('the documents dialog offers "Download PDF" before any preview', () => {
       }),
     ),
   );
-  const [download] = buttons(markup, 'Download PDF');
-  assert.ok(download, 'the dialog shows "Download PDF"');
-  assert.doesNotMatch(download, /\sdisabled=""/);
+  const [create] = buttons(markup, 'Create PDF');
+  assert.ok(create, 'the dialog shows "Create PDF"');
+  assert.doesNotMatch(create, /\sdisabled=""/);
+  assert.equal(buttons(markup, 'Download PDF').length, 0, 'nothing to download before a PDF exists');
   assert.ok(buttons(markup, 'Preview document').length, 'preview stays available');
 });
 
-test('without the permission to download, the button only creates the PDF', () => {
-  const render = (canDownload: boolean) =>
-    renderToStaticMarkup(
-      createElement(
-        QueryClientProvider,
-        { client: cacheWith(canDownload) },
-        createElement(CreatePdfButton, {
-          permission: { schoolId: scope.schoolId, action: SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS },
-          disabled: false,
-          running: null,
-          onCreate: () => {},
-        }),
-      ),
-    );
-  assert.match(render(true), /Download PDF/);
-  assert.doesNotMatch(render(false), /Download PDF/);
+test('the create button says when its job is being started', () => {
+  const render = (running: boolean) =>
+    renderToStaticMarkup(createElement(CreatePdfButton, { disabled: running, running, onCreate: () => {} }));
   assert.match(render(false), /Create PDF/);
+  assert.match(render(true), /Starting PDF/);
 });
 
 test("an examination document's class picker lists the examination's classes, not the school's", () => {

@@ -1,8 +1,9 @@
 import type {
   DocumentTemplatePageSize,
-  DocumentType,
+  TemplateDocumentType as DocumentType,
 } from "./document.dto";
 import { LEGACY_DOCUMENT_TEMPLATES } from "./document.catalog.legacy";
+import { STANDARD_DOCUMENT_TEMPLATE_SOURCES } from "./document.catalog.standard";
 
 type CatalogTemplate = {
   slug: string;
@@ -116,6 +117,53 @@ function renameContextPath(source: string, from: string, to: string) {
   );
 }
 
+/** A date-parts value as the legacy bill designs print dates: `24/11/2026`. */
+const dueDate = (path: string) => `{{${path}.day}}/{{${path}.month}}/{{${path}.year}}`;
+
+/**
+ * The legacy bill designs' period, frequency and "Statement Through" rows,
+ * rewritten to the current contract before the path renames run:
+ * - Frequency prints the period's recorded cadence (`bill.period.cadence`),
+ *   blank when the bill has no recorded period (a manual bill, a migrated
+ *   bill whose cadence is unknown); never a raw period key;
+ * - Period prints the period's first and last day;
+ * - "Statement Through" prints only on a Bill due (`billDue`, null on an
+ *   ordinary bill), with its date.
+ * Whole-template replacements of exact legacy markup, so nothing else is
+ * touched; the renames below stay whole-path only.
+ */
+function adaptLegacyBillRows(source: string) {
+  return source
+    .replaceAll(
+      "{{bill.frequency}}",
+      '{{#if bill.period}}<span style="text-transform:capitalize;">{{bill.period.cadence}}</span>{{/if}}',
+    )
+    .replaceAll(
+      "{{#if bill.period}}<td class=\"label\">Period</td><td>{{bill.period}}</td>{{/if}}",
+      `{{#if bill.period}}<td class="label">Period</td><td>${dueDate("bill.period.start")} – ${dueDate("bill.period.end")}</td>{{/if}}`,
+    )
+    .replaceAll("{{#if bill.statementDate}}", "{{#if billDue}}")
+    .replaceAll("{{bill.statementDate}}", dueDate("billDue.date"));
+}
+
+/**
+ * The legacy designs' "Payments This Period" and "Discounts This Period"
+ * rows become one row per `credits[]` entry (Payment, Discount, Waiver,
+ * Write-off, Credit correction, reversals), each with its reference and date,
+ * keeping the design's own cell markup. An ordinary bill has no credits, so
+ * nothing prints there, as before.
+ */
+function adaptLegacyCreditRows(source: string) {
+  const payments = /{{#if paidThisPeriod}}\s*<tr>(\s*)<td([^>]*)>Payments This Period<\/td>(\s*)<td([^>]*)>-{{currency\.symbol}}{{paidThisPeriod}}<\/td>(\s*)<\/tr>\s*{{\/if}}/;
+  return source
+    .replace(
+      payments,
+      (_match, lead: string, labelAttributes: string, middle: string, amountAttributes: string, tail: string) =>
+        `{{#each credits}}<tr>${lead}<td${labelAttributes}>{{this.label}}{{#if this.reference}} {{this.reference}}{{/if}} (${dueDate("this.date")})</td>${middle}<td${amountAttributes}>-{{@root.currency.code}}{{this.amount}}</td>${tail}</tr>{{/each}}`,
+    )
+    .replace(/\s*{{#if discountThisPeriod}}[\s\S]*?{{\/if}}/, "");
+}
+
 function adaptFinanceContext(source: string, type: "bill" | "receipt") {
   const replacements: Array<[string, string]> = [
     ["student.name", "admission.name"],
@@ -128,12 +176,14 @@ function adaptFinanceContext(source: string, type: "bill" | "receipt") {
     ["currency.symbol", "currency.code"],
   ];
   if (type === "bill") {
+    // Period, frequency and "Statement Through" are rewritten to their
+    // current fields first (`adaptLegacyBillRows`), so no path is renamed to
+    // a different fact (they once all became `bill.periodKey` or
+    // `bill.issueDate`, which printed raw keys and showed "Statement Through"
+    // on every bill).
     replacements.push(
       ["lineItems", "lines"],
       ["bill.generatedAt", "bill.issueDate"],
-      ["bill.statementDate", "bill.issueDate"],
-      ["bill.frequency", "bill.periodKey"],
-      ["bill.period", "bill.periodKey"],
       ["totalAmount", "bill.total"],
       ["outstandingBefore", "balanceBefore"],
       ["netBill", "balanceAfter"],
@@ -148,12 +198,13 @@ function adaptFinanceContext(source: string, type: "bill" | "receipt") {
   }
   let adapted = replacements.reduce(
     (value, [from, to]) => renameContextPath(value, from, to),
-    source,
+    type === "bill" ? adaptLegacyCreditRows(adaptLegacyBillRows(source)) : source,
   );
   if (type === "bill") {
+    // A Bill due has no bill number: it prints DUE/ and its date instead.
     adapted = adapted.replace(
       '<div class="title">Fee Bill</div>',
-      '<div class="title">Fee Bill</div><div style="text-align:center;margin-bottom:6px;">Bill No: {{bill.number}}</div>',
+      `<div class="title">Fee Bill</div><div style="text-align:center;margin-bottom:6px;">Bill No: {{#if bill.number}}{{bill.number}}{{else}}{{#if billDue}}DUE/${dueDate("billDue.date")}{{/if}}{{/if}}</div>`,
     );
   } else {
     adapted = adapted
@@ -426,7 +477,9 @@ const noticeTemplates: CatalogTemplate[] = [
  *   is a CSS `direction:` value read from the context, not a `dir`
  *   attribute. The questions carry their own `dir`/`lang`/script fonts;
  * - the optional facts (location, time allowed, maximum marks, registration
- *   number) are guarded by `{{#if}}`, because the context may carry null.
+ *   number) are guarded by `{{#if}}`, because the context may carry null;
+ *   so are the mode and the exam name in the footer, which a quick paper
+ *   (docs/question-papers.md "Quick papers in a school") leaves empty.
  */
 const questionPaperClassicTemplate = `<style>.qpc{font-family:'Noto Serif','Noto Serif Devanagari','Noto Sans','Noto Sans Devanagari',serif;color:#111;font-size:12pt;line-height:1.4}.qpc *{box-sizing:border-box}.qpc-head{text-align:center;padding-bottom:3mm;border-bottom:1.5px solid #111}.qpc-head img{display:block;width:18mm;height:18mm;margin:0 auto 2mm;object-fit:contain}.qpc-head h1{margin:0;font-size:20pt;line-height:1.2;letter-spacing:.5px}.qpc-head p{margin:1mm 0 0;font-size:10pt}.qpc-exam{margin:3mm 0 0;font-size:13pt;font-weight:bold}.qpc-subject{margin:1mm 0 0;font-size:12pt}.qpc-rule{display:flex;justify-content:space-between;gap:6mm;margin:3mm 0 4mm;padding:1.5mm 0;border-top:1px solid #111;border-bottom:1px solid #111;font-weight:bold}.qpc-foot{position:fixed;bottom:0;left:0;right:0;display:flex;justify-content:space-between;gap:6mm;padding-top:1.5mm;border-top:1px solid #555;font-size:9pt;color:#444}</style>
 <div class="qpc" style="direction:{{questionPaper.direction}}">
@@ -435,7 +488,7 @@ const questionPaperClassicTemplate = `<style>.qpc{font-family:'Noto Serif','Noto
     <h1>{{school.name}}</h1>
     {{#if school.location}}<p>{{school.location}}</p>{{/if}}
     <p class="qpc-exam">{{exam.name}} ({{session.startYear}}-{{session.endYear}})</p>
-    <p class="qpc-subject">{{questionPaper.className}} &middot; {{questionPaper.subjectName}} ({{questionPaper.modeName}})</p>
+    <p class="qpc-subject">{{questionPaper.className}} &middot; {{questionPaper.subjectName}}{{#if questionPaper.modeName}} ({{questionPaper.modeName}}){{/if}}</p>
   </header>
   <div class="qpc-rule">
     <span>{{#if questionPaper.timeAllowed}}Time: {{questionPaper.timeAllowed}}{{/if}}</span>
@@ -444,7 +497,7 @@ const questionPaperClassicTemplate = `<style>.qpc{font-family:'Noto Serif','Noto
   {{{questionPaper.bodyHtml}}}
   <footer class="qpc-foot">
     <span>{{school.name}}</span>
-    <span>{{exam.name}} - {{questionPaper.subjectName}}</span>
+    <span>{{#if exam.name}}{{exam.name}} - {{/if}}{{questionPaper.subjectName}}</span>
   </footer>
 </div>`;
 
@@ -459,7 +512,7 @@ const questionPaperCompactTemplate = `<style>.qpk{font-family:'Noto Sans','Noto 
   </header>
   <table class="qpk-meta">
     <tr><td><b>Examination:</b> {{exam.name}} ({{session.startYear}}-{{session.endYear}})</td><td><b>Class:</b> {{questionPaper.className}}</td></tr>
-    <tr><td><b>Subject:</b> {{questionPaper.subjectName}} ({{questionPaper.modeName}})</td><td>{{#if questionPaper.timeAllowed}}<b>Time:</b> {{questionPaper.timeAllowed}}{{/if}}</td></tr>
+    <tr><td><b>Subject:</b> {{questionPaper.subjectName}}{{#if questionPaper.modeName}} ({{questionPaper.modeName}}){{/if}}</td><td>{{#if questionPaper.timeAllowed}}<b>Time:</b> {{questionPaper.timeAllowed}}{{/if}}</td></tr>
     <tr><td colspan="2">{{#if questionPaper.maxMarks}}<b>Maximum marks:</b> {{questionPaper.maxMarks}}{{/if}}</td></tr>
   </table>
   {{{questionPaper.bodyHtml}}}
@@ -490,6 +543,89 @@ const questionPaperTemplates: CatalogTemplate[] = [
   },
 ];
 
+/**
+ * The "CampusPilot Standard" set (`document.catalog.standard.ts`): one design
+ * per type, named without a paper size, with the footprint the school printed
+ * it on (admit card, bill and receipt half A4, everything else full). Every
+ * new school starts with these selected (`DEFAULT_DOCUMENT_TEMPLATE_SLUGS`).
+ */
+const standardTemplates: CatalogTemplate[] = [
+  {
+    slug: "standard-report-card",
+    documentType: "report_card",
+    name: "CampusPilot Standard Report Card",
+    description: "A full-A4 report card with a two-logo letterhead, marks by assessment, co-scholastic grades, attendance and signature lines.",
+    pageSize: "full",
+    content: STANDARD_DOCUMENT_TEMPLATE_SOURCES.report_card,
+  },
+  {
+    slug: "standard-id-card",
+    documentType: "id_card",
+    name: "CampusPilot Standard ID Card",
+    description: "A student ID card with the school logo, photo, class, roll number, date of birth and father's name.",
+    pageSize: "full",
+    content: STANDARD_DOCUMENT_TEMPLATE_SOURCES.id_card,
+  },
+  {
+    slug: "standard-admit-card",
+    documentType: "admit_card",
+    name: "CampusPilot Standard Admit Card",
+    description: "A half-A4 admit card with the student's details, photo and examination schedule. Two cards print per sheet.",
+    pageSize: "half",
+    content: STANDARD_DOCUMENT_TEMPLATE_SOURCES.admit_card,
+  },
+  {
+    slug: "standard-timetable",
+    documentType: "timetable",
+    name: "CampusPilot Standard Timetable",
+    description: "A landscape examination timetable with a two-logo letterhead and one column per class.",
+    pageSize: "full",
+    content: STANDARD_DOCUMENT_TEMPLATE_SOURCES.timetable,
+  },
+  {
+    slug: "standard-bill",
+    documentType: "bill",
+    name: "CampusPilot Standard Fee Bill",
+    description: "A half-A4 fee bill with a two-logo letterhead, fee lines, the opening balance, payments and other credits, and the amount payable. Prints bills due too. Two bills print per sheet.",
+    pageSize: "half",
+    content: STANDARD_DOCUMENT_TEMPLATE_SOURCES.bill,
+  },
+  {
+    slug: "standard-receipt",
+    documentType: "receipt",
+    name: "CampusPilot Standard Receipt",
+    description: "A half-A4 payment and refund receipt with the previous and remaining balance. Two receipts print per sheet.",
+    pageSize: "half",
+    content: STANDARD_DOCUMENT_TEMPLATE_SOURCES.receipt,
+  },
+  {
+    slug: "standard-question-paper",
+    documentType: "question_paper",
+    name: "CampusPilot Standard Question Paper",
+    description: "A question paper heading with the school logo on both sides, the class, subject and full marks, and lines for the student's name and roll number.",
+    pageSize: "full",
+    content: STANDARD_DOCUMENT_TEMPLATE_SOURCES.question_paper,
+  },
+];
+
+/**
+ * The design of each type every new school starts with selected
+ * (docs/document-system.md "Default templates"): the CampusPilot Standard
+ * set, and for statements the existing full-A4 statement design. Notices
+ * have no default here: a notice renders with the built-in `notice-default`
+ * design while none is selected. Personal spaces get none.
+ */
+export const DEFAULT_DOCUMENT_TEMPLATE_SLUGS = {
+  report_card: "standard-report-card",
+  id_card: "standard-id-card",
+  admit_card: "standard-admit-card",
+  timetable: "standard-timetable",
+  bill: "standard-bill",
+  receipt: "standard-receipt",
+  statement: "statement-default-full",
+  question_paper: "standard-question-paper",
+} as const satisfies Partial<Record<DocumentType, string>>;
+
 /** Published slugs are immutable provenance. The current catalog intentionally
  * replaces the former generated style families with the legacy application’s
  * named designs, plus matching statement designs which had no legacy source.
@@ -499,4 +635,5 @@ export const DOCUMENT_MARKETPLACE: CatalogTemplate[] = [
   ...statementTemplates,
   ...noticeTemplates,
   ...questionPaperTemplates,
+  ...standardTemplates,
 ];

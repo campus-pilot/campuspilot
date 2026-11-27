@@ -106,7 +106,7 @@ for (const [classIndex, definition] of classDefinitions.entries()) {
   const examModes: ClassConfig['subjects'][string]['examModes'] = preschool
     ? { oral: { name: 'Oral', percentage: 60 }, activity: { name: 'Activity', percentage: 40 } }
     : { written: { name: 'Written', percentage: 80 }, oral: { name: 'Oral', percentage: 20 } };
-  const config: ClassConfig = { subjects: Object.fromEntries(subjectDefinitions.map(([slug, name]) => [slug!, { name: name!, books: [{ title: `${definition.label} ${name} Workbook`, publication: 'Maple Grove sample curriculum' }], examModes }])) };
+  const config: ClassConfig = { subjects: Object.fromEntries(subjectDefinitions.map(([slug, name]) => [slug!, { name: name!, attachment: { kind: 'school' as const }, books: [{ title: `${definition.label} ${name} Workbook`, publication: 'Maple Grove sample curriculum' }], examModes }])) };
   let classroom: Awaited<ReturnType<typeof rpc.school.getClass>> | undefined = (await rpc.school.listClasses(scope)).find((item) => item.slug === definition.slug);
   if (!classroom) classroom = await rpc.school.createClass({ schoolId, slug: definition.slug, label: definition.label, config, sections: [{ slug: 'a', label: 'A' }] });
   const section = (await rpc.school.listSections({ schoolId, classId: classroom.id }))[0]!;
@@ -213,8 +213,8 @@ try {
   if ((error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode !== 404) throw error;
   await getS3Client().send(new CreateBucketCommand({ Bucket: env.S3_BUCKET }));
 }
-/** Types with a generator source; `notice` has a template but is rendered by the notices feature. */
-type GeneratedDocumentType = Exclude<DocumentType, 'notice' | 'question_paper'>;
+/** Types with a generator source and a template of their own; `notice` has a template but is rendered by the notices feature, and a Bill due is printed with the bill template. */
+type GeneratedDocumentType = Exclude<DocumentType, 'notice' | 'question_paper' | 'bill_due'>;
 const templates = new Map<GeneratedDocumentType, string>();
 const types: GeneratedDocumentType[] = ['report_card', 'id_card', 'admit_card', 'timetable', 'bill', 'receipt', 'statement'];
 for (const documentType of types) {
@@ -246,11 +246,19 @@ await mkdir(new URL('documents/', local), { recursive: true });
 for (const documentType of types) {
   const source = sourceByType[documentType];
   const history = await rpc.school.listDocumentArtifacts({ schoolId, filters: { sessionId, documentType } });
-  let artifact = history.items.find((item) => item.templateRevisionId === templates.get(documentType));
+  let artifact: { id: string } | undefined = history.items.find((item) => item.templateRevisionId === templates.get(documentType));
   if (!artifact) {
     const preview = await rpc.school.previewDocument({ schoolId, source, templateRevisionId: templates.get(documentType)! });
     if (source.documentType === 'statement') source.expectedReviewHash = preview.reviewHash!;
-    artifact = (await rpc.school.generateDocument({ schoolId, source, templateRevisionId: templates.get(documentType)! })).artifact;
+    // Generation is a job in the worker: poll it until the PDF exists.
+    const { jobId } = await rpc.school.generateDocument({ schoolId, source, templateRevisionId: templates.get(documentType)! });
+    let job = await rpc.school.getDocumentGenerationJob({ schoolId, jobId, documentType });
+    for (let attempt = 0; (job.status === 'queued' || job.status === 'running') && attempt < 600; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      job = await rpc.school.getDocumentGenerationJob({ schoolId, jobId, documentType });
+    }
+    assert(job.status === 'succeeded' && job.artifactId, `Cannot generate ${documentType}: ${job.errorMessage ?? job.status}`);
+    artifact = { id: job.artifactId };
   }
   const download = await rpc.school.getDocumentDownload({ schoolId, artifactId: artifact.id, documentType });
   const response = await fetch(download.url);

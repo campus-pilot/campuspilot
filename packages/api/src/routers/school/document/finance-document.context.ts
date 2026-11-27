@@ -2,6 +2,7 @@ import type { DatabaseExecutor } from "@campuspilot/db";
 import { currencyMinorUnitDigits, currencyCodeSchema } from "@campuspilot/db/schema/jsonb/currencies";
 import {
   financeBillLineTable,
+  financeBillRunTable,
   financeBillTable,
   financeAdjustmentTable,
   financeLedgerEntryTable,
@@ -11,51 +12,74 @@ import {
 import { schoolTable } from "@campuspilot/db/schema/school";
 import { schoolSessionTable } from "@campuspilot/db/schema/session";
 import { financeSchemaConfigSchema } from "@campuspilot/db/schema/jsonb/finance-config";
-import { and, asc, eq, inArray, lt, or } from "drizzle-orm";
+import { and, asc, eq, inArray, lt, lte, max, or, type SQL } from "drizzle-orm";
+import type { DocumentLedgerCutoff } from "@campuspilot/db/schema/document-generation-job";
 import { createHash } from "node:crypto";
 import { rpcError } from "../../../errors";
 import type { DocumentSource } from "./document.dto";
-import { buildSchoolDocumentContext } from "./document.context";
+import { schoolDocumentContextFor, type DocumentContextOptions } from "./document.context";
 import { isValidLocalDate, localDateToInstant } from "../billing/period";
+import { buildBillDueContexts } from "./bill-due.context";
+import {
+  documentBillingPeriod,
+  documentDateParts,
+  formatDocumentMoney,
+  optionalDocumentMoney,
+} from "./finance-document.values";
 
-type FinanceSource = Extract<DocumentSource, { documentType: "bill" | "receipt" | "statement" }>;
-const SOURCE_QUERY_CHUNK = 500;
+import { cutoffMap, ledgerAccountKey, loadInChunks, signed, type CutoffMap } from "./finance-document.ledger";
 
-function chunks<T>(values: T[], size = SOURCE_QUERY_CHUNK) {
-  const groups: T[][] = [];
-  for (let index = 0; index < values.length; index += size) groups.push(values.slice(index, index + size));
-  return groups;
-}
+export { formatDocumentMoney } from "./finance-document.values";
 
-/** Keeps large document selections within PostgreSQL parameter limits without
- * opening an unbounded number of concurrent database queries. */
-async function loadInChunks<TValue, TRow>(
-  values: TValue[],
-  load: (group: TValue[]) => Promise<TRow[]>,
-) {
-  const rows: TRow[] = [];
-  for (const group of chunks(values)) rows.push(...await load(group));
-  return rows;
-}
-
-export function formatDocumentMoney(value: bigint, currency: string) {
-  const digits = currencyMinorUnitDigits(currencyCodeSchema.parse(currency));
-  const sign = value < BigInt(0) ? "-" : "";
-  const absolute = value < BigInt(0) ? -value : value;
-  if (digits === 0) return `${sign}${absolute}`;
-  const scale = BigInt(10) ** BigInt(digits);
-  const whole = absolute / scale;
-  const fraction = (absolute % scale).toString().padStart(digits, "0");
-  return `${sign}${whole}.${fraction}`;
-}
-
+type FinanceSource = Extract<DocumentSource, { documentType: "bill" | "receipt" | "statement" | "bill_due" }>;
 const amount = formatDocumentMoney;
 
-const signed = (entry: { direction: "debit" | "credit"; amountMinor: bigint }) =>
-  entry.direction === "debit" ? entry.amountMinor : -entry.amountMinor;
 
-const ledgerAccountKey = (admissionId: string, currency: string) =>
-  `${admissionId}\u0000${currency}`;
+/** Options of the finance builder: the shared ones plus a pinned ledger cutoff. */
+export type FinanceDocumentContextOptions = DocumentContextOptions & {
+  /**
+   * The per-account high-water sequences a generation job pinned when it was
+   * accepted. When given, every ledger read of an account stops at its
+   * sequence, so the documents describe the ledger as it was then; an
+   * account without one is refused (the source changed). Without it the
+   * builder reads the ledger as it is now.
+   */
+  ledgerCutoff?: readonly DocumentLedgerCutoff[];
+};
+
+
+/** The ledger condition of one account under the cutoff (none without a cutoff). */
+function cutoffCondition(cutoff: CutoffMap, admissionId: string, currency: string): SQL | undefined {
+  if (!cutoff) return undefined;
+  const sequence = cutoff.get(ledgerAccountKey(admissionId, currency));
+  if (sequence === undefined) throw rpcError.conflict("This document's accounts changed after it was requested. Create it again.");
+  return lte(financeLedgerEntryTable.sequence, sequence);
+}
+
+/**
+ * The high-water sequence of each account now (the largest posted sequence),
+ * read in chunks; what a generation job pins for bills and receipts.
+ */
+async function accountHighWaters(
+  db: DatabaseExecutor,
+  schoolId: string,
+  accounts: Array<{ admissionId: string; currency: string }>,
+): Promise<DocumentLedgerCutoff[]> {
+  const wanted = new Set(accounts.map((account) => ledgerAccountKey(account.admissionId, account.currency)));
+  const admissionIds = [...new Set(accounts.map((account) => account.admissionId))];
+  const rows = await loadInChunks(admissionIds, (ids) => db.select({
+    admissionId: financeLedgerEntryTable.admissionId,
+    currency: financeLedgerEntryTable.currency,
+    sequence: max(financeLedgerEntryTable.sequence),
+  }).from(financeLedgerEntryTable).where(and(
+    eq(financeLedgerEntryTable.schoolId, schoolId),
+    inArray(financeLedgerEntryTable.admissionId, ids),
+  )).groupBy(financeLedgerEntryTable.admissionId, financeLedgerEntryTable.currency));
+  return rows
+    .filter((row) => row.sequence !== null && wanted.has(ledgerAccountKey(row.admissionId, row.currency)))
+    .map((row) => ({ admissionId: row.admissionId, currency: row.currency, highWaterSequence: row.sequence!.toString() }))
+    .sort((a, b) => a.admissionId.localeCompare(b.admissionId) || a.currency.localeCompare(b.currency));
+}
 
 type OrderedLedgerFact = Pick<
   typeof financeLedgerEntryTable.$inferSelect,
@@ -76,6 +100,7 @@ async function billBalancesBefore(
   db: DatabaseExecutor,
   schoolId: string,
   bills: Array<Pick<typeof financeBillTable.$inferSelect, "admissionId" | "currency" | "ledgerEntryId">>,
+  cutoff: CutoffMap,
 ) {
   const accountKeys = new Set(
     bills.map((bill) => ledgerAccountKey(bill.admissionId, bill.currency)),
@@ -103,6 +128,12 @@ async function billBalancesBefore(
   for (const fact of facts) {
     const key = ledgerAccountKey(fact.admissionId, fact.currency);
     if (!accountKeys.has(key)) continue;
+    if (cutoff) {
+      const sequence = cutoff.get(key);
+      if (sequence === undefined) throw rpcError.conflict("This document's accounts changed after it was requested. Create it again.");
+      // Posted after the job was accepted: not part of this document.
+      if (fact.sequence > sequence) continue;
+    }
     const accountFacts = factsByAccount.get(key) ?? [];
     accountFacts.push(fact);
     factsByAccount.set(key, accountFacts);
@@ -132,6 +163,7 @@ async function balanceBeforeLedgerFact(
   admissionId: string,
   currency: string,
   fact: Pick<typeof financeLedgerEntryTable.$inferSelect, "effectiveAt" | "sequence" | "id">,
+  cutoff: CutoffMap,
 ) {
   const rows = await db.select({ direction: financeLedgerEntryTable.direction, amountMinor: financeLedgerEntryTable.amountMinor })
     .from(financeLedgerEntryTable)
@@ -139,6 +171,7 @@ async function balanceBeforeLedgerFact(
       eq(financeLedgerEntryTable.schoolId, schoolId),
       eq(financeLedgerEntryTable.admissionId, admissionId),
       eq(financeLedgerEntryTable.currency, currency),
+      cutoffCondition(cutoff, admissionId, currency),
       or(
         lt(financeLedgerEntryTable.effectiveAt, fact.effectiveAt),
         and(
@@ -155,10 +188,10 @@ async function balanceBeforeLedgerFact(
   return rows.reduce((total, row) => total + signed(row), BigInt(0));
 }
 
-async function schoolContext(db: DatabaseExecutor, schoolId: string) {
+async function schoolContext(db: DatabaseExecutor, schoolId: string, options: DocumentContextOptions) {
   const [school] = await db.select().from(schoolTable).where(eq(schoolTable.id, schoolId)).limit(1);
   if (!school) throw rpcError.notFound("School");
-  return buildSchoolDocumentContext(school);
+  return schoolDocumentContextFor(school, options.images);
 }
 
 /** Builds finance documents only from immutable posted facts and their captured
@@ -169,8 +202,11 @@ export async function buildFinanceDocumentContexts(
   db: DatabaseExecutor,
   schoolId: string,
   source: FinanceSource,
+  options: FinanceDocumentContextOptions = {},
 ) {
-  const school = await schoolContext(db, schoolId);
+  const school = await schoolContext(db, schoolId, options);
+  const generatedAt = (options.generatedAt ?? new Date()).toISOString();
+  const cutoff = cutoffMap(options.ledgerCutoff);
   if (source.documentType === "bill") {
     const bills = await db.select().from(financeBillTable).where(and(
       eq(financeBillTable.schoolId, schoolId),
@@ -183,10 +219,18 @@ export async function buildFinanceDocumentContexts(
     if (!bills.length || (source.billIds && bills.length !== new Set(source.billIds).size)) throw rpcError.notFound("Posted bill");
     if (source.billRunId && bills.some((bill) => bill.billRunId !== source.billRunId)) throw rpcError.notFound("Posted billing run");
     const billIds = bills.map((bill) => bill.id);
-    const [lines, balanceByLedgerId] = await Promise.all([
+    const runIds = [...new Set(bills.flatMap((bill) => (bill.billRunId ? [bill.billRunId] : [])))];
+    const [lines, balanceByLedgerId, runs] = await Promise.all([
       loadInChunks(billIds, (ids) => db.select().from(financeBillLineTable).where(and(eq(financeBillLineTable.schoolId, schoolId), inArray(financeBillLineTable.billId, ids))).orderBy(asc(financeBillLineTable.billId), asc(financeBillLineTable.lineOrder))),
-      billBalancesBefore(db, schoolId, bills),
+      billBalancesBefore(db, schoolId, bills, cutoff),
+      loadInChunks(runIds, (ids) => db.select({
+        id: financeBillRunTable.id,
+        cadence: financeBillRunTable.cadence,
+        periodStartDate: financeBillRunTable.periodStartDate,
+        periodEndDate: financeBillRunTable.periodEndDate,
+      }).from(financeBillRunTable).where(and(eq(financeBillRunTable.schoolId, schoolId), inArray(financeBillRunTable.id, ids)))),
     ]);
+    const runById = new Map(runs.map((run) => [run.id, run]));
     const linesByBillId = new Map<string, typeof lines>();
     for (const line of lines) {
       const billLines = linesByBillId.get(line.billId) ?? [];
@@ -197,20 +241,56 @@ export async function buildFinanceDocumentContexts(
       const beforeMinor = balanceByLedgerId.get(bill.ledgerEntryId);
       if (beforeMinor === undefined) throw rpcError.notFound("Bill ledger fact");
       const afterMinor = beforeMinor + bill.totalAmountMinor;
+      // The period the bill's run recorded (its cadence and dates). A bill
+      // without a run (a manual bill) has none; neither has a bill whose run is
+      // unknown. Never read from the period key's shape.
+      const run = bill.billRunId ? runById.get(bill.billRunId) : undefined;
+      const issueDate = documentDateParts(bill.issueDate);
       return {
         school,
         session: { startYear: bill.sessionStartYearSnapshot, endYear: bill.sessionEndYearSnapshot },
         admission: { name: bill.admissionNameSnapshot, number: bill.admissionNumberSnapshot, fatherName: null, motherName: null, classLabel: bill.classLabelSnapshot, sectionLabel: bill.sectionLabelSnapshot, rollNumber: bill.rollNumberSnapshot?.toString() ?? null },
         currency: { code: bill.currency, exponent: currencyMinorUnitDigits(currencyCodeSchema.parse(bill.currency)) },
-        bill: { id: bill.id, number: bill.billNumber, issueDate: bill.issueDate, periodKey: bill.periodKey, total: amount(bill.totalAmountMinor, bill.currency), totalMinor: bill.totalAmountMinor.toString() },
-        lines: (linesByBillId.get(bill.id) ?? []).map((line) => ({ slug: line.feeElementSlug, name: line.feeElementName, amount: amount(line.amountMinor, line.currency), amountMinor: line.amountMinor.toString(), pricingSource: line.pricingSourceKind })),
-        balanceBefore: amount(beforeMinor, bill.currency),
+        bill: {
+          id: bill.id,
+          number: bill.billNumber,
+          issueDate: bill.issueDate,
+          periodKey: bill.periodKey,
+          period: run ? documentBillingPeriod(run.cadence, run.periodStartDate, run.periodEndDate) : null,
+          total: amount(bill.totalAmountMinor, bill.currency),
+          totalMinor: bill.totalAmountMinor.toString(),
+        },
+        // An ordinary bill is not a Bill due: no Bill due facts, no credits and no period totals.
+        billDue: null,
+        lines: (linesByBillId.get(bill.id) ?? []).map((line) => ({
+          kind: "bill_line" as const,
+          slug: line.feeElementSlug,
+          name: line.feeElementName,
+          note: null,
+          billNumber: bill.billNumber,
+          reference: bill.billNumber,
+          issueDate,
+          amount: amount(line.amountMinor, line.currency),
+          amountMinor: line.amountMinor.toString(),
+          pricingSource: line.pricingSourceKind,
+        })),
+        credits: [],
+        balanceBefore: optionalDocumentMoney(beforeMinor, bill.currency),
         balanceAfter: amount(afterMinor, bill.currency),
-        generatedAt: new Date().toISOString(),
+        paidThisPeriod: null,
+        discountThisPeriod: null,
+        waiverThisPeriod: null,
+        writeOffThisPeriod: null,
+        creditCorrectionThisPeriod: null,
+        refundThisPeriod: null,
+        generatedAt,
       };
     });
-    return { contexts, name: bills.length === 1 ? `Bill ${bills[0]!.billNumber}` : `${bills.length} bills`, financeSource: { kind: "bill" as const, admissionIds: [...new Set(bills.map((bill) => bill.admissionId))], billIds, billRunId: source.billRunId ?? null }, reviewHash: null };
+    const ledgerCutoff = options.ledgerCutoff ? [...options.ledgerCutoff] : await accountHighWaters(db, schoolId, bills);
+    return { contexts, name: bills.length === 1 ? `Bill ${bills[0]!.billNumber}` : `${bills.length} bills`, financeSource: { kind: "bill" as const, admissionIds: [...new Set(bills.map((bill) => bill.admissionId))], billIds, billRunId: source.billRunId ?? null }, reviewHash: null, ledgerCutoff };
   }
+
+  if (source.documentType === "bill_due") return buildBillDueContexts(db, schoolId, source, { school, generatedAt, cutoff });
 
   if (source.documentType === "receipt") {
     const paymentIds = source.transactions.filter((item) => item.kind === "payment").map((item) => item.id);
@@ -260,7 +340,7 @@ export async function buildFinanceDocumentContexts(
       if (!ledger) throw rpcError.notFound("Receipt ledger fact");
       const snapshot = payment.documentSnapshot;
       if (!snapshot) throw rpcError.conflict("This legacy payment has no immutable receipt identity snapshot.");
-      const previousMinor = await balanceBeforeLedgerFact(db, schoolId, payment.admissionId, payment.currency, ledger);
+      const previousMinor = await balanceBeforeLedgerFact(db, schoolId, payment.admissionId, payment.currency, ledger, cutoff);
       const transactionAmount = refund?.amountMinor ?? payment.amountMinor;
       const remainingMinor = previousMinor + signed(ledger);
       return {
@@ -272,10 +352,11 @@ export async function buildFinanceDocumentContexts(
         payment: { id: payment.id, receiptNumber: refund?.refundNumber ?? payment.receiptNumber, receivedAt: (refund?.recordedAt ?? payment.receivedAt).toISOString(), amount: amount(transactionAmount, payment.currency), amountMinor: transactionAmount.toString(), method: refund?.method ?? payment.method, externalReference: refund?.externalReference ?? payment.externalReference, payerName: payment.payerName, note: refund?.reason ?? payment.note },
         previousBalance: amount(previousMinor, payment.currency),
         remainingBalance: amount(remainingMinor, payment.currency),
-        generatedAt: new Date().toISOString(),
+        generatedAt,
       };
     }));
-    return { contexts, name: contexts.length === 1 ? `Receipt ${contexts[0]!.payment.receiptNumber}` : `${contexts.length} receipts`, financeSource: { kind: "receipt" as const, admissionIds: [...new Set(payments.map((payment) => payment.admissionId))], transactions: source.transactions }, reviewHash: null };
+    const ledgerCutoff = options.ledgerCutoff ? [...options.ledgerCutoff] : await accountHighWaters(db, schoolId, payments);
+    return { contexts, name: contexts.length === 1 ? `Receipt ${contexts[0]!.payment.receiptNumber}` : `${contexts.length} receipts`, financeSource: { kind: "receipt" as const, admissionIds: [...new Set(payments.map((payment) => payment.admissionId))], transactions: source.transactions }, reviewHash: null, ledgerCutoff };
   }
 
   const [session] = await db.select({
@@ -309,10 +390,11 @@ export async function buildFinanceDocumentContexts(
       eq(financeLedgerEntryTable.admissionId, admissionId),
       eq(financeLedgerEntryTable.currency, currency),
       lt(financeLedgerEntryTable.effectiveAt, endAt),
+      cutoffCondition(cutoff, admissionId, currency),
     )).orderBy(asc(financeLedgerEntryTable.sequence));
     if (!entries.length) throw rpcError.notFound("Admission statement facts");
-    const cutoff = entries.at(-1)!.sequence;
-    accounts.push({ admissionId, highWaterSequence: cutoff.toString() });
+    const highWater = entries.at(-1)!.sequence;
+    accounts.push({ admissionId, highWaterSequence: highWater.toString() });
     const snapshot = entries.at(-1)!.documentSnapshot;
     if (!snapshot?.admissionName || !snapshot.admissionNumber) throw rpcError.conflict("This account has no immutable statement identity snapshot.");
     let running = BigInt(0);
@@ -333,8 +415,10 @@ export async function buildFinanceDocumentContexts(
       }
       return [{ sequence: entry.sequence.toString(), effectiveAt: entry.effectiveAt.toISOString(), reference: references.get(entry.id) ?? `Ledger ${entry.sequence}`, description: entry.note ?? entry.type.replaceAll("_", " "), debit: entry.direction === "debit" ? amount(entry.amountMinor, entry.currency) : "", credit: entry.direction === "credit" ? amount(entry.amountMinor, entry.currency) : "", balance: amount(running, entry.currency) }];
     });
-    contexts.push({ school, session: { startYear: snapshot.sessionStartYear, endYear: snapshot.sessionEndYear }, admission: { name: snapshot.admissionName, number: snapshot.admissionNumber, fatherName: snapshot.fatherName, motherName: snapshot.motherName, classLabel: snapshot.classLabel, sectionLabel: snapshot.sectionLabel, rollNumber: snapshot.rollNumber?.toString() ?? null }, currency: { code: currency, exponent: currencyMinorUnitDigits(currencyCodeSchema.parse(currency)) }, statement: { periodStartDate, throughDate: source.throughDate, asOfSequence: cutoff.toString(), openingBalance: amount(openingMinor, currency), openingBalanceMinor: openingMinor.toString(), closingBalance: amount(running, currency), closingBalanceMinor: running.toString() }, entries: rows, generatedAt: new Date().toISOString() });
+    contexts.push({ school, session: { startYear: snapshot.sessionStartYear, endYear: snapshot.sessionEndYear }, admission: { name: snapshot.admissionName, number: snapshot.admissionNumber, fatherName: snapshot.fatherName, motherName: snapshot.motherName, classLabel: snapshot.classLabel, sectionLabel: snapshot.sectionLabel, rollNumber: snapshot.rollNumber?.toString() ?? null }, currency: { code: currency, exponent: currencyMinorUnitDigits(currencyCodeSchema.parse(currency)) }, statement: { periodStartDate, throughDate: source.throughDate, asOfSequence: highWater.toString(), openingBalance: amount(openingMinor, currency), openingBalanceMinor: openingMinor.toString(), closingBalance: amount(running, currency), closingBalanceMinor: running.toString() }, entries: rows, generatedAt });
   }
   const reviewHash = createHash("sha256").update(JSON.stringify({ schoolId, sessionId: source.sessionId, currency, throughDate: source.throughDate, timeZone, accounts })).digest("hex");
-  return { contexts, name: contexts.length === 1 ? `Account statement ${contexts[0]!.admission.number}` : `${contexts.length} account statements`, financeSource: { kind: "statement" as const, currency, throughDate: source.throughDate, timeZone, accounts }, reviewHash };
+  // A statement's cutoff is its reviewed high-water sequence per account.
+  const ledgerCutoff = accounts.map((account) => ({ admissionId: account.admissionId, currency, highWaterSequence: account.highWaterSequence }));
+  return { contexts, name: contexts.length === 1 ? `Account statement ${contexts[0]!.admission.number}` : `${contexts.length} account statements`, financeSource: { kind: "statement" as const, currency, throughDate: source.throughDate, timeZone, accounts }, reviewHash, ledgerCutoff };
 }

@@ -1,4 +1,4 @@
-import { HeadObjectCommand } from '@aws-sdk/client-s3';
+import { HeadObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { cadetAuth } from '@campuspilot/auth/cadet';
 import { CADET_OAUTH_GRANT_TABLES, findLiveOAuthGrant } from '@campuspilot/auth/mcp-credential';
 import { db } from '@campuspilot/db';
@@ -22,6 +22,7 @@ import {
   schoolAssistantAccessRoleTable,
 } from '@campuspilot/db/schema/assistant';
 import { demoSchoolPurgeTable } from '@campuspilot/db/schema/demo-school-job';
+import { documentGenerationJobTable } from '@campuspilot/db/schema/document-generation-job';
 import { noticeClassTable, noticeTable } from '@campuspilot/db/schema/notice';
 import { cadetPushSubscriptionTable } from '@campuspilot/db/schema/notification';
 import { whatsappMediaUploadTable } from '@campuspilot/db/schema/whatsapp-media';
@@ -34,6 +35,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { connectCadetMcp, signInCadet } from '../../../test/cadet';
 import { createCadetOAuthContext } from '../../cadet/context';
 import { noticePdfKey } from '../../routers/school/notice/notice.render';
+import { documentJobPrefix } from '../document-generation/storage';
 import { collectDemoSchoolObjectKeys, deleteDemoSchoolData, revokeDemoSchoolSessions, revokeManifestSessions, runDemoSchoolPurgeStages } from './purge-workflow';
 
 import { examResultPublicationTable } from '@campuspilot/db/schema/exam-result-publication';
@@ -274,6 +276,50 @@ describe('purge_demo_school and the demo-only finance exception', () => {
     // The real school keeps its notice and its PDF.
     expect(await exists(realNotice.pdfKey)).toBe(true);
     expect(await db.select().from(noticeTable).where(eq(noticeTable.schoolId, realNotice.schoolId))).toHaveLength(2);
+  });
+
+  it('deletes the document generation jobs of a demo school and their temporary objects, and nothing of another school', async () => {
+    const productionId = () => `sch_${crypto.randomUUID().replaceAll('-', '').slice(0, 21)}`;
+    const exists = (key: string) =>
+      getS3Client().send(new HeadObjectCommand({ Bucket: env.S3_BUCKET, Key: key })).then(() => true, () => false);
+    /** A queued job (pinned to a real template revision) with a temporary object under its prefix. */
+    const jobWithObject = async (isDemo: boolean) => {
+      const school = await createTestSchool({ id: productionId(), isDemo });
+      const session = await createTestSession({ schoolId: school.id, sessionStartYear: 2026, sessionEndYear: 2027 });
+      const principal = createTestClient((await createSchoolStaffSession(school.id, [{ role: 'principal' }])).session).school;
+      const template = await principal.selectMarketplaceTemplate({ schoolId: school.id, documentType: 'id_card', slug: 'id_card-default', expectedRevisionId: null });
+      const [job] = await db
+        .insert(documentGenerationJobTable)
+        .values({
+          schoolId: school.id,
+          sessionId: session.id,
+          documentType: 'id_card',
+          requestedBy: 'user',
+          source: { documentType: 'id_card', sessionId: session.id, classId: 'cls' },
+          templateRevisionId: template.revisionId,
+          artifactId: `art_${crypto.randomUUID().replaceAll('-', '').slice(0, 21)}`,
+          name: 'Student IDs',
+          documentCount: 1,
+          generatedAt: new Date(),
+        })
+        .returning();
+      const key = `${documentJobPrefix(school.id, job!.id)}batch-0001.json`;
+      await getS3Client().send(new PutObjectCommand({ Bucket: env.S3_BUCKET, Key: key, Body: '{}', ContentType: 'application/json' }));
+      return { schoolId: school.id, jobId: job!.id, key };
+    };
+    const demoJob = await jobWithObject(true);
+    const realJob = await jobWithObject(false);
+    expect(await exists(demoJob.key)).toBe(true);
+
+    await db.insert(demoSchoolPurgeTable).values({ schoolId: demoJob.schoolId, status: 'pending', attempt: 1 });
+    const purged = await runDemoSchoolPurgeStages({ schoolId: demoJob.schoolId, attempt: 1, step: (_name, action) => action(), stopSeedRuns: async () => undefined });
+    expect(purged.status).toBe('completed');
+    expect(await db.select().from(documentGenerationJobTable).where(eq(documentGenerationJobTable.schoolId, demoJob.schoolId))).toHaveLength(0);
+    expect(await exists(demoJob.key)).toBe(false);
+    expect(await collectDemoSchoolObjectKeys({ keys: [], prefixes: [`schools/${demoJob.schoolId}/`] })).toEqual([]);
+    // The real school keeps its job and its temporary object.
+    expect(await db.select().from(documentGenerationJobTable).where(eq(documentGenerationJobTable.id, realJob.jobId))).toHaveLength(1);
+    expect(await exists(realJob.key)).toBe(true);
   });
 
   it('purges the Cadet Portal logins of a demo school and revokes their sessions and MCP tokens', async () => {

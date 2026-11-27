@@ -63,7 +63,8 @@ describe('demo question papers (steps only, one class)', () => {
   });
 
   it('selects the Question paper template although the demo has the assistant feature off', async () => {
-    expect(await selectedQuestionPaperTemplate(db, job.schoolId)).toMatchObject({ name: 'Classic Question Paper' });
+    // A demo starts with the defaults every new school gets (docs/document-system.md "Default templates").
+    expect(await selectedQuestionPaperTemplate(db, job.schoolId)).toMatchObject({ name: 'CampusPilot Standard Question Paper' });
   });
 
   it('stores the pages and a first version printed as a PDF, dated from asOf', async () => {

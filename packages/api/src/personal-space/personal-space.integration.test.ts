@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 import { createAdminSession, createRegularUserSession, createTestClient, createTestSchool, createTestSchoolMember } from '../../test/fixtures';
 import { createCadetTestClient } from '../../test/cadet';
 import { expectRpcCode } from '../../test/finance/assertions';
+import { selectedTemplateSlugs } from '../../test/documents';
 import { googleNewcomer, personalSpaceOwner } from '../../test/personal-space';
 import { handleSchoolLogoBlob } from '../routers/school/logo/logo.blob';
 import { handleCadetManifestBlob } from '../routers/school/manifest/cadet-manifest.blob';
@@ -52,6 +53,8 @@ describe('personalSpace.create', () => {
     expect(await client.personalSpace.getStatus()).toEqual({ schoolId, refusal: 'already_has_one' });
     const [listed] = await client.school.listMySchools();
     expect(listed).toMatchObject({ id: schoolId, kind: 'personal', hasActivePlan: true, planSource: 'trial' });
+    // A personal space gets no default document templates (only schools do).
+    expect(await selectedTemplateSlugs(schoolId)).toEqual({});
   });
 
   it('does not use the school creation allowance: the person can still create a school', async () => {
@@ -77,11 +80,20 @@ describe('personalSpace.create', () => {
     expect(await refusalOf(client.personalSpace.create())).toBe('no_google_account');
   });
 
-  it('refuses a member of any school', async () => {
+  it('gives a member of a school a personal space beside their school', async () => {
     const { client, userId } = await googleNewcomer();
     const school = await createTestSchool();
     await createTestSchoolMember({ schoolId: school.id, userId, roles: [{ role: 'teacher', meta: { classIds: [] } }] });
-    expect(await refusalOf(client.personalSpace.create())).toBe('member_of_school');
+    expect(await client.personalSpace.getStatus()).toEqual({ schoolId: null, refusal: null });
+    const { schoolId } = await client.personalSpace.create();
+    expect(await client.personalSpace.getStatus()).toEqual({ schoolId, refusal: 'already_has_one' });
+    const mine = await client.school.listMySchools();
+    expect(mine.map((entry) => [entry.id, entry.kind]).sort()).toEqual(
+      [
+        [school.id, 'school'],
+        [schoolId, 'personal'],
+      ].sort(),
+    );
   });
 
   it('refuses a demo login', async () => {
@@ -129,12 +141,11 @@ describe('after a Google sign-up', () => {
     expect(spaces).toHaveLength(1);
   });
 
-  it('creates nothing, and does not fail, for an account that already belongs to a school', async () => {
-    const { userId } = await googleNewcomer();
-    const school = await createTestSchool();
-    await createTestSchoolMember({ schoolId: school.id, userId, roles: [{ role: 'principal', meta: null }] });
+  it('creates nothing, and does not fail, for an account that may not get one', async () => {
+    const { userId, schoolId } = await personalSpaceOwner();
     await expect(createPersonalSpaceAfterGoogleSignUp(db, userId)).resolves.toBeUndefined();
-    expect(await db.select().from(schoolTable).where(and(eq(schoolTable.ownerUserId, userId), eq(schoolTable.kind, 'personal')))).toEqual([]);
+    const spaces = await db.select({ id: schoolTable.id }).from(schoolTable).where(and(eq(schoolTable.ownerUserId, userId), eq(schoolTable.kind, 'personal')));
+    expect(spaces).toEqual([{ id: schoolId }]);
   });
 });
 

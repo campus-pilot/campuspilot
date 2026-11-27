@@ -7,7 +7,9 @@
  * examination's plans and a notice belong to exactly one session, so
  * switching away from them returns to that area's list in the new session
  * instead of showing the old session's record under the new session's
- * navigation. Writing a new notice is not about a record and is kept.
+ * navigation. Writing a new notice is not about a record and is kept, and
+ * neither is a quick paper (`/question-papers/<id>`), which belongs to no
+ * session: the same paper opens under the other session.
  */
 export function sessionSwitchSuffix(suffix: string): string {
   if (suffix.startsWith('/exam/')) return '/exam';

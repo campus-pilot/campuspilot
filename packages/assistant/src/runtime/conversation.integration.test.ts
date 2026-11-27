@@ -722,6 +722,62 @@ describe('a write tool call', () => {
   });
 });
 
+describe('a conversation started from the template editor', () => {
+  const saveTemplate = mcpTool('school.saveDocumentTemplate', 'write', { module: 'documents' });
+  const selectDesign = mcpTool('school.selectMarketplaceTemplate', 'write', { module: 'documents' });
+  const saveCall = { id: 'tu_save', name: saveTemplate.modelName, input: { documentType: 'bill', content: '<p>x</p>' } };
+  const selectCall = { id: 'tu_select', name: selectDesign.modelName, input: { documentType: 'bill', slug: 'bill-default' } };
+  const templateSeed = { seed: { kind: 'document_template' as const, documentType: 'bill' as const } };
+
+  beforeEach(() => {
+    loadToolCatalogMock.mockResolvedValue(catalogOf(listStudents, updateStudent, saveTemplate, selectDesign));
+  });
+
+  it('refuses the template writes before any approval, telling the model to propose a draft instead', async () => {
+    const { provider, turn, invoke } = await arrange({
+      body: templateSeed,
+      script: [fakeReply({ toolUses: [saveCall, selectCall] }), fakeReply({ text: 'Proposed instead.' })],
+    });
+
+    await invoke().done;
+
+    expect(callToolMock).not.toHaveBeenCalled();
+    const results = toolResultsSentTo(provider.calls[1]);
+    expect(results.map((result) => [result.toolUseId, result.isError])).toEqual([[saveCall.id, true], [selectCall.id, true]]);
+    for (const result of results) {
+      expect(JSON.parse(result.content)).toMatchObject({ code: 'FORBIDDEN', message: expect.stringContaining('validateDocumentTemplateDraft') });
+    }
+    const { run, toolCalls, approvals } = await readTurn(turn);
+    expect(run.status).toBe('completed');
+    expect(toolCalls).toEqual([]);
+    expect(approvals).toEqual([]);
+  });
+
+  it('keeps refusing them in a later turn, whose own message carries no seed', async () => {
+    const first = await arrange({ body: templateSeed, script: [fakeReply({ text: 'Hello.' })] });
+    await first.invoke().done;
+    const next = await seedNextTurn(first.turn, 'Now save it.');
+    const provider = createFakeProvider({ script: [fakeReply({ toolUses: [saveCall] }), fakeReply({ text: 'I cannot.' })] });
+    const processRun = createRunProcessor({ providers: fakeProviderRegistry(provider), log, checkAccess: async () => ({ allowed: true as const }) });
+
+    await processRun(createFakeRunContext(), next.input);
+
+    expect(callToolMock).not.toHaveBeenCalled();
+    expect(JSON.parse(toolResultsSentTo(provider.calls[1])[0]!.content)).toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('leaves the same writes behind their approval in any other conversation', async () => {
+    const { turn, invoke } = await arrange({ script: [fakeReply({ toolUses: [saveCall] }), fakeReply({ text: 'Not saved.' })] });
+    const { ctx, done } = invoke();
+
+    const approval = await waitForPendingApproval(turn, done);
+    expect(approval.toolName).toBe(saveCall.name);
+    await respondToApproval(ctx, approval, 'decline');
+    await done;
+    expect(callToolMock).not.toHaveBeenCalled();
+  });
+});
+
 describe('at-most-once writes', () => {
   const script = () => [fakeReply({ toolUses: [writeCall] }), fakeReply({ text: 'Renamed.' })];
 

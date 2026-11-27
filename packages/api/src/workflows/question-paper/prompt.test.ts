@@ -17,6 +17,9 @@ import {
   QUESTION_PAPER_JOB_REDRAW_SYSTEM_PROMPT,
   QUESTION_PAPER_JOB_SYSTEM_PROMPT,
   questionPaperJobSystemPrompt,
+  QUICK_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT,
+  QUICK_PAPER_JOB_REDRAW_SYSTEM_PROMPT,
+  QUICK_PAPER_JOB_SYSTEM_PROMPT,
   STANDALONE_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT,
   STANDALONE_PAPER_JOB_SYSTEM_PROMPT,
   TEACHER_INSTRUCTIONS_END,
@@ -231,5 +234,19 @@ describe('the prompts of a standalone paper (docs/personal-space.md)', () => {
     expect(first.text).toContain('belongs to no exam plan');
     const last = parts.at(-1) as { type: 'text'; text: string };
     expect(JSON.parse(last.text.split('\n')[1]!)).toEqual({ above: [], below: [] });
+  });
+});
+
+describe('the prompts of a quick paper (docs/question-papers.md "Quick papers in a school")', () => {
+  it("leaves the heading to the school's template, as for an exam paper, and still asks for the details block", () => {
+    const system = questionPaperJobSystemPrompt(null, { standalone: true, schoolTemplate: true });
+    expect(system).toBe(QUICK_PAPER_JOB_SYSTEM_PROMPT);
+    expect(system).toContain("What the school's template prints");
+    expect(system).toContain('[maximum marks]');
+    expect(system).toContain('```paper-details');
+    expect(system).toContain('"maxMarks"');
+    expect(system).not.toContain("Write the paper's whole heading yourself");
+    expect(questionPaperJobSystemPrompt('Make it easier', { standalone: true, schoolTemplate: true })).toBe(QUICK_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT);
+    expect(questionPaperJobSystemPrompt(null, { standalone: true, schoolTemplate: true, redrawFigures: true })).toBe(QUICK_PAPER_JOB_REDRAW_SYSTEM_PROMPT);
   });
 });

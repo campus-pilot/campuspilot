@@ -2,13 +2,14 @@
 
 import { useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Columns2, Download, History, Images, Languages, ListChecks, PanelLeftClose, PanelLeftOpen, Sparkles, SquarePen, WandSparkles, X } from 'lucide-react';
+import { Columns2, History, Images, Languages, ListChecks, PanelLeftClose, PanelLeftOpen, Sparkles, SquarePen, WandSparkles, X } from 'lucide-react';
 import { APP_SHELL_FILL_HEIGHT_MD_CLASS } from '@campuspilot/components/app-shell';
 import type { AssistantSuggestion } from '@campuspilot/components/assistant';
 import { OptionSelect } from '@campuspilot/components/option-select';
 import { GenerationStatus } from '@campuspilot/components/question-paper/generation-status';
 import { PlaceholderNote, RemovedList } from '@campuspilot/components/question-paper/paper-notices';
 import { isPaperLocked, versionSourceLabel } from '@campuspilot/components/question-paper/question-paper-model';
+import { VersionDownloadButtons } from '@campuspilot/components/question-paper/version-download';
 import { Button } from '@campuspilot/ui/components/button';
 import { Skeleton } from '@campuspilot/ui/components/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@campuspilot/ui/components/tooltip';
@@ -34,7 +35,7 @@ import { PaperPhotoCompare } from './paper-photo-compare';
 import { VersionPdf } from './version-pdf';
 import { TwoWaySwitch } from './source-preview-dialogs';
 import type { PageUploads } from './use-page-uploads';
-import { useDownloadQuestionPaper, type QuestionPaperDetail } from './use-question-paper-detail';
+import { downloadFailedMessage, useDownloadQuestionPaper, type QuestionPaperDetail } from './use-question-paper-detail';
 
 /**
  * What the assistant is asked with one click on a new conversation. Each is a
@@ -463,19 +464,15 @@ function PaperToolbar({
       {sources}
       {compare}
       {version ? (
-        <Button
-          type="button"
-          variant="outline"
-          disabled={download.isPending}
-          onClick={() =>
+        <VersionDownloadButtons
+          pending={download.isPending ? (download.variables?.format ?? null) : null}
+          onDownload={(format) =>
             download.mutate(
-              { target: scope, versionNo: version.versionNo },
-              { onError: (error) => toast.error(requestErrorMessage(error, 'The PDF could not be prepared.')) },
+              { target: scope, versionNo: version.versionNo, format },
+              { onError: (error) => toast.error(requestErrorMessage(error, downloadFailedMessage(format))) },
             )
           }
-        >
-          <Download aria-hidden /> {download.isPending ? 'Preparing…' : 'Download PDF'}
-        </Button>
+        />
       ) : null}
     </div>
   );

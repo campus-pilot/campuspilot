@@ -1,6 +1,7 @@
 import { Button } from '@campuspilot/ui/components/button';
-import { Download, Eye } from 'lucide-react';
+import { Eye } from 'lucide-react';
 import { versionSourceLabel, type QuestionPaperVersionSource } from './question-paper-model';
+import { VersionDownloadButtons, type VersionDownloadFormat } from './version-download';
 
 export type VersionView = {
   versionNo: number;
@@ -23,9 +24,10 @@ function VersionRow({
 }: {
   version: VersionView;
   selected: boolean;
-  downloading: boolean;
+  /** The format of this version being prepared, or null. */
+  downloading: VersionDownloadFormat | null;
   onPreview: (versionNo: number) => void;
-  onDownload: (versionNo: number) => void;
+  onDownload: (versionNo: number, format: VersionDownloadFormat) => void;
 }) {
   const parts = [
     versionSourceLabel(version.source),
@@ -49,34 +51,31 @@ function VersionRow({
         <Button type="button" size="sm" variant="outline" onClick={() => onPreview(version.versionNo)}>
           <Eye aria-hidden /> Preview
         </Button>
-        <Button
-          type="button"
+        <VersionDownloadButtons
           size="sm"
-          variant="outline"
-          disabled={downloading}
-          aria-label={`Download PDF of version ${version.versionNo}`}
-          onClick={() => onDownload(version.versionNo)}
-        >
-          <Download aria-hidden /> PDF
-        </Button>
+          subject={`version ${version.versionNo}`}
+          pending={downloading}
+          onDownload={(format) => onDownload(version.versionNo, format)}
+        />
       </div>
     </li>
   );
 }
 
-/** Every saved version, newest first, with preview and PDF download. Versions are never edited, only added. */
+/** Every saved version, newest first, with preview and download (PDF, or Word from the menu beside it). Versions are never edited, only added. */
 export function VersionList({
   versions,
   selectedVersionNo,
-  downloadingVersionNo,
+  downloading,
   onPreview,
   onDownload,
 }: {
   versions: readonly VersionView[];
   selectedVersionNo: number | null;
-  downloadingVersionNo: number | null;
+  /** The version and format being prepared, or null. */
+  downloading: { versionNo: number; format: VersionDownloadFormat } | null;
   onPreview: (versionNo: number) => void;
-  onDownload: (versionNo: number) => void;
+  onDownload: (versionNo: number, format: VersionDownloadFormat) => void;
 }) {
   if (versions.length === 0) return <p className="text-sm text-muted-foreground">No version has been saved yet.</p>;
   return (
@@ -86,7 +85,7 @@ export function VersionList({
           key={version.versionNo}
           version={version}
           selected={version.versionNo === selectedVersionNo}
-          downloading={version.versionNo === downloadingVersionNo}
+          downloading={downloading?.versionNo === version.versionNo ? downloading.format : null}
           onPreview={onPreview}
           onDownload={onDownload}
         />

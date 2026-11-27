@@ -15,6 +15,7 @@ Only names, ids, sizes and durations are logged, never content.
 | `runtime.stats` | info; warn when the loop p99 reaches 300 ms or the container was throttled 100 ms or more | every 30 s, server and worker | `loopDelayMs` (`p50`, `p99`, `max`), `loopBusy`, `cpuCores`, `cpuLimitCores`, `periods`, `throttledPeriods`, `throttledMs`, `rssMb`, `heapUsedMb`, `inFlight` |
 | `runtime.eventloop.blocked` | warn | a 100 ms probe timer fired 300 ms or more late | `blockedMs`, `inFlight` (up to 10 requests, longest running first: `reqId`, `method`, `path`, `elapsedMs`) |
 | `question-paper.save.timing` | info; warn when slow or failed | the worker saves a generated paper | `jobId`, `durationMs`, `steps`, `slow`, `failed` |
+| `document-generation.prepare.timing`, `document-generation.batch.timing`, `document-generation.merge.timing` | info; warn when slow or failed | the worker prepares a PDF job, converts one batch, merges the batches | `jobId`, `batch`, `documents`, `batches`, `images`, `htmlBytes`, `assets`, `assetBytes`, `pdfBytes`, `durationMs`, `steps`, `slow`, `failed` |
 
 - `steps` maps a step name to its total milliseconds in that request; `stepCalls` says how
   often a step ran when more than once. Nested steps are listed separately, so a parent's
@@ -49,17 +50,33 @@ Only names, ids, sizes and durations are logged, never content.
 | `qp.document.render` | template render, document sanitiser and body substitution | sync |
 | `qp.preview.placeholders` | counting figure placeholders for a version preview | sync |
 | `qp.draft.check` | `checkQuestionPaperDraft` | async |
+| `qp.docx.html` | the Word conversion's HTML step: sanitising, the CSS cascade and the mapping (`question-paper.docx-html.ts`) | sync |
+| `qp.docx.svg` | drawing the paper's SVG diagrams to PNG (Gotenberg's Chromium) | async |
+| `qp.docx.images` | turning WebP images (a template's logo) into PNG | async |
+| `qp.docx.convert` | Pandoc conversion (in its own container) | async |
+| `qp.docx.package` | the table fix-ups of the converted package | sync |
 | `doc.template.compile`, `doc.template.render` | Handlebars, for every document type | sync |
 | `doc.sanitize` | the document sanitiser, for every document type | sync |
 | `doc.pdf.convert` | Gotenberg conversion (Chromium in its own container) | async |
 | `doc.pdf.pagecount` | the question paper page cap check | async |
+| `doc.template.measure` | measuring one document of a PDF job before batching (the loop is free between documents) | sync |
+| `doc.pdf.wait` | a PDF job waiting for one of the process's two conversion slots (a batch or a merge) | async |
+| `doc.job.prepare.wait` | a PDF job waiting for the process's prepare slot | async |
+| `doc.pdf.merge` | Gotenberg merging a job's batch PDFs, streamed from and to storage | async |
+| `doc.job.contexts` | building every context of a PDF job (one repeatable-read transaction) | async |
+| `doc.preview.context` | building a template preview's context: the OPA round, the student management flag and the school's data (`document.preview-context.ts`) | async |
+| `doc.preview.images` | reading and embedding a template preview's logo and photo | async |
+| `doc.job.images.head`, `doc.job.images.read` | sizing every image of a job; reading a batch's images | async |
+| `doc.job.template.read`, `doc.job.batch.read`, `doc.job.batches.store`, `doc.job.batch.store` | the pinned template and the job's temporary objects in storage | async |
 | `image.decode.wait` | an upload waiting for one of the two decode slots | async |
 | `image.decode` | sharp decoding and encoding (libuv thread pool) | async |
 | `assistant.spend.window` | the school's active billing period, read before the cached AI spend on every assistant access check (docs/school-billing.md) | async |
 
 Question paper previews and draft previews also annotate `htmlBytes` (the size of the
 response's document), `paperId` and `versionNo`; the body adds `qpFormulas`, `qpFigures`
-and `qpBodyBytes`; a PDF adds `pdfHtmlBytes` and `pdfBytes`.
+and `qpBodyBytes`; a PDF adds `pdfHtmlBytes` and `pdfBytes`. A Word download that makes its file adds `docxHtmlBytes`,
+`docxBytes`, `docxTables`, `docxImages`, `docxSvgs`, `docxWorkUnits` (the HTML step's work budget spent,
+see docs/question-papers.md "Word download") and `docxWarnings` (Pandoc's warning count).
 
 ## Reading them
 

@@ -2,18 +2,22 @@
 
 import { useForm } from "@tanstack/react-form";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, CheckCircle2, Eye, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { z } from "zod";
-import type { DocumentSource } from "@campuspilot/api/routers/school/document/document.dto";
+import {
+  MAX_DOCUMENT_SOURCE_ITEMS,
+  type DocumentGenerationJobDto,
+  type DocumentSource,
+} from "@campuspilot/api/routers/school/document/document.dto";
 import { formatMinor } from "@campuspilot/components/finance";
 import {
   DocumentButton,
   DocumentErrors,
   DocumentNotice,
-  DocumentPreview,
 } from "@campuspilot/components/documents/document-controls";
 import { Badge } from "@campuspilot/ui/components/badge";
 import { Input } from "@campuspilot/ui/components/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@campuspilot/ui/components/tabs";
 import { RequirePermissions } from "@/components/require-permissions";
 import { client, orpc } from "@/lib/orpc";
 import { SimplePagination } from "@/components/billing/finance-ui";
@@ -22,14 +26,10 @@ import {
   DocumentReadError,
   SCHOOL_ACTIONS,
   documentPermission,
-  useDocumentCache,
   type DocumentScope,
 } from "./document-common";
-import {
-  CreatePdfButton,
-  DocumentDownload,
-  downloadCreatedDocument,
-} from "./document-generator";
+import { BillDueGenerator } from "./bill-due";
+import { FinancePreviewPanel } from "./finance-preview-panel";
 
 type FinanceDocumentType = "bill" | "receipt";
 type FinanceSource = Extract<
@@ -40,9 +40,11 @@ type Preview = {
   html: string;
   warnings: string[];
   recipientCount: number;
+  sampleCount: number;
   fingerprint: string;
 };
-type GeneratedArtifact = { id: string; fingerprint: string };
+/** The job started for a selection, with the selection it was started for. */
+type StartedJob = { job: DocumentGenerationJobDto; fingerprint: string };
 type Selection = { id: string; label: string };
 
 const selectionSchema = z.object({
@@ -71,7 +73,7 @@ export function FinanceDocumentGenerator({
     SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES,
     SCHOOL_ACTIONS.READ_SESSION_FINANCE,
     SCHOOL_ACTIONS.READ_ADMISSION_LEDGER,
-    ...(documentType === "bill" ? [SCHOOL_ACTIONS.READ_BILLING_RUNS] : []),
+    // Billing runs are read by the Bills creator's Billing cycles tab only, which checks it itself.
   ];
   return (
     <RequirePermissions
@@ -123,9 +125,39 @@ function FinanceDocumentGeneratorData({
     onHistory,
   };
   return documentType === "bill" ? (
-    <BillGenerator key={template.data.artifact.id} {...props} />
+    <BillsCreator key={template.data.artifact.id} {...props} />
   ) : (
     <ReceiptGenerator key={template.data.artifact.id} {...props} />
+  );
+}
+
+/**
+ * The Bills creator: **By date** (a Bill due per student as of a chosen date,
+ * the default) and **Billing cycles** (the bills of one posted billing run).
+ * Both print with the school's bill template. The tab is local view state,
+ * not a form value; each tab keeps its own form while the dialog is open
+ * (Radix keeps only the active tab's content mounted, so switching starts
+ * that tab afresh).
+ */
+function BillsCreator(props: GeneratorProps) {
+  return (
+    <Tabs defaultValue="date" className="flex min-w-0 flex-col gap-4">
+      <TabsList>
+        <TabsTrigger value="date">By date</TabsTrigger>
+        <TabsTrigger value="cycles">Billing cycles</TabsTrigger>
+      </TabsList>
+      <TabsContent value="date" className="min-w-0">
+        <BillDueGenerator {...props} />
+      </TabsContent>
+      <TabsContent value="cycles" className="min-w-0">
+        <RequirePermissions
+          permissions={documentPermission(props.scope.schoolId, SCHOOL_ACTIONS.READ_BILLING_RUNS)}
+          fallback={<DocumentNotice>You do not have access to billing runs.</DocumentNotice>}
+        >
+          <BillGenerator {...props} />
+        </RequirePermissions>
+      </TabsContent>
+    </Tabs>
   );
 }
 
@@ -143,16 +175,15 @@ function useFinanceGeneration({
     selected: Selection[];
   }) => FinanceSource | null;
 }) {
-  const cache = useDocumentCache();
   const form = useForm({
     defaultValues: {
       search: "",
       page: 1,
       billRunId: "",
       selected: [] as Selection[],
-      mode: "preview" as "preview" | "generate" | "download",
+      mode: "preview" as "preview" | "generate",
       preview: null as Preview | null,
-      generated: null as GeneratedArtifact | null,
+      generated: null as StartedJob | null,
       error: "",
     },
     validators: {
@@ -160,18 +191,19 @@ function useFinanceGeneration({
         search: z.string().max(searchMax),
         page: z.number().int().positive(),
         billRunId: z.string(),
-        selected: z.array(selectionSchema).max(500),
-        mode: z.enum(["preview", "generate", "download"]),
+        selected: z.array(selectionSchema).max(MAX_DOCUMENT_SOURCE_ITEMS),
+        mode: z.enum(["preview", "generate"]),
         preview: z
           .object({
             html: z.string(),
             warnings: z.array(z.string()),
             recipientCount: z.number().int().nonnegative(),
+            sampleCount: z.number().int().nonnegative(),
             fingerprint: z.string(),
           })
           .nullable(),
         generated: z
-          .object({ id: z.string().min(1), fingerprint: z.string().min(1) })
+          .object({ job: z.custom<DocumentGenerationJobDto>(), fingerprint: z.string().min(1) })
           .nullable(),
         error: z.string(),
       }),
@@ -193,6 +225,7 @@ function useFinanceGeneration({
             html: preview.html,
             warnings: preview.warnings,
             recipientCount: preview.studentCount,
+            sampleCount: preview.sampleCount,
             fingerprint,
           });
           return;
@@ -203,20 +236,7 @@ function useFinanceGeneration({
           source,
           templateRevisionId: templateId,
         });
-        form.setFieldValue("generated", {
-          id: generated.artifact.id,
-          fingerprint,
-        });
-        await cache.artifacts(scope.schoolId);
-        if (value.mode === "download")
-          form.setFieldValue(
-            "error",
-            await downloadCreatedDocument({
-              schoolId: scope.schoolId,
-              artifactId: generated.artifact.id,
-              documentType: source.documentType,
-            }),
-          );
+        form.setFieldValue("generated", { job: generated.job, fingerprint });
       } catch (error) {
         form.setFieldValue(
           "error",
@@ -228,7 +248,7 @@ function useFinanceGeneration({
   return form;
 }
 
-type GeneratorProps = {
+export type GeneratorProps = {
   scope: DocumentScope;
   templateId: string;
   onHistory: () => void;
@@ -503,7 +523,9 @@ function ReceiptPicker({
         <DocumentErrors errors={searchErrors} />
       </div>
       <p className="text-xs text-muted-foreground">
-        {values.selected.length} of 500 payments selected across pages
+        {values.selected.length} of{" "}
+        {MAX_DOCUMENT_SOURCE_ITEMS.toLocaleString("en-IN")} payments selected
+        across pages
       </p>
       {values.selected.length ? (
         <div className="flex max-h-24 flex-wrap gap-2 overflow-y-auto">
@@ -532,7 +554,8 @@ function ReceiptPicker({
             {payments.data.items.map((payment) => {
               const selected = selectedIds.has(payment.id);
               const disabled =
-                payment.reversed || (!selected && values.selected.length >= 500);
+                payment.reversed ||
+                (!selected && values.selected.length >= MAX_DOCUMENT_SOURCE_ITEMS);
               return (
                 <DocumentButton
                   key={payment.id}
@@ -602,87 +625,33 @@ function FinancePreviewAndActions({
       })}
     >
       {({ values, submitting, canSubmit }) => {
-        const fingerprint = source
-          ? generationFingerprint(source, templateId)
-          : "";
+        const fingerprint = source ? generationFingerprint(source, templateId) : "";
         const previewCurrent = values.preview?.fingerprint === fingerprint;
         const generatedCurrent = values.generated?.fingerprint === fingerprint;
         return (
-          <section className="flex min-w-0 flex-col gap-3">
-            {previewCurrent
-              ? values.preview?.warnings.map((warning) => (
-                  <DocumentNotice key={warning}>{warning}</DocumentNotice>
-                ))
-              : null}
-            {values.error ? (
-              <DocumentNotice error>{values.error}</DocumentNotice>
-            ) : null}
-            <div className="flex flex-wrap gap-2">
-              <CreatePdfButton
-                permission={{
-                  schoolId: scope.schoolId,
-                  action: SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS,
-                }}
-                disabled={!source || submitting || !canSubmit}
-                running={submitting ? values.mode : null}
-                onCreate={(mode) => {
-                  form.setFieldValue("mode", mode);
-                  void form.handleSubmit();
-                }}
-              />
-              <DocumentButton
-                variant="outline"
-                disabled={!source || submitting || !canSubmit}
-                onClick={() => {
-                  form.setFieldValue("mode", "preview");
-                  void form.handleSubmit();
-                }}
-              >
-                <Eye />
-                {submitting && values.mode === "preview"
-                  ? "Preparing preview…"
-                  : "Preview document"}
-              </DocumentButton>
-            </div>
-            {previewCurrent ? (
-              <p className="text-xs text-muted-foreground">
-                Preview contains {values.preview?.recipientCount ?? 0}{" "}
-                {documentType === "bill" ? "bills" : "receipts"}.
-              </p>
-            ) : null}
-            <DocumentPreview
-              html={previewCurrent ? values.preview?.html : undefined}
-            />
-            {generatedCurrent && values.generated ? (
-              <div className="flex flex-col gap-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
-                <p role="status" className="flex items-center gap-2 text-sm font-medium">
-                  <CheckCircle2 className="size-4" /> Your PDF is ready
-                </p>
-                <RequirePermissions
-                  permissions={documentPermission(
-                    scope.schoolId,
-                    SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS,
-                  )}
-                  fallback={
-                    <DocumentNotice>
-                      The PDF was created, but your account cannot download
-                      finance documents.
-                    </DocumentNotice>
-                  }
-                >
-                  <DocumentDownload
-                    schoolId={scope.schoolId}
-                    artifactId={values.generated.id}
-                    documentType={documentType}
-                    label="Download again"
-                  />
-                  <DocumentButton variant="ghost" onClick={onHistory}>
-                    View document history <ArrowRight />
-                  </DocumentButton>
-                </RequirePermissions>
-              </div>
-            ) : null}
-          </section>
+          <FinancePreviewPanel
+            state={{
+              ready: Boolean(source),
+              preview: previewCurrent ? values.preview : null,
+              job: generatedCurrent ? (values.generated?.job ?? null) : null,
+              error: values.error,
+              submitting,
+              mode: values.mode,
+              canSubmit,
+            }}
+            documentType={documentType}
+            documentsLabel={documentType === "bill" ? "bills" : "receipts"}
+            scope={scope}
+            onCreate={() => {
+              form.setFieldValue("mode", "generate");
+              void form.handleSubmit();
+            }}
+            onPreview={() => {
+              form.setFieldValue("mode", "preview");
+              void form.handleSubmit();
+            }}
+            onHistory={onHistory}
+          />
         );
       }}
     </form.Subscribe>

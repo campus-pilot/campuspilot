@@ -28,9 +28,10 @@ export type SchoolRoleAssignment = {
   role: `school.${Role}`;
   /**
    * Where the assignment is valid: its school, with that school's kind
-   * (`school.kind`), which the policy reads for the actions that exist only
-   * in a personal space (`personal_space_actions` in
-   * `policies/school/permissions.rego`).
+   * (`school.kind`), a fact of the assignment a policy may read. No policy
+   * reads it today: standalone question papers, the one set of actions that
+   * was limited to personal spaces, are granted in real schools too since
+   * quick papers (docs/question-papers.md "Quick papers in a school").
    */
   scope: { kind: 'school'; schoolId: string; schoolKind: SchoolKind };
   meta: RoleMeta | null;

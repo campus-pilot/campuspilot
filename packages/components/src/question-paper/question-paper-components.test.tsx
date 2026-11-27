@@ -272,23 +272,31 @@ describe('VersionList', () => {
   it('labels who wrote each version and previews or downloads the chosen one', () => {
     const onPreview = vi.fn();
     const onDownload = vi.fn();
-    render(<VersionList versions={versions} selectedVersionNo={2} downloadingVersionNo={null} onPreview={onPreview} onDownload={onDownload} />);
+    render(<VersionList versions={versions} selectedVersionNo={2} downloading={null} onPreview={onPreview} onDownload={onDownload} />);
     expect(screen.getByText(/Assistant chat/)).toBeTruthy();
     expect(screen.getByText(/AI from photos/)).toBeTruthy();
     fireEvent.click(screen.getAllByRole('button', { name: /Preview/ })[1]!);
     expect(onPreview).toHaveBeenCalledWith(1);
     fireEvent.click(screen.getByRole('button', { name: 'Download PDF of version 2' }));
-    expect(onDownload).toHaveBeenCalledWith(2);
+    expect(onDownload).toHaveBeenCalledWith(2, 'pdf');
+    // Word is offered beside each version's PDF.
+    expect(screen.getByRole('button', { name: 'More download formats for version 1' })).toBeTruthy();
+  });
+
+  it('says which file of which version is being prepared', () => {
+    render(<VersionList versions={versions} selectedVersionNo={2} downloading={{ versionNo: 1, format: 'docx' }} onPreview={() => {}} onDownload={() => {}} />);
+    expect(screen.getByText('Preparing Word…')).toBeTruthy();
+    expect(screen.getAllByText('Download PDF')).toHaveLength(1);
   });
 
   it('labels a version copied from an earlier paper', () => {
     const copied = [{ versionNo: 3, source: 'copy' as const, createdAt: new Date('2026-11-03T10:00:00Z'), createdByName: 'Asha', warningCount: 0, isLatest: true }];
-    render(<VersionList versions={copied} selectedVersionNo={3} downloadingVersionNo={null} onPreview={() => {}} onDownload={() => {}} />);
+    render(<VersionList versions={copied} selectedVersionNo={3} downloading={null} onPreview={() => {}} onDownload={() => {}} />);
     expect(screen.getByText(/Copied from an earlier paper/)).toBeTruthy();
   });
 
   it('says so when there is no version', () => {
-    render(<VersionList versions={[]} selectedVersionNo={null} downloadingVersionNo={null} onPreview={() => {}} onDownload={() => {}} />);
+    render(<VersionList versions={[]} selectedVersionNo={null} downloading={null} onPreview={() => {}} onDownload={() => {}} />);
     expect(screen.getByText('No version has been saved yet.')).toBeTruthy();
   });
 });

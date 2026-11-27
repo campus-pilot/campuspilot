@@ -43,6 +43,8 @@ const CORE_TOOLS = [
   'school.getCollectionRegister',
   'school.getDashboard',
   'school.getDocumentDownload',
+  // Generation is a background job: generateDocument returns it, this reads its outcome.
+  'school.getDocumentGenerationJob',
   'school.getExam',
   'school.getExamOverview',
   'school.getExamResult',
@@ -71,6 +73,15 @@ const CORE_TOOLS = [
 ];
 
 const HIDDEN_TOOLS = [
+  // Template PDF previews: each call is a Gotenberg conversion for a person
+  // looking at the editor or the marketplace, never an agent tool.
+  'school.previewDocumentTemplatePdf',
+  'school.previewDocumentTemplateRevisionPdf',
+  'school.previewMarketplaceTemplatePdf',
+  // The data the template editor's previews render with (students, results,
+  // finance as the caller may read them): the editor's, not an agent tool;
+  // agents read that data through its own tools.
+  'school.getDocumentTemplatePreviewContext',
   'auth.setPassword',
   'auth.getOAuthConsentClient',
   'auth.listOAuthConnections',
@@ -110,6 +121,13 @@ const HIDDEN_TOOLS = [
   'systemAdmin.requestDataMigrationRun',
   // Website leads carry prospects' contact details: platform admins only.
   'systemAdmin.listLeads',
+  // School Onboarding submissions carry a school's contact details and recordings.
+  'systemAdmin.listSchoolRegistrationRequests',
+  'systemAdmin.getSchoolRegistrationRequestMedia',
+  // Setting up a school from a submission creates schools and accounts: a human decision.
+  'systemAdmin.getSchoolSetup',
+  'systemAdmin.saveSchoolSetupDraft',
+  'systemAdmin.startSchoolSetup',
   // Demo provisioning, credentials and purge stay human admin actions.
   'systemAdmin.listDemoClassCatalogue',
   'systemAdmin.createDemoSchool',
@@ -197,6 +215,9 @@ const HIDDEN_TOOLS = [
   'school.getStandalonePaperPreview',
   'school.previewStandalonePaperDraft',
   'school.getStandalonePaperDownload',
+  // The school's Question papers page (a screen read; agents use the per-kind paper tools).
+  'school.listSchoolQuestionPapers',
+  'school.listSchoolQuestionPaperFilterOptions',
 ];
 
 /**
@@ -207,7 +228,11 @@ const HIDDEN_TOOLS = [
  * is paid in model tokens on every conversation, so growing it must be a
  * deliberate decision.
  */
-const CORE_LISTING_BUDGET_CHARS = 38_000;
+// 38,500 since getDocumentGenerationJob joined core (37 tools; packages/api/AGENTS.md):
+// tightening the generation descriptions could not bring the listing back under 38,000.
+// 39,400 since generateDocument's source gained the Bill due branch (about 900
+// characters: its recipients are an explicit session / class / admissions choice).
+const CORE_LISTING_BUDGET_CHARS = 39_400;
 
 let appRouter: AnyRouter;
 let catalog: McpCatalog;
@@ -296,7 +321,9 @@ describe('catalog metadata', () => {
 
     expect(classified).toEqual([...leafNames].sort());
     expect(catalog.core.map(({ name }) => name).sort()).toEqual(CORE_TOOLS);
-    expect(catalog.core).toHaveLength(36);
+    // 37 since getDocumentGenerationJob (deliberate: generation is a background job, and the
+    // assistant cannot fetch a PDF it generated without reading the job; packages/api/AGENTS.md).
+    expect(catalog.core).toHaveLength(37);
     // 85 on main, plus releaseExamToCadet, withdrawExamFromCadet,
     // get/saveStudentExamRemark and get/updateCadetPortalSettings (+6);
     // +4 result notification tools (release preview, release batch read,
@@ -306,10 +333,14 @@ describe('catalog metadata', () => {
     // +3 exam timetable publication tools (publish preview, publish, withdraw);
     // +8 question paper tools (list, get, versions, learn, validate, save, get draft, edit);
     // +1 school.updateExamClasses (change the classes taking part in an exam);
-    // +10 standalone paper tools of a personal space (list, filter options, create,
+    // +10 standalone paper tools of a personal space and a school's quick papers (list, filter options, create,
     // get, get draft, versions, learn, validate, save, edit);
-    // +1 systemAdmin.getPersonalSpaceStats (the admin dashboard's personal space counts).
-    expect(catalog.advanced).toHaveLength(130);
+    // +1 systemAdmin.getPersonalSpaceStats (the admin dashboard's personal space counts);
+    // +4 school.addClassSubject, updateClassSubject, removeClassSubject and
+    // moveClassSubjectToClassroom (one subject at a time, subjects added from an exam);
+    // +1 school.listDocumentGenerationJobs (PDFs being created, and recent failures);
+    // +4 template tools (list and get revisions, learn template editing, validate a template draft).
+    expect(catalog.advanced).toHaveLength(139);
   });
 });
 
@@ -333,6 +364,8 @@ describe('school feature gates in the catalog', () => {
       'school.listDocumentArtifacts',
       // Every source they generate from is a student management document, so the gate is theirs.
       'school.generateDocument',
+      'school.getDocumentGenerationJob',
+      'school.listDocumentGenerationJobs',
       'school.previewDocument',
       'school.listNotificationDeliveries',
     ]) {
@@ -804,10 +837,11 @@ describe('assistant service view', () => {
       expect(typeof tool._meta?.[ASSISTANT_TOOL_META.module]).toBe('string');
       // Every school sees the same listing; the worker drops the tools of features its school lacks.
       expect(tool._meta?.[ASSISTANT_TOOL_META.features], tool.name).toEqual([...definitions.get(tool.name)!.features]);
-      // And the kinds of school it serves, so a personal space is offered only its own tools.
+      // And the kinds of school it serves, so a personal space is offered only the tools that serve it.
       expect(tool._meta?.[ASSISTANT_TOOL_META.schoolKinds], tool.name).toEqual([...definitions.get(tool.name)!.schoolKinds]);
     }
-    expect(tools.find(({ name }) => name === 'school.listStandalonePapers')?._meta?.[ASSISTANT_TOOL_META.schoolKinds]).toEqual(['personal']);
+    // A school's quick papers and a personal space's papers share the standalone paper tools.
+    expect(tools.find(({ name }) => name === 'school.listStandalonePapers')?._meta?.[ASSISTANT_TOOL_META.schoolKinds]).toEqual(['school', 'personal']);
     expect(tools.find(({ name }) => name === 'school.listStudents')?._meta?.[ASSISTANT_TOOL_META.schoolKinds]).toEqual(['school']);
     // Account-level tools name no school, so every kind of school is offered them.
     expect(tools.find(({ name }) => name === 'school.listMySchools')?._meta?.[ASSISTANT_TOOL_META.schoolKinds]).toEqual(['school', 'personal']);
@@ -836,6 +870,23 @@ describe('assistant service view', () => {
     // Procedures the assistant may not use are not listed at all.
     expect(tools.map((tool) => tool.name)).not.toContain('school.startQuestionPaperGeneration');
     expect(tools.map((tool) => tool.name)).toEqual(expect.arrayContaining(['school.saveQuestionPaperVersion', 'school.listQuestionPapers']));
+  });
+
+  it('gives the in-app assistant the template editing reads, keeps template saves behind approval and withholds the PDF preview', () => {
+    const byName = new Map(exposedTools().map((tool) => [tool.name, tool]));
+    for (const name of ['school.learn_document_template_editing', 'school.validateDocumentTemplateDraft']) {
+      const tool = byName.get(name);
+      expect(tool, name).toBeDefined();
+      expect(tool!.mcp.module).toBe('documents');
+      expect(assistantToolDecision(tool!.mcp), name).toEqual({ allowed: true, requiresApproval: false });
+    }
+    // A save from the template editor's chat is the person's own (the editor's Save); any other save still asks.
+    expect(assistantToolDecision(byName.get('school.saveDocumentTemplate')!.mcp)).toEqual({ allowed: true, requiresApproval: true });
+    // One Gotenberg conversion per call: a person's preview only.
+    expect(byName.has('school.previewDocumentTemplatePdf')).toBe(false);
+    expect(byName.has('school.previewMarketplaceTemplatePdf')).toBe(false);
+    expect(byName.has('school.previewDocumentTemplateRevisionPdf')).toBe(false);
+    expect(byName.has('school.getDocumentTemplatePreviewContext')).toBe(false);
   });
 
   /** The question paper tools by name: what each is for, and how the in-app assistant and external clients reach it. */

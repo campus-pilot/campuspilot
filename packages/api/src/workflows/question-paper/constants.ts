@@ -43,6 +43,7 @@ export const QUESTION_PAPER_JOB_FAILURES = {
   invalid_output: 'The AI returned a paper that could not be used. Try again.',
   output_too_long: 'This paper is too long to read in one go.',
   template_missing: 'Choose a question paper template first.',
+  no_active_session: "Activate an academic session first: the school's question paper template prints its years.",
   paper_locked: 'This paper can no longer be changed.',
   plan_mode_removed: 'The exam plan no longer has this paper\'s mode, so the paper was not saved. Check the exam plan and try again.',
   paper_unprintable: 'The paper was read but it is too large or too complex to print. Use fewer pages or simpler formulas.',

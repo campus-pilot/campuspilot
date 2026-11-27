@@ -12,7 +12,15 @@ import {
   type ExamPlanPreviewDto,
 } from '@campuspilot/api/routers/school/exam/exam.dto';
 import { ExamClassSelection } from '@campuspilot/components/exam/exam-class-selection';
-import { sameClassSelection } from '@campuspilot/components/exam/exam-class-selection-model';
+import {
+  NO_PLAN_SELECTION_CHANGES,
+  applyPlanSelectionChanges,
+  changesAfterSubjectAdded,
+  planSelectionChanges,
+  sameClassSelection,
+  type PlanSelectionChanges,
+  type SubjectChoice,
+} from '@campuspilot/components/exam/exam-class-selection-model';
 import {
   Dialog,
   DialogContent,
@@ -32,11 +40,16 @@ import {
   useExamCache,
 } from './exam-common';
 import {
+  changedKeptClasses,
   classSelectionFormOptions,
+  editClassesBase,
+  editClassesSubjects,
+  editSelectionIssue,
   fieldError,
   participatingClassIds,
-  selectionIssue,
+  type ClassSelectionValues,
 } from './exam-class-model';
+import { ExamAddSubjectButton, ExamAddSubjectDialog } from './exam-add-subject';
 import { errorCode, errorMessage, examResultsHref, schoolPermission, type ExamScope } from './exam-model';
 
 /**
@@ -117,9 +130,10 @@ export function ExamClassesSection({
                   <DialogHeader>
                     <DialogTitle>Classes taking part</DialogTitle>
                     <DialogDescription>
-                      Added classes get their plans from class settings. A
-                      removed class leaves the plans, timetable, results and
-                      documents of this examination.
+                      Added classes get plans for the subjects you choose. A
+                      subject added here to a class taking part gets its plan
+                      at once. A removed class leaves the plans, timetable,
+                      results and documents of this examination.
                     </DialogDescription>
                   </DialogHeader>
                   {editing && (
@@ -135,6 +149,10 @@ export function ExamClassesSection({
   );
 }
 
+/** What the review keeps outside its keyed form: the person's changes to carry and the class whose Add subject dialog is open. */
+type CarryValues = { changes: PlanSelectionChanges; addingTo: string | null };
+const carrySchema = z.object({ changes: z.custom<PlanSelectionChanges>(), addingTo: z.string().nullable() });
+
 /**
  * Loads the review and renders a fresh form per `configurationVersion`. The
  * server's refusal of a save is held here, outside the keyed form, until the
@@ -143,6 +161,12 @@ export function ExamClassesSection({
  * baseline and would drop a message held inside it, and keeping any refusal
  * out of the form's error map keeps Save classes available for a retry (see
  * `classSelectionFormOptions`).
+ *
+ * Only the person's own changes are carried into a remounted form (after a
+ * subject is added or a stale-review refusal): classes added or removed and
+ * subjects ticked or unticked, applied to the new review's classes taking
+ * part and planned subjects (`applyPlanSelectionChanges`). A full snapshot
+ * would silently undo what someone else saved meanwhile.
  */
 function ClassesPreview({ scope, onClose }: { scope: ExamScope; onClose: () => void }) {
   const query = useQuery(orpc.school.getExamPlanPreview.queryOptions({ input: scope }));
@@ -150,8 +174,17 @@ function ClassesPreview({ scope, onClose }: { scope: ExamScope; onClose: () => v
     defaultValues: { message: null as string | null },
     validators: { onChange: z.object({ message: z.string().nullable() }) },
   });
+  const carry = useForm({
+    defaultValues: { changes: NO_PLAN_SELECTION_CHANGES, addingTo: null } as CarryValues,
+    validators: { onChange: carrySchema },
+  });
   if (query.isPending) return <LoadingExam />;
   if (!query.data) return <ReadError error={query.error} retry={query.refetch} />;
+  const preview = query.data;
+  const base = editClassesBase(preview);
+  const initial = applyPlanSelectionChanges(preview.classes, base, carry.state.values.changes, base.classIds);
+  const added = (classId: string, subjectSlug: string) =>
+    carry.setFieldValue('changes', changesAfterSubjectAdded(preview.classes, carry.state.values.changes, classId, subjectSlug));
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <refusal.Subscribe selector={(state) => state.values.message}>
@@ -160,28 +193,58 @@ function ClassesPreview({ scope, onClose }: { scope: ExamScope; onClose: () => v
       <ClassesForm
         key={query.data.configurationVersion}
         scope={scope}
-        preview={query.data}
+        preview={preview}
+        initial={initial}
         busy={query.isFetching}
         onClose={onClose}
         onRefusal={(message) => refusal.setFieldValue('message', message)}
+        onSelectionChange={(value) => carry.setFieldValue('changes', planSelectionChanges(base, value))}
+        onAddSubject={(classId) => carry.setFieldValue('addingTo', classId)}
       />
+      <carry.Subscribe selector={(state) => state.values.addingTo}>
+        {(addingTo) => {
+          const schoolClass = preview.classes.find((entry) => entry.classId === addingTo);
+          return schoolClass ? (
+            <ExamAddSubjectDialog
+              scope={scope}
+              schoolClass={schoolClass}
+              onAdded={(subjectSlug) => added(schoolClass.classId, subjectSlug)}
+              onClose={() => carry.setFieldValue('addingTo', null)}
+            />
+          ) : null;
+        }}
+      </carry.Subscribe>
     </div>
   );
 }
 
+/**
+ * Edit classes. Every class's breakdown has subject checkboxes: for a class
+ * taking part they show which subjects have plans (`planned`), so ticking an
+ * unplanned subject adds its plan and unticking a planned one removes it
+ * (the server refuses a subject with results, question papers or timetable
+ * entries); for a class being added they choose its plans. A subject added
+ * here to a class taking part gets its plan at once on the server.
+ */
 function ClassesForm({
   scope,
   preview,
+  initial,
   busy,
   onClose,
   onRefusal,
+  onSelectionChange,
+  onAddSubject,
 }: {
   scope: ExamScope;
   preview: ExamPlanPreviewDto;
+  initial: { classIds: string[]; subjects: SubjectChoice };
   busy: boolean;
   onClose: () => void;
   /** Shows (or, with null, clears) the server's refusal outside this keyed form. */
   onRefusal: (message: string | null) => void;
+  onSelectionChange: (value: ClassSelectionValues) => void;
+  onAddSubject: (classId: string) => void;
 }) {
   const queries = useExamCache();
   const baseline = participatingClassIds(preview);
@@ -194,15 +257,16 @@ function ClassesForm({
     ]);
   const form = useForm(
     classSelectionFormOptions({
-      classIds: baseline,
-      save: async (classIds) => {
+      ...initial,
+      save: async (value) => {
         const result = await client.school.updateExamClasses({
           ...scope,
           configurationVersion: preview.configurationVersion,
-          classIds,
+          classIds: value.classIds,
+          subjects: editClassesSubjects(preview, value),
         });
         toast.success(
-          `Classes updated: ${result.addedClassIds.length} added, ${result.removedClassIds.length} removed.`,
+          `Classes updated: ${result.addedClassIds.length} added, ${result.removedClassIds.length} removed · ${result.createdPlanCount} subject plans added, ${result.deletedPlanCount} removed.`,
         );
         onClose();
         await refresh();
@@ -214,11 +278,12 @@ function ClassesForm({
         // keeps this form and its selection, so the same save can be retried.
         onRefusal(
           errorCode(error) === 'CONFLICT'
-            ? `${errorMessage(error)} The list now shows the current classes taking part.`
+            ? `${errorMessage(error)} The list now shows what was saved meanwhile, with your changes on top. Review it and save again.`
             : errorMessage(error),
         );
         await refresh();
       },
+      onSelectionChange,
     }),
   );
   return (
@@ -229,55 +294,97 @@ function ClassesForm({
         void form.handleSubmit();
       }}
     >
-      <form.Field name="classIds">
-        {(field) => (
-          <ExamClassSelection
-            classes={preview.classes}
-            selected={field.state.value}
-            baseline={baseline}
-            disabled={busy}
-            error={fieldError(field.state.meta.errors)}
-            onChange={(classIds) => field.handleChange(classIds)}
-          />
+      <form.Field name="subjects">
+        {(subjectsField) => (
+          <form.Field name="classIds">
+            {(field) => (
+              <ExamClassSelection
+                classes={preview.classes}
+                selected={field.state.value}
+                baseline={baseline}
+                disabled={busy}
+                error={fieldError(field.state.meta.errors)}
+                onChange={(classIds) => field.handleChange(classIds)}
+                subjects={{
+                  chosen: subjectsField.state.value,
+                  onChange: (subjects) => subjectsField.handleChange(subjects),
+                }}
+                renderAddSubject={(schoolClass) => (
+                  <ExamAddSubjectButton
+                    scope={scope}
+                    label={schoolClass.label}
+                    onAdd={() => onAddSubject(schoolClass.classId)}
+                  />
+                )}
+              />
+            )}
+          </form.Field>
         )}
       </form.Field>
       <form.Subscribe
         selector={(state) => ({
           classIds: state.values.classIds,
+          subjects: state.values.subjects,
           canSubmit: state.canSubmit,
           isSubmitting: state.isSubmitting,
           errors: state.errors,
         })}
       >
-        {({ classIds, canSubmit, isSubmitting, errors }) => {
-          const issue = selectionIssue(
-            preview,
-            classIds.filter((classId) => !baseline.includes(classId)),
-          );
-          const unchanged = sameClassSelection(classIds, baseline);
-          return (
-            <div className="sticky bottom-0 flex flex-col gap-3 border-t bg-popover py-3">
-              {issue && (
-                <Notice error>
-                  {issue} Fix it in class settings or leave the class out.
-                </Notice>
-              )}
-              <Issues errors={errors} />
-              <div className="flex flex-wrap justify-end gap-3">
-                <ExamButton type="button" variant="outline" disabled={isSubmitting} onClick={onClose}>
-                  Cancel
-                </ExamButton>
-                <ExamButton
-                  type="submit"
-                  disabled={busy || unchanged || issue !== null || !canSubmit || isSubmitting}
-                >
-                  {isSubmitting ? 'Saving…' : 'Save classes'}
-                </ExamButton>
-              </div>
-            </div>
-          );
-        }}
+        {({ classIds, subjects, canSubmit, isSubmitting, errors }) => (
+          <ClassesFooter
+            issue={editSelectionIssue(preview, { classIds, subjects })}
+            unchanged={
+              sameClassSelection(classIds, baseline) &&
+              changedKeptClasses(preview, { classIds, subjects }).length === 0
+            }
+            busy={busy}
+            canSubmit={canSubmit}
+            isSubmitting={isSubmitting}
+            errors={errors}
+            onClose={onClose}
+          />
+        )}
       </form.Subscribe>
     </form>
+  );
+}
+
+function ClassesFooter({
+  issue,
+  unchanged,
+  busy,
+  canSubmit,
+  isSubmitting,
+  errors,
+  onClose,
+}: {
+  issue: string | null;
+  unchanged: boolean;
+  busy: boolean;
+  canSubmit: boolean;
+  isSubmitting: boolean;
+  errors: readonly unknown[];
+  onClose: () => void;
+}) {
+  return (
+    <div className="sticky bottom-0 flex flex-col gap-3 border-t bg-popover py-3">
+      {issue && (
+        <Notice error>
+          {issue} Fix it in class settings or leave it out.
+        </Notice>
+      )}
+      <Issues errors={errors} />
+      <div className="flex flex-wrap justify-end gap-3">
+        <ExamButton type="button" variant="outline" disabled={isSubmitting} onClick={onClose}>
+          Cancel
+        </ExamButton>
+        <ExamButton
+          type="submit"
+          disabled={busy || unchanged || issue !== null || !canSubmit || isSubmitting}
+        >
+          {isSubmitting ? 'Saving…' : 'Save classes'}
+        </ExamButton>
+      </div>
+    </div>
   );
 }

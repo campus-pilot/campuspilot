@@ -5,7 +5,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useForm } from '@tanstack/react-form';
 import { CheckCircle2, CircleAlert, Download, LoaderCircle, RefreshCw, Settings } from 'lucide-react';
 import { z } from 'zod';
-import type { DocumentSource } from '@campuspilot/api/routers/school/document/document.dto';
+import type { DocumentGenerationJobDto, DocumentSource } from '@campuspilot/api/routers/school/document/document.dto';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import {
   createStatementFormSchema,
@@ -23,15 +23,18 @@ import { RequirePermissions } from '@/components/require-permissions';
 import { schoolHref } from '@/components/school-route';
 import { client, orpc } from '@/lib/orpc';
 import { DocumentDownload } from '@/components/documents/document-generator';
+import { DocumentJobTracker, useDocumentJob } from '@/components/documents/document-job';
 import { CreateSessionButton } from '../session/create-session-button';
 
 export type { StatementSession } from '@campuspilot/components/documents/statement-session';
 
 type FinanceSource = Extract<DocumentSource, { documentType: 'bill' | 'receipt' }>;
 
-/** Generates an immutable PDF and starts its download without relying on a
- * popup opened after the asynchronous render. The completion indicator means
- * the browser has received the handoff, not that the local download finished. */
+/** Creates an immutable PDF in the background and offers its download once it
+ * is ready. The click starts the job and returns at once; the button then
+ * shows that the PDF is being created and becomes a download button when it
+ * exists (the browser blocks downloads that do not follow a click, so the
+ * download is its own click). */
 export function FinanceDocumentAction({ schoolId, source, label, iconOnly = false }: { schoolId: string; source: FinanceSource; label: string; iconOnly?: boolean }) {
   const resource = { kind: 'school' as const, schoolId };
   return (
@@ -58,13 +61,12 @@ export function FinanceDocumentAction({ schoolId, source, label, iconOnly = fals
 function FinanceDocumentActionInner({ schoolId, source, label, iconOnly }: { schoolId: string; source: FinanceSource; label: string; iconOnly: boolean }) {
   const template = useQuery(orpc.school.getActiveDocumentTemplate.queryOptions({ input: { schoolId, documentType: source.documentType } }));
   const form = useForm({
-    defaultValues: { completed: false, error: '' },
+    defaultValues: { job: null as DocumentGenerationJobDto | null, error: '' },
     validators: {
-      onChange: z.object({ completed: z.boolean(), error: z.string() }),
+      onChange: z.object({ job: z.custom<DocumentGenerationJobDto>().nullable(), error: z.string() }),
     },
     onSubmit: async () => {
       form.setFieldValue('error', '');
-      form.setFieldValue('completed', false);
       try {
         if (!template.data) {
           throw new Error(`Configure the ${source.documentType} template before generating a PDF.`);
@@ -74,16 +76,7 @@ function FinanceDocumentActionInner({ schoolId, source, label, iconOnly }: { sch
           source,
           templateRevisionId: template.data.artifact.id,
         });
-        const { url } = await client.school.getDocumentDownload({
-          schoolId,
-          artifactId: generated.artifact.id,
-          documentType: source.documentType,
-        });
-        const link = document.createElement('a');
-        link.href = url;
-        link.rel = 'noopener noreferrer';
-        link.click();
-        form.setFieldValue('completed', true);
+        form.setFieldValue('job', generated.job);
       } catch (error) {
         form.setFieldValue(
           'error',
@@ -95,17 +88,22 @@ function FinanceDocumentActionInner({ schoolId, source, label, iconOnly }: { sch
   return (
     <form.Subscribe
       selector={(state) => ({
-        completed: state.values.completed,
+        job: state.values.job,
         error: state.values.error,
         submitting: state.isSubmitting,
       })}
     >
-      {({ completed, error, submitting }) => (
+      {({ job, error, submitting }) => (
         <div className="flex flex-col items-start gap-1">
-          {completed ? (
-            <span role="status" aria-label="PDF download started" title="PDF download started" className="flex size-7 items-center justify-center text-emerald-600">
-              <CheckCircle2 className="size-4" aria-hidden />
-            </span>
+          {job ? (
+            <FinanceJobState
+              key={job.id}
+              schoolId={schoolId}
+              job={job}
+              label={label}
+              iconOnly={iconOnly}
+              onRetry={() => form.setFieldValue('job', null)}
+            />
           ) : (
             <Button
               type="button"
@@ -117,7 +115,7 @@ function FinanceDocumentActionInner({ schoolId, source, label, iconOnly }: { sch
               onClick={() => void form.handleSubmit()}
             >
               {submitting ? <span className="size-2 rounded-full bg-amber-500" aria-hidden /> : <Download aria-hidden />}
-              {iconOnly ? null : submitting ? 'Generating…' : label}
+              {iconOnly ? null : submitting ? 'Starting…' : label}
             </Button>
           )}
           {template.isError ? (
@@ -144,6 +142,111 @@ function FinanceDocumentActionInner({ schoolId, source, label, iconOnly }: { sch
               Configure this template in Settings first.
             </p>
           ) : null}
+          {error ? <p className="text-xs text-destructive">{error}</p> : null}
+        </div>
+      )}
+    </form.Subscribe>
+  );
+}
+
+/**
+ * The row action while its PDF job runs (a spinner), when it is ready (a
+ * download button that fetches a fresh link on click) and when it failed
+ * (the reason and a way to start again).
+ */
+function FinanceJobState({
+  schoolId,
+  job: initial,
+  label,
+  iconOnly,
+  onRetry,
+}: {
+  schoolId: string;
+  job: DocumentGenerationJobDto;
+  label: string;
+  iconOnly: boolean;
+  onRetry: () => void;
+}) {
+  const job = useDocumentJob({ schoolId, jobId: initial.id, documentType: initial.documentType, initial });
+  const current = job.data ?? initial;
+  if (current.status === 'succeeded' && current.artifactId)
+    return <ReadyDownloadButton schoolId={schoolId} artifactId={current.artifactId} documentType={current.documentType} label={label} iconOnly={iconOnly} />;
+  if (current.status === 'failed')
+    return (
+      <div className="flex flex-col items-start gap-1">
+        <p className="text-xs text-destructive">{current.errorMessage ?? 'The PDF could not be created.'}</p>
+        <Button type="button" size="sm" variant="ghost" onClick={onRetry}>
+          <RefreshCw aria-hidden />
+          Try again
+        </Button>
+      </div>
+    );
+  // Reading the job failed (a network blip): read the same job again, never start another.
+  if (job.isError)
+    return (
+      <div className="flex flex-col items-start gap-1">
+        <p className="text-xs text-destructive">
+          {job.error instanceof Error ? job.error.message : 'The PDF status could not be read.'}
+        </p>
+        <Button type="button" size="sm" variant="ghost" disabled={job.isFetching} onClick={() => void job.refetch()}>
+          <RefreshCw className={job.isFetching ? 'animate-spin' : undefined} aria-hidden />
+          Check again
+        </Button>
+      </div>
+    );
+  return (
+    <Button type="button" variant="outline" size={iconOnly ? 'icon' : undefined} disabled aria-label="Creating PDF" title="Creating PDF">
+      <LoaderCircle className="animate-spin" aria-hidden />
+      {iconOnly ? null : 'Creating PDF…'}
+    </Button>
+  );
+}
+
+/** Downloads a ready PDF on click, asking for a fresh short-lived link each time. */
+function ReadyDownloadButton({
+  schoolId,
+  artifactId,
+  documentType,
+  label,
+  iconOnly,
+}: {
+  schoolId: string;
+  artifactId: string;
+  documentType: DocumentGenerationJobDto['documentType'];
+  label: string;
+  iconOnly: boolean;
+}) {
+  const form = useForm({
+    defaultValues: { error: '' },
+    validators: { onChange: z.object({ error: z.string() }) },
+    onSubmit: async () => {
+      form.setFieldValue('error', '');
+      try {
+        const { url } = await client.school.getDocumentDownload({ schoolId, artifactId, documentType });
+        const link = document.createElement('a');
+        link.href = url;
+        link.rel = 'noopener noreferrer';
+        link.click();
+      } catch (error) {
+        form.setFieldValue('error', error instanceof Error ? error.message : 'Download unavailable.');
+      }
+    },
+  });
+  return (
+    <form.Subscribe selector={(state) => ({ submitting: state.isSubmitting, error: state.values.error })}>
+      {({ submitting, error }) => (
+        <div className="flex flex-col items-start gap-1">
+          <Button
+            type="button"
+            size={iconOnly ? 'icon' : undefined}
+            aria-label={`${label}: PDF ready, download`}
+            title="PDF ready: download"
+            disabled={submitting}
+            onClick={() => void form.handleSubmit()}
+          >
+            <CheckCircle2 aria-hidden />
+            {iconOnly ? null : 'Download PDF'}
+          </Button>
           {error ? <p className="text-xs text-destructive">{error}</p> : null}
         </div>
       )}
@@ -368,7 +471,7 @@ function StatementDocumentDialogInner({
         source: { ...base, expectedReviewHash: preview.reviewHash },
         templateRevisionId: template.data.artifact.id,
       });
-      return generated.artifact;
+      return generated.job;
     },
   });
   const defaultSession =
@@ -400,29 +503,29 @@ function StatementDocumentDialogInner({
         </DialogHeader>
         {mutation.data ? (
           <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
-              <p role="status" className="flex items-center gap-2 text-sm font-medium">
-                <CheckCircle2 className="size-4" aria-hidden />
-                Your statement PDF is ready
-              </p>
-              <RequirePermissions
-                permissions={{
-                  action: SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS,
-                  resource: { kind: 'school', schoolId },
-                }}
-                fallback={
-                  <p className="text-xs text-muted-foreground">
-                    You do not have permission to download finance documents.
-                  </p>
-                }
-              >
-                <DocumentDownload
-                  schoolId={schoolId}
-                  artifactId={mutation.data.id}
-                  documentType="statement"
-                />
-              </RequirePermissions>
-            </div>
+            <DocumentJobTracker
+              schoolId={schoolId}
+              job={mutation.data}
+              ready={(artifactId) => (
+                <RequirePermissions
+                  permissions={{
+                    action: SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS,
+                    resource: { kind: 'school', schoolId },
+                  }}
+                  fallback={
+                    <p className="text-xs text-muted-foreground">
+                      You do not have permission to download finance documents.
+                    </p>
+                  }
+                >
+                  <DocumentDownload
+                    schoolId={schoolId}
+                    artifactId={artifactId}
+                    documentType="statement"
+                  />
+                </RequirePermissions>
+              )}
+            />
             <DialogFooter>
               <Button type="button" onClick={onClose}>
                 Close

@@ -135,8 +135,16 @@ function savedPaperScopeOf(input: unknown): string | null {
   return parts.every((part) => typeof part === 'string') ? JSON.stringify(parts) : null;
 }
 
-/** The draft cards of a conversation in order (cards are never folded under a work bar). */
-const cardCallsOf = (rows: readonly AssistantTimelineRow[]) => rows.flatMap((row) => (row.kind === 'card' ? [row.call] : []));
+/**
+ * Whether a card row is a question paper's draft (an exam paper's or a
+ * standalone one's). Other cards (a template editor's draft) are not papers:
+ * they never count as a paper's "Draft n" or settle one.
+ */
+export const isPaperDraftCard = (row: AssistantTimelineRow): row is Extract<AssistantTimelineRow, { kind: 'card' }> =>
+  row.kind === 'card' && (row.card === 'question_paper_draft' || row.card === 'standalone_paper_draft');
+
+/** The paper draft cards of a conversation in order (cards are never folded under a work bar). */
+const cardCallsOf = (rows: readonly AssistantTimelineRow[]) => rows.flatMap((row) => (isPaperDraftCard(row) ? [row.call] : []));
 
 /**
  * The draft cards whose stored result cannot be trusted (cut at 4,000 characters
@@ -233,7 +241,7 @@ export function unsavedDraftOf(
   let ordinal = 0;
   let found: UnsavedDraft | null = null;
   const visit = (row: AssistantTimelineRow) => {
-    if (row.kind === 'card') {
+    if (isPaperDraftCard(row)) {
       ordinal += 1;
       const input = parseDraftCallInput(row.call.body.input);
       const result = parseStoredDraftResult(row.call.body.output, row.call.body.outputTruncated) ?? verdicts.get(row.call.id);

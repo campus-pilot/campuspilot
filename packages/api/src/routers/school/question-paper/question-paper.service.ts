@@ -53,12 +53,14 @@ import {
   type PageRow,
   type PaperRow,
 } from './question-paper.records';
+import { currentQuickPaperPrintedDetails } from './question-paper.print-context';
 import { hasSelectedQuestionPaperTemplate } from './question-paper.render';
 import {
   assertResolvedPaperWritable,
   assertResolvedPaperWritableLocked,
   isStandalonePaper,
   paperSchoolIdOf,
+  printLayoutOf,
   type PaperScope,
   type ResolvedPaper,
 } from './question-paper.scope';
@@ -777,8 +779,8 @@ export async function rotateQuestionPaperPage(
 
 /**
  * Deletes the papers matched by `where` inside the caller's transaction:
- * rows (pages, jobs, versions and figures cascade), the PDF artifacts of
- * their versions, and returns every object key to remove after the commit.
+ * rows (pages, jobs, versions and figures cascade), the PDF and Word artifacts
+ * of their versions, and returns every object key to remove after the commit.
  * Template revisions are shared with other versions and are never deleted.
  */
 /**
@@ -798,9 +800,18 @@ async function deletePaperRows(tx: DatabaseTransaction, papers: PaperRow[]): Pro
   const [pages, figures, versions] = await Promise.all([
     tx.select().from(examQuestionPaperPageTable).where(inArray(examQuestionPaperPageTable.paperId, paperIds)),
     tx.select().from(examQuestionPaperFigureTable).where(inArray(examQuestionPaperFigureTable.paperId, paperIds)),
-    tx.select({ pdfArtifactId: examQuestionPaperVersionTable.pdfArtifactId }).from(examQuestionPaperVersionTable).where(inArray(examQuestionPaperVersionTable.paperId, paperIds)),
+    // FOR UPDATE: a download storing a version's Word file (or restoring its PDF) sets the version's pointer in its own
+    // transaction without the paper lock. Locking the rows here makes the two wait for each other: either that
+    // pointer committed first and its artifact is read (and deleted) here, or it waits, finds the version gone and
+    // rolls back with its upload deleted. Without the lock its artifact and object would outlive the paper.
+    tx
+      .select({ pdfArtifactId: examQuestionPaperVersionTable.pdfArtifactId, docxArtifactId: examQuestionPaperVersionTable.docxArtifactId })
+      .from(examQuestionPaperVersionTable)
+      .where(inArray(examQuestionPaperVersionTable.paperId, paperIds))
+      .for('update'),
   ]);
-  const artifactIds = versions.map((version) => version.pdfArtifactId).filter((id): id is string => id !== null);
+  // Each version's PDF and, once one was downloaded, its Word file.
+  const artifactIds = versions.flatMap((version) => [version.pdfArtifactId, version.docxArtifactId]).filter((id): id is string => id !== null);
   const artifacts = artifactIds.length
     ? await tx.select({ id: artifactTable.id, s3Key: artifactTable.s3Key }).from(artifactTable).where(inArray(artifactTable.id, artifactIds))
     : [];
@@ -1039,8 +1050,11 @@ export async function startQuestionPaperGeneration(
   assertResolvedPaperWritable(scope);
   const model = getQuestionPaperModel();
   if (!model) throw providerUnavailableError();
-  // A standalone paper prints in the built-in plain shell: it needs no template.
-  if (!isStandalonePaper(scope) && !(await hasSelectedQuestionPaperTemplate(db, scope.key.schoolId))) throw templateMissingError();
+  // A plain paper (a personal space's) prints in the built-in shell: it needs no template. Every other paper, a quick
+  // paper of a school included, prints with the school's selected template.
+  if (printLayoutOf(scope) !== 'plain' && !(await hasSelectedQuestionPaperTemplate(db, paperSchoolIdOf(scope)))) throw templateMissingError();
+  // A quick paper's heading prints the school's active session: refused now, before any model cost, without one.
+  if (isStandalonePaper(scope) && printLayoutOf(scope) === 'school_template') await currentQuickPaperPrintedDetails(db, scope);
   const jobId = await db.transaction(async (tx) => {
     await assertResolvedPaperWritableLocked(tx, scope);
     const paper = await lockPaperOf(tx, scope).catch((error: unknown) => {
@@ -1056,7 +1070,8 @@ export async function startQuestionPaperGeneration(
     if (await activeJobOf(tx, paper.id)) throw rpcError.conflict('A generation is already running for this paper.');
     await assertSchoolJobCapacity(tx, paperSchoolIdOf(scope));
     if (isStandalonePaper(scope)) {
-      // The job saves a version and its PDF: refused now, before any model cost, when it could not be saved.
+      // The job saves a version and its PDF: refused now, before any model cost, when it could not be saved (a
+      // personal space's limits; both return at once for a real school, which has none).
       await assertStandaloneVersionRoom(tx, { schoolId: paperSchoolIdOf(scope), paperId: paper.id, countsTowardRate: false, lock: true });
       await assertPersonalSpaceStorageRoom(tx, { schoolId: paperSchoolIdOf(scope), addedBytes: 0, lock: true });
     }

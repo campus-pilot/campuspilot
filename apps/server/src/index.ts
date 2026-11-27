@@ -13,6 +13,7 @@ import { attachAssistantVoice } from '@campuspilot/assistant/voice/server';
 import { sweepDemoSchoolOutbox } from '@campuspilot/api/routers/system-admin/demo-school/demo-school.outbox';
 import { configureQuestionPaperModel } from '@campuspilot/api/workflows/question-paper/model';
 import { sweepQuestionPaperOutbox } from '@campuspilot/api/workflows/question-paper/outbox';
+import { sweepDocumentGenerationOutbox } from '@campuspilot/api/workflows/document-generation/outbox';
 import { sweepImageDerivatives } from '@campuspilot/api/workflows/image-derivatives/outbox';
 import { releaseExpiredPageReservations } from '@campuspilot/api/routers/school/question-paper/question-paper.service';
 import { createQuestionPaperModel } from '@campuspilot/assistant/question-paper-model';
@@ -24,6 +25,8 @@ import { sweepResultPublications } from '@campuspilot/api/notifications/emitters
 import { sweepWhatsAppFailureAlerts } from '@campuspilot/api/notifications/failure-alerts';
 import { startRuntimeMonitor } from '@campuspilot/logger/perf';
 import { sweepLeadAlertOutbox } from '@campuspilot/api/leads/lead.outbox';
+import { sweepOnboardingAlertOutbox } from '@campuspilot/api/leads/school-onboarding.alert-outbox';
+import { sweepSchoolSetupOutbox } from '@campuspilot/api/school-setup/school-setup.outbox';
 import { registerGoogleSignUpHandler } from '@campuspilot/auth/google-sign-up';
 import { createPersonalSpaceAfterGoogleSignUp } from '@campuspilot/api/personal-space/personal-space.service';
 
@@ -101,6 +104,16 @@ async function sweepQuestionPapers() {
 }
 
 /**
+ * One document generation sweep: hands queued PDF jobs to the worker that
+ * Restate has not accepted, fails jobs that can no longer progress, and
+ * removes temporary objects ended jobs left behind.
+ */
+async function sweepDocumentJobs() {
+  const result = await sweepDocumentGenerationOutbox();
+  if (Object.values(result).some((value) => value > 0)) log.info(result, 'document-generation.outbox.ok');
+}
+
+/**
  * One image derivative sweep: hands pages and chat images still waiting for
  * their thumbnail and model copy to the worker again, fails those past the
  * deadline, and removes page reservations whose photo never arrived.
@@ -119,6 +132,17 @@ async function sweepImages() {
 async function sweepLeadAlerts() {
   const result = await sweepLeadAlertOutbox();
   if (Object.values(result).some((value) => value > 0)) log.info(result, 'lead-alert.outbox.ok');
+  const onboarding = await sweepOnboardingAlertOutbox();
+  if (Object.values(onboarding).some((value) => value > 0)) log.info(onboarding, 'school-onboarding-alert.outbox.ok');
+}
+
+/**
+ * One school setup sweep: hands over setups whose start was not accepted by
+ * Restate, and fails setups that can no longer progress (docs/school-onboarding-form.md).
+ */
+async function sweepSchoolSetups() {
+  const result = await sweepSchoolSetupOutbox();
+  if (Object.values(result).some((value) => value > 0)) log.info(result, 'school-setup.outbox.ok');
 }
 
 /** Finishes result publications whose deliveries settled (publisher notified once). */
@@ -137,8 +161,10 @@ const OUTBOX_SWEEPS: ReadonlyArray<{ errorMessage: string; run: () => Promise<vo
   { errorMessage: 'notification.outbox.error', run: sweepNotifications },
   { errorMessage: 'assistant.outbox.error', run: sweepAssistant },
   { errorMessage: 'question-paper.outbox.error', run: sweepQuestionPapers },
+  { errorMessage: 'document-generation.outbox.error', run: sweepDocumentJobs },
   { errorMessage: 'image-derivatives.outbox.error', run: sweepImages },
   { errorMessage: 'lead-alert.outbox.error', run: sweepLeadAlerts },
+  { errorMessage: 'school-setup.outbox.error', run: sweepSchoolSetups },
   { errorMessage: 'notification.results.sweep.error', run: sweepPublications },
   // Reports failed WhatsApp deliveries to staff granted to receive them (D-30).
   { errorMessage: 'notification.failure-alerts.error', run: async () => { await sweepWhatsAppFailureAlerts(); } },

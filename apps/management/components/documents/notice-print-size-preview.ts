@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { DocumentType } from '@campuspilot/api/routers/school/document/document.dto';
+import type { TemplateDocumentType as DocumentType } from '@campuspilot/api/routers/school/document/document.dto';
 
 /** The print size a Notice design is previewed at (`print.size`); never saved with a revision. */
 export const noticePreviewPrintSizeSchema = z.enum(['full', 'half']);
@@ -17,18 +17,23 @@ export const noticePrintSizeOptions = [
 ] as const satisfies readonly { value: NoticePreviewPrintSize; label: string }[];
 
 /**
- * The `getMarketplaceTemplate` input of a marketplace preview. `printSize`
- * is sent for Notice designs only: the server refuses it for every other
- * document type rather than ignoring it.
+ * The input of a marketplace design's preview (`previewMarketplaceTemplatePdf`,
+ * and `getMarketplaceTemplate` for its HTML). `printSize` is sent for Notice
+ * designs only: the server refuses it for every other document type rather
+ * than ignoring it. `sessionId` (the session selected in the sidebar) is
+ * sent only when one is known; without it the server uses the school's
+ * active session.
  */
 export function marketplaceTemplatePreviewInput(
   scope: { schoolId: string; documentType: DocumentType },
   slug: string,
   printSize: NoticePreviewPrintSize,
+  sessionId?: string,
 ) {
   return {
     ...scope,
     slug,
     ...(scope.documentType === 'notice' ? { printSize } : {}),
+    ...(sessionId ? { sessionId } : {}),
   };
 }

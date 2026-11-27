@@ -65,7 +65,9 @@ describe('question paper in the document system', () => {
       for (const design of designs) {
         const item = await world.people.teacher.client.school.getMarketplaceTemplate({ ...scope(), slug: design.slug });
         expect(item.html, design.slug).toContain('Which gas is released during photosynthesis?');
-        expect(item.html, design.slug).toContain('Greenwood Public School');
+        // The school's own header (docs/document-system.md, "Preview context"), the example paper's body.
+        expect(item.html, design.slug).toContain('Question Paper School');
+        expect(item.html, design.slug).not.toContain('Greenwood Public School');
         expect(item.contextHelp).toBe(DOCUMENT_CONTEXT_HELP);
         expect(item.contextHelp).toContain('position:fixed; bottom:0');
       }

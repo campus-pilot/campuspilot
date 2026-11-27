@@ -1,6 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { VersionDownloadFormat } from '@campuspilot/components/question-paper/version-download';
 import { toast } from '@campuspilot/ui/lib/toast';
 import { orpc } from '@/lib/orpc';
 import { detailPollInterval, isConflict, requestErrorMessage, type QuestionPaperScope } from './question-paper-model';
@@ -50,19 +51,38 @@ export function useCanManageQuestionPaper(target: PaperTarget) {
   return query.data?.results[0] === true;
 }
 
-/** Reads the paper and the list it is in again, for example after an upload. Resolves when the paper is fresh. */
-export function useRefreshQuestionPaper(target: PaperTarget) {
+/**
+ * Reads every list a standalone paper shows in again: a personal space's
+ * papers and a school's Question papers page, each with its filter values
+ * (built from the papers' names). Resolves when they are fresh.
+ */
+export function useStandalonePaperListsInvalidation() {
   const queryClient = useQueryClient();
   return async () => {
     await Promise.all([
+      queryClient.invalidateQueries({ queryKey: orpc.school.listStandalonePapers.key() }),
+      queryClient.invalidateQueries({ queryKey: orpc.school.listStandalonePaperFilterOptions.key() }),
+      queryClient.invalidateQueries({ queryKey: orpc.school.listSchoolQuestionPapers.key() }),
+      queryClient.invalidateQueries({ queryKey: orpc.school.listSchoolQuestionPaperFilterOptions.key() }),
+    ]);
+  };
+}
+
+/** Reads the paper and the lists it is in again, for example after an upload. Resolves when the paper is fresh. */
+export function useRefreshQuestionPaper(target: PaperTarget) {
+  const queryClient = useQueryClient();
+  const invalidateStandaloneLists = useStandalonePaperListsInvalidation();
+  return async () => {
+    await Promise.all([
       queryClient.invalidateQueries({ queryKey: paperDetailQueryKey(target) }),
-      // A standalone paper's list and its filter values (built from the papers' details) change with it.
       ...(isStandaloneTarget(target)
-        ? [
-            queryClient.invalidateQueries({ queryKey: orpc.school.listStandalonePapers.key() }),
-            queryClient.invalidateQueries({ queryKey: orpc.school.listStandalonePaperFilterOptions.key() }),
-          ]
-        : [queryClient.invalidateQueries({ queryKey: orpc.school.listQuestionPapers.key() })]),
+        ? [invalidateStandaloneLists()]
+        : [
+            queryClient.invalidateQueries({ queryKey: orpc.school.listQuestionPapers.key() }),
+            // An exam paper shows on the school's Question papers page too.
+            queryClient.invalidateQueries({ queryKey: orpc.school.listSchoolQuestionPapers.key() }),
+            queryClient.invalidateQueries({ queryKey: orpc.school.listSchoolQuestionPaperFilterOptions.key() }),
+          ]),
     ]);
   };
 }
@@ -99,14 +119,21 @@ export function pageTurningOf(rotate: ReturnType<typeof useRotatePage>, pageRevi
   };
 }
 
+/** What a failed download says when the server's refusal gives no sentence of its own. */
+export const downloadFailedMessage = (format: VersionDownloadFormat) =>
+  format === 'docx' ? 'The Word file could not be prepared.' : 'The PDF could not be prepared.';
+
 /**
- * Downloads the PDF of a version: asks for a five-minute signed URL and
- * navigates to it (an attachment, so the page stays put). Call
- * `mutate({ target, versionNo })`.
+ * Downloads a version as its PDF or as an editable Word file: asks for a
+ * five-minute signed URL and navigates to it (an attachment, so the page stays
+ * put). The first Word download of a version makes the file, so it can take a
+ * few seconds; `variables.format` says which one is being prepared. Call
+ * `mutate({ target, versionNo, format })`.
  */
 export function useDownloadQuestionPaper() {
   return useMutation({
-    mutationFn: ({ target, versionNo }: { target: PaperTarget; versionNo: number }) => paperCalls.download(target, versionNo),
+    mutationFn: ({ target, versionNo, format }: { target: PaperTarget; versionNo: number; format: VersionDownloadFormat }) =>
+      paperCalls.download(target, versionNo, format),
     onSuccess: ({ url }) => {
       window.location.assign(url);
     },

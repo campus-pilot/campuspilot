@@ -22,8 +22,13 @@ export const documentTypeEnum = pgEnum("document_type", [
   "statement",
   "notice",
   "question_paper",
+  // A bill for one admission as of a chosen date (docs/document-system.md
+  // "Bill due"); printed with the school's selected `bill` template, so it has
+  // no template revisions or selection of its own.
+  "bill_due",
 ]);
-export const artifactKindEnum = pgEnum("artifact_kind", ["template", "pdf"]);
+/** What an artifact's object is: a template revision, a generated PDF, or a generated Word file (question paper versions only). */
+export const artifactKindEnum = pgEnum("artifact_kind", ["template", "pdf", "docx"]);
 export const artifactStatusEnum = pgEnum("artifact_status", [
   "ready",
   "deleting",
@@ -80,6 +85,16 @@ export const artifactTable = pgTable(
         | { kind: "bill"; admissionIds: string[]; billIds: string[]; billRunId: string | null }
         | { kind: "receipt"; admissionIds: string[]; transactions: Array<{ kind: "payment" | "refund"; id: string }> }
         | { kind: "statement"; currency: string; throughDate: string; timeZone: string; accounts: Array<{ admissionId: string; highWaterSequence: string }> }
+        | {
+            kind: "bill_due";
+            currency: string;
+            throughDate: string;
+            timeZone: string;
+            /** The billing period containing `throughDate`; `endDate` is exclusive, as on a billing run. */
+            period: { cadence: "monthly" | "quarterly" | "yearly"; startDate: string; endDate: string };
+            /** `highWaterSequence` is null for an account with no ledger fact through the date (printed with zeros). */
+            accounts: Array<{ admissionId: string; highWaterSequence: string | null }>;
+          }
         | null
       >(),
     createdBy: text("created_by").notNull(),
