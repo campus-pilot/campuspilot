@@ -123,6 +123,7 @@ const ALLOWED: AssistantAccessDecision = {
   noPlan: false,
   limit: { known: true, monthlyLimitUsd: null },
   limitReached: false,
+  windowSpend: null,
   voiceEnabled: false,
   allowed: true,
   refusal: null,
@@ -620,6 +621,7 @@ describe('access', () => {
       available: false,
       unavailableReason: 'Refused: role_not_enabled.',
       voice: { available: false },
+      allowance: null,
     });
     expect(await rowsOf(turn.conversationId)).toMatchObject({ conversations: 1, runs: 1 });
   });
@@ -650,6 +652,7 @@ describe('access', () => {
       available: false,
       unavailableReason: 'Refused: limit_reached.',
       voice: { available: false },
+      allowance: null,
     });
     await expect(send(turn)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', data: { reason: 'limit_reached' } });
   });
@@ -663,7 +666,35 @@ describe('access', () => {
       unavailableReason: null,
       // The test environment has no voice model, so no school has voice (voice is tested in voice/server.integration.test.ts).
       voice: { available: false },
+      allowance: null,
     });
+  });
+});
+
+describe('the allowance in the status', () => {
+  const status = (turn: Pick<SeededTurn, 'schoolId' | 'userId'>) => call(assistantRouter.getStatus, { schoolId: turn.schoolId }, as(turn.userId));
+  const window = { start: new Date('2031-11-19T18:30:00Z'), end: new Date('2031-12-17T18:30:00Z') };
+
+  it('tells everyone who may use the assistant the share of the allowance used and when it resets, from the decision’s own spend', async () => {
+    const turn = await seedTurn();
+    loadAccessMock.mockResolvedValue({ ...ALLOWED, limit: { known: true, monthlyLimitUsd: 50 }, windowSpend: { spendUsd: '42', ...window } });
+    await expect(status(turn)).resolves.toMatchObject({ available: true, allowance: { usedPercent: 84, resetsAt: window.end } });
+
+    // At the limit the assistant stays visible, with the full allowance.
+    loadAccessMock.mockResolvedValue({
+      ...refusedAccess('limit_reached'),
+      limit: { known: true, monthlyLimitUsd: 50 },
+      windowSpend: { spendUsd: '50.5', ...window },
+    });
+    await expect(status(turn)).resolves.toMatchObject({ allowed: true, available: false, allowance: { usedPercent: 101, resetsAt: window.end } });
+  });
+
+  it('has no allowance without a limit, or for someone who may not see the assistant', async () => {
+    const turn = await seedTurn();
+    loadAccessMock.mockResolvedValue({ ...ALLOWED, limit: { known: true, monthlyLimitUsd: null } });
+    await expect(status(turn)).resolves.toMatchObject({ allowance: null });
+    loadAccessMock.mockResolvedValue({ ...refusedAccess('role_not_enabled'), limit: { known: true, monthlyLimitUsd: 50 } });
+    await expect(status(turn)).resolves.toMatchObject({ allowed: false, allowance: null });
   });
 });
 

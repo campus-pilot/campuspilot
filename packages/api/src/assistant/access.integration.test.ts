@@ -242,6 +242,13 @@ describe('resolveAssistantAccess', () => {
 
     const inJanuary = await resolveAssistantAccess(db, { schoolId: school.id, userId: teacher.user.id, now: new Date('2033-01-31T18:29:30Z') });
     expect(inJanuary).toMatchObject({ limitReached: true, refusal: { code: 'limit_reached' } });
+    // Told as the share of the allowance and the day it resets, never in dollars; the decision keeps the spend it read.
+    expect(inJanuary.refusal?.message).toBe('You’ve used 100% of this period’s AI allowance. It resets on 1 Feb.');
+    expect(inJanuary.windowSpend).toEqual({
+      spendUsd: '1.00000000',
+      start: new Date('2032-12-31T18:30:00Z'),
+      end: new Date('2033-01-31T18:30:00Z'),
+    });
     const inFebruary = await resolveAssistantAccess(db, { schoolId: school.id, userId: teacher.user.id, now: new Date('2033-01-31T18:31:30Z') });
     expect(inFebruary).toMatchObject({ limitReached: false, allowed: true });
     expect(await redis.get(`assistant:spend:${school.id}:2033-01`)).toBe('1.00000000');

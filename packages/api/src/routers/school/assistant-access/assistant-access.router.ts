@@ -7,26 +7,27 @@ import { getSchoolFeatureConfig } from '../../../feature-flags/feature-flags.ser
 import { protectedProcedure } from '../../../index';
 import { requireSchoolFeature } from '../../../permissions/feature';
 import { requireSchoolPermission } from '../../../permissions/school';
-import { assistantUsageSchema, schoolAssistantUsage } from '../../../assistant/usage';
+import { readSchoolAssistantAllowance } from '../../../assistant/allowance';
 import {
   assistantAccessDtoSchema,
   assistantAccessInputSchema,
-  schoolAssistantUsageInputSchema,
+  schoolAssistantAllowanceInputSchema,
+  schoolAssistantAllowanceSchema,
   updateAssistantRolesInputSchema,
   type AssistantAccessDto,
 } from './assistant-access.dto';
 
 /**
- * The school's assistant role list as the settings screen shows it, with the
- * monthly limit from the feature's config (CONFLICT when that is unusable,
- * like every config reader).
+ * The school's assistant role list as the settings screen shows it, with
+ * whether the feature's config sets a limit (CONFLICT when that config is
+ * unusable, like every config reader). Never the limit's amount.
  */
 async function readAssistantAccess(db: DatabaseExecutor, schoolId: string): Promise<AssistantAccessDto> {
   const config = await getSchoolFeatureConfig(db, schoolId, 'assistant');
   return {
     schoolId,
     roles: await readAssistantRoleStates(db, schoolId),
-    monthlyLimitUsd: config?.monthlyLimitUsd ?? null,
+    limited: (config?.monthlyLimitUsd ?? null) !== null,
   };
 }
 
@@ -34,17 +35,19 @@ async function readAssistantAccess(db: DatabaseExecutor, schoolId: string): Prom
  * Which school roles may use the in-app assistant, managed by the school's
  * principal or manager. It is the same list the platform administrator
  * edits in the admin app (`systemAdmin.updateSchoolAssistantRoles`): either
- * may switch any role on or off, and each sees what the other saved. Both
- * procedures are behind the `assistant` feature (after the permission
- * check) and are human settings, so they are hidden from MCP and never
- * offered to the assistant itself.
+ * may switch any role on or off, and each sees what the other saved. With
+ * the school's AI allowance (`getAssistantAllowance`), every procedure here
+ * is behind the `assistant` feature (after the permission check) and is a
+ * human setting, so hidden from MCP and never offered to the assistant
+ * itself. None returns an amount of money: schools see their AI use only as
+ * a percentage of the allowance.
  */
 export const schoolAssistantAccessRouter = {
   getAssistantAccess: protectedProcedure
     .route({
       summary: 'Get assistant access',
       description:
-        'Read which school roles may use the in-app AI assistant (for every role, whether the assistant is switched on for it) and the school’s monthly spend limit.',
+        'Read which school roles may use the in-app AI assistant (for every role, whether the assistant is switched on for it) and whether the school’s plan limits its AI use.',
       tags: ['School', 'Assistant'],
     })
     .meta({ mcp: { exposure: 'hidden', access: 'read', destructive: false, module: 'schools' } })
@@ -84,21 +87,21 @@ export const schoolAssistantAccessRouter = {
       }
     }),
 
-  getAssistantUsage: protectedProcedure
+  getAssistantAllowance: protectedProcedure
     .route({
-      summary: 'Get assistant usage',
+      summary: 'Get assistant allowance',
       description:
-        'Read what the in-app AI assistant cost the school per IST calendar day over a range (USD, from the costs saved with every model request), with request and token counts. May be up to an hour behind unless `refresh` is set, which computes it again.',
+        'Read how much of the current period’s AI allowance the school has used, as a percentage, when it resets, and each person’s share of it. Never amounts of money. The total may be up to 10 minutes old.',
       tags: ['School', 'Assistant'],
     })
     .meta({ mcp: { exposure: 'hidden', access: 'read', destructive: false, module: 'schools' } })
-    .input(schoolAssistantUsageInputSchema)
+    .input(schoolAssistantAllowanceInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_ASSISTANT_USAGE))
     .use(requireSchoolFeature('assistant'))
-    .output(assistantUsageSchema)
+    .output(schoolAssistantAllowanceSchema)
     .handler(async ({ context, input }) => {
       try {
-        return await schoolAssistantUsage(context.db, input.schoolId, { from: input.from, to: input.to }, { refresh: input.refresh });
+        return await readSchoolAssistantAllowance(context.db, input.schoolId);
       } catch (error) {
         throw toRpcError(error);
       }

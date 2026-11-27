@@ -28,6 +28,13 @@ const STEP_MS = BILLING_PERIOD_DAYS * 24 * 60 * 60 * 1000;
  * extended trial gets one limit per 28 days from its start. A school without
  * a period (on a standing tier alone) counts the IST calendar month of `now`,
  * as before billing periods existed.
+ *
+ * `end` is when the window's allowance resets, and the screens say so. When
+ * the active period's last step ends with no period after it, the school
+ * falls back to the IST calendar month at that moment (if a standing tier
+ * keeps its plan; otherwise it is read-only): that month may already hold
+ * spend from the step that just ended, so the reset need not free the whole
+ * allowance, or any of it. This is the intended counting, not corrected here.
  */
 export async function schoolSpendWindow(
   db: DatabaseExecutor,
@@ -50,22 +57,36 @@ export async function schoolSpendWindow(
 }
 
 /**
+ * A school's saved assistant spend in its current spend window, with the
+ * window it was counted over: the one figure the limit check, the school's
+ * allowance meter and the assistant panel's allowance all read, so they
+ * always agree.
+ */
+export type SchoolWindowSpend = {
+  /** USD as decimal text: the sum of the window's `assistant_model_request.cost_usd`, up to {@link SPEND_CACHE_SECONDS} old. */
+  spendUsd: string;
+  /** When the window began. */
+  start: Date;
+  /** When the window ends (exclusive): the allowance resets then. */
+  end: Date;
+};
+
+/**
  * A school's saved assistant spend in its current spend window
- * ({@link schoolSpendWindow}), in USD as decimal text (the sum of its
- * `assistant_model_request.cost_usd`). Cached in Redis for
+ * ({@link schoolSpendWindow}), with that window. Cached in Redis for
  * {@link SPEND_CACHE_SECONDS}; when Redis cannot be reached the sum is read
  * from the database, never assumed.
  */
-export async function schoolWindowSpendUsd(
+export async function readSchoolWindowSpend(
   db: DatabaseExecutor,
   schoolId: string,
   now: Date = new Date(),
-): Promise<string> {
+): Promise<SchoolWindowSpend> {
   const { key: window, start, end } = await schoolSpendWindow(db, schoolId, now);
   const key = spendKey(schoolId, window);
   const redis = getRedisClient();
   const cached = await redis.get(key).catch(() => null);
-  if (cached !== null) return cached;
+  if (cached !== null) return { spendUsd: cached, start, end };
   const [row] = await db
     .select({ total: sql<string>`coalesce(sum(${assistantModelRequestTable.costUsd}), 0)::text` })
     .from(assistantModelRequestTable)
@@ -78,5 +99,17 @@ export async function schoolWindowSpendUsd(
     );
   const total = row?.total ?? '0';
   await redis.set(key, total, 'EX', SPEND_CACHE_SECONDS).catch(() => undefined);
-  return total;
+  return { spendUsd: total, start, end };
+}
+
+/**
+ * A school's saved assistant spend in its current spend window, in USD as
+ * decimal text ({@link readSchoolWindowSpend} without the window).
+ */
+export async function schoolWindowSpendUsd(
+  db: DatabaseExecutor,
+  schoolId: string,
+  now: Date = new Date(),
+): Promise<string> {
+  return (await readSchoolWindowSpend(db, schoolId, now)).spendUsd;
 }

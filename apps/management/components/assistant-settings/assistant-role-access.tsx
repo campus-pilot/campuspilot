@@ -1,9 +1,9 @@
 'use client';
 
+import { BILLING_PERIOD_DAYS } from '@campuspilot/api/billing/billing.contract';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import type { AssistantAccessDto } from '@campuspilot/api/routers/school/assistant-access/assistant-access.dto';
 import type { Role } from '@campuspilot/api/routers/school/member/member.dto';
-import { formatUsdText } from '@campuspilot/assistant-contract/money';
 import { Button } from '@campuspilot/ui/components/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@campuspilot/ui/components/card';
 import { Label } from '@campuspilot/ui/components/label';
@@ -18,6 +18,8 @@ import { roleLabels } from '@/components/staff-role-picker';
 import { client, orpc } from '@/lib/orpc';
 
 import { assistantOrpc } from '@/lib/assistant-client';
+
+import { AssistantAllowanceSummary } from './assistant-allowance';
 
 const roleAccessSchema = z.object({ enabled: z.record(z.string(), z.boolean()) });
 
@@ -116,10 +118,21 @@ function RoleAccessForm({ schoolId, access, canManage }: { schoolId: string; acc
   );
 }
 
+/** What the plan allows, without an amount: schools see their use only as a share of the allowance. */
 function limitText(access: AssistantAccessDto) {
-  return access.monthlyLimitUsd === null
-    ? 'Your plan has no assistant spending limit.'
-    : `Your plan allows ${formatUsdText(String(access.monthlyLimitUsd))} of assistant use every 28 days of a billing period, or every calendar month without one; once it is reached the assistant is unavailable until the next of these begins.`;
+  return access.limited
+    ? `Your plan includes an AI allowance for every ${BILLING_PERIOD_DAYS} days of a billing period, or every calendar month without one. Once 100% is used, the assistant is unavailable until it resets.`
+    : 'Your plan has no AI usage limit.';
+}
+
+/** The allowance meter for those who may read the school's usage (the principal and manager); nothing without a limit. */
+function AllowanceMeterForReaders({ schoolId, access }: { schoolId: string; access: AssistantAccessDto }) {
+  if (!access.limited) return null;
+  return (
+    <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.READ_ASSISTANT_USAGE, resource: { kind: 'school', schoolId } }}>
+      <AssistantAllowanceSummary schoolId={schoolId} />
+    </RequirePermissions>
+  );
 }
 
 /**
@@ -141,7 +154,8 @@ export function AssistantRoleAccess({ schoolId }: { schoolId: string }) {
           {query.data ? ` ${limitText(query.data)}` : null}
         </CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="flex flex-col gap-4">
+        {query.data ? <AllowanceMeterForReaders schoolId={schoolId} access={query.data} /> : null}
         {query.isPending ? (
           <div className="h-40 animate-pulse rounded-lg bg-muted" />
         ) : query.isError ? (

@@ -22,5 +22,31 @@ export function usdToUnits(amount: string): bigint {
  * arithmetic touches the comparison.
  */
 export function spendReachedLimit(spendUsd: string, limitUsd: number): boolean {
-  return usdToUnits(spendUsd) >= usdToUnits(limitUsd.toFixed(USD_SCALE));
+  return usdToUnits(spendUsd) >= limitUnits(limitUsd);
+}
+
+/** A configured limit in dollars as an integer of 10⁻⁸ USD, through its decimal text (see {@link spendReachedLimit}). */
+const limitUnits = (limitUsd: number) => usdToUnits(limitUsd.toFixed(USD_SCALE));
+
+/**
+ * A saved spend as a percentage of a limit, the share of a school's AI
+ * allowance it used, computed with integers (no float touches the division)
+ * and rounded **down** to one decimal. Rounding down keeps it in step with
+ * {@link spendReachedLimit}: it reads 100 or more exactly when the limit is
+ * reached, so a school is never told "100%" while it may still send, nor
+ * refused at "99.9%". Not capped: spend may pass the limit by what the
+ * spend cache let through (`SPEND_CACHE_SECONDS`).
+ *
+ * Any spend at all reads at least 0.1, the smallest share there is: rounded
+ * down, a share under a tenth of a percent would read 0, as if nothing had
+ * been used (the screens then show "<1%"). That never touches 100.
+ *
+ * The limit is at least a cent (the feature config's minimum), so it is
+ * never zero units here.
+ */
+export function spendPercentOfLimit(spendUsd: string, limitUsd: number): number {
+  const spent = usdToUnits(spendUsd);
+  const tenths = (spent * BigInt(1000)) / limitUnits(limitUsd);
+  if (spent > BigInt(0) && tenths === BigInt(0)) return 0.1;
+  return Number(tenths) / 10;
 }

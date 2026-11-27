@@ -94,6 +94,12 @@ export const schoolTierRank = {
  */
 export const BILLING_PERIOD_DAYS = 28;
 
+/**
+ * The smallest AI limit a school can have, in USD: one cent. Every reader
+ * (the assistant feature's config, the school setup draft) refuses less.
+ */
+export const ASSISTANT_MIN_LIMIT_USD = 0.01;
+
 /** Why a school has a tier during a billing period: a free trial, a payment, or a gift from CampusPilot. */
 export const BILLING_PERIOD_KINDS = ["trial", "paid", "complimentary"] as const;
 export type BillingPeriodKind = (typeof BILLING_PERIOD_KINDS)[number];
@@ -212,8 +218,13 @@ export const schoolFeatureCatalogue = {
        * to the last day), in USD; null means no limit. Once the month's
        * saved model-request costs reach it, nobody in the school can start
        * or continue a turn until the next month.
+       *
+       * At least one cent (`ASSISTANT_MIN_LIMIT_USD`): the admin form takes
+       * whole cents, and a smaller limit would round to no units at all in
+       * the API's exact arithmetic (`assistant/money.ts`), so no share of it
+       * could be computed.
        */
-      monthlyLimitUsd: z.number().positive().max(1_000_000).nullable(),
+      monthlyLimitUsd: z.number().min(ASSISTANT_MIN_LIMIT_USD).max(1_000_000).nullable(),
       // Which roles may use the assistant is not a setting here: it is the
       // school's one role list (`school_assistant_access_role`), which the
       // platform administrator and the school's principal both edit. A config

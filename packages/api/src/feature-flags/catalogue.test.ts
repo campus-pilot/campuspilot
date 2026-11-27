@@ -63,6 +63,9 @@ describe('school feature catalogue', () => {
       voice: { enabled: false },
     });
     expect(() => parseSchoolFeatureConfig('assistant', { monthlyLimitUsd: 0 })).toThrow();
+    // At least one cent: less would be no units at all in the exact arithmetic of the allowance.
+    expect(() => parseSchoolFeatureConfig('assistant', { monthlyLimitUsd: 0.009 })).toThrow();
+    expect(parseSchoolFeatureConfig('assistant', { monthlyLimitUsd: 0.01 })).toEqual({ monthlyLimitUsd: 0.01, voice: { enabled: false } });
     expect(() => parseSchoolFeatureConfig('assistant', { monthlyLimitUsd: -5 })).toThrow();
     expect(() => parseSchoolFeatureConfig('assistant', { monthlyLimitUsd: 1_000_001 })).toThrow();
     expect(() => parseSchoolFeatureConfig('assistant', {})).toThrow();

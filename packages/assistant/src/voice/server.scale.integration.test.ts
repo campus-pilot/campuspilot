@@ -78,6 +78,7 @@ const ALLOWED: AssistantAccessDecision = {
   noPlan: false,
   limit: { known: true, monthlyLimitUsd: null },
   limitReached: false,
+  windowSpend: null,
   voiceEnabled: true,
   allowed: true,
   refusal: null,

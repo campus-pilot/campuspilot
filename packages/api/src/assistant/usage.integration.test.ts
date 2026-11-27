@@ -9,7 +9,6 @@ import { eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
-import { expectFeatureDisabled, expectPermissionDenied } from '../../test/feature-flags';
 import {
   createAdminSession,
   createSchoolStaffSession,
@@ -17,6 +16,7 @@ import {
   createTestSchool,
   setTestSchoolFeature,
 } from '../../test/fixtures';
+import { schoolAssistantUsage } from './usage';
 
 /**
  * Usage reads over saved model requests. Each test uses its own far-away
@@ -76,7 +76,12 @@ async function request(options: {
   });
 }
 
-describe('school.getAssistantUsage', () => {
+/**
+ * The dollar usage of one school. Schools no longer read it (they see their
+ * allowance as a percentage, `school.getAssistantAllowance`); the admin app's
+ * school views build on the same computation.
+ */
+describe('schoolAssistantUsage', () => {
   it('sums saved costs per IST day, listing every day of the range', async () => {
     const school = await createTestSchool();
     await enable(school.id);
@@ -89,11 +94,7 @@ describe('school.getAssistantUsage', () => {
     // Outside the range (IST 4 March) and another school: not counted.
     await request({ schoolId: school.id, userId, at: '2031-03-03T19:00:00Z', costUsd: '5' });
 
-    const usage = await createTestClient(principal.session).school.getAssistantUsage({
-      schoolId: school.id,
-      from: '2031-03-01',
-      to: '2031-03-03',
-    });
+    const usage = await schoolAssistantUsage(db, school.id, { from: '2031-03-01', to: '2031-03-03' });
     expect(usage.days.map((day) => [day.date, day.requests, day.costUsd])).toEqual([
       ['2031-03-01', 1, '0.1'],
       ['2031-03-02', 2, '0.20000002'],
@@ -121,7 +122,7 @@ describe('school.getAssistantUsage', () => {
     }
     await request({ schoolId: school.id, userId, at: '2031-07-01T09:00:00Z', costUsd: '0', inputTokens: 0, usageComplete: false });
 
-    const usage = await createTestClient(principal.session).school.getAssistantUsage({ schoolId: school.id, from: '2031-07-01', to: '2031-07-01' });
+    const usage = await schoolAssistantUsage(db, school.id, { from: '2031-07-01', to: '2031-07-01' });
     expect(usage.total).toMatchObject({ requests: 4, incompleteRequests: 1, inputTokens: 3 * 2_147_483_647 });
     expect(usage.days[0]).toMatchObject({ inputTokens: 6_442_450_941, incompleteRequests: 1 });
     expect(usage.models[0]).toMatchObject({ inputTokens: 6_442_450_941, incompleteRequests: 1 });
@@ -133,7 +134,7 @@ describe('school.getAssistantUsage', () => {
     const principal = await createSchoolStaffSession(school.id, [{ role: 'principal' }]);
     const userId = principal.user.id;
     const range = { from: '2031-09-01', to: '2031-09-01' };
-    const read = () => createTestClient(principal.session).school.getAssistantUsage({ schoolId: school.id, ...range, refresh: true });
+    const read = () => schoolAssistantUsage(db, school.id, range, { refresh: true });
 
     await request({ schoolId: school.id, userId, at: '2031-09-01T06:00:00Z', costUsd: '0.5', inputTokens: 100 });
     expect((await read()).sources).toEqual([
@@ -170,39 +171,28 @@ describe('school.getAssistantUsage', () => {
     const school = await createTestSchool();
     await enable(school.id);
     const principal = await createSchoolStaffSession(school.id, [{ role: 'principal' }]);
-    const client = createTestClient(principal.session);
-    const range = { schoolId: school.id, from: '2031-05-01', to: '2031-05-01' };
+    const range = { from: '2031-05-01', to: '2031-05-01' };
     await request({ schoolId: school.id, userId: principal.user.id, at: '2031-05-01T06:00:00Z', costUsd: '1' });
-    expect((await client.school.getAssistantUsage(range)).total.costUsd).toBe('1');
+    expect((await schoolAssistantUsage(db, school.id, range)).total.costUsd).toBe('1');
     await request({ schoolId: school.id, userId: principal.user.id, at: '2031-05-01T07:00:00Z', costUsd: '1' });
-    const stale = await client.school.getAssistantUsage(range);
+    const stale = await schoolAssistantUsage(db, school.id, range);
     expect(stale.total.costUsd).toBe('1');
 
     // A refresh computes the figures again and replaces the cached answer for later reads.
-    const refreshed = await client.school.getAssistantUsage({ ...range, refresh: true });
+    const refreshed = await schoolAssistantUsage(db, school.id, range, { refresh: true });
     expect(refreshed.total.costUsd).toBe('2');
     expect(Date.parse(refreshed.computedAt)).toBeGreaterThanOrEqual(Date.parse(stale.computedAt));
-    expect(await client.school.getAssistantUsage(range)).toEqual(refreshed);
+    expect(await schoolAssistantUsage(db, school.id, range)).toEqual(refreshed);
   });
 
-  it('is for the principal and manager, behind the feature, with a validated range', async () => {
+  it('validates the range: ordered, at most the longest range, real dates', async () => {
     const school = await createTestSchool();
-    const principal = createTestClient((await createSchoolStaffSession(school.id, [{ role: 'principal' }])).session);
-    const range = { schoolId: school.id, from: '2031-06-01', to: '2031-06-07' };
-    await expectFeatureDisabled(principal.school.getAssistantUsage(range), 'assistant');
-    await enable(school.id);
-    await expect(principal.school.getAssistantUsage(range)).resolves.toMatchObject({ total: { requests: 0, costUsd: '0' } });
-    const manager = createTestClient((await createSchoolStaffSession(school.id, [{ role: 'manager' }])).session);
-    await expect(manager.school.getAssistantUsage(range)).resolves.toMatchObject({ days: expect.any(Array) });
-    const teacher = createTestClient(
-      (await createSchoolStaffSession(school.id, [{ role: 'teacher', meta: { classIds: [] } }])).session,
-    );
-    await expectPermissionDenied(teacher.school.getAssistantUsage(range));
-    await expect(createTestClient(null).school.getAssistantUsage(range)).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
-
-    await expect(principal.school.getAssistantUsage({ ...range, from: '2031-06-08' })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
-    await expect(principal.school.getAssistantUsage({ ...range, from: '2030-01-01' })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
-    await expect(principal.school.getAssistantUsage({ ...range, to: '2031-02-30' })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    const admin = createTestClient(await createAdminSession());
+    const range = { id: school.id, from: '2031-06-01', to: '2031-06-07' };
+    await expect(admin.systemAdmin.getSchoolAssistantUsage(range)).resolves.toMatchObject({ total: { requests: 0, costUsd: '0' } });
+    await expect(admin.systemAdmin.getSchoolAssistantUsage({ ...range, from: '2031-06-08' })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(admin.systemAdmin.getSchoolAssistantUsage({ ...range, from: '2030-01-01' })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(admin.systemAdmin.getSchoolAssistantUsage({ ...range, to: '2031-02-30' })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
 });
 

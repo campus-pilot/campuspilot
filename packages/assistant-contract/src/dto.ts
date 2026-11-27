@@ -307,6 +307,18 @@ export const assistantStatusOutputSchema = z.object({
    * shows the voice button only then, and never infers it from `available`.
    */
   voice: z.object({ available: z.boolean() }),
+  /**
+   * How much of the school's AI allowance this period is used, for everyone
+   * who may see the assistant (`allowed`): the share in percent (rounded down
+   * to one decimal but at least 0.1 for any spend, 100 or more once the limit
+   * is reached; up to 10 minutes
+   * old, the figure the limit check uses) and when the period's allowance
+   * resets. Null when the school has no limit, or when `allowed` is false.
+   * Its own fact: the panel warns from it near the limit (see
+   * `@campuspilot/assistant-contract/allowance`), never from `available`.
+   * Never an amount of money.
+   */
+  allowance: z.object({ usedPercent: z.number(), resetsAt: z.date() }).nullable(),
 });
 
 /** Page size for conversation lists, matching the platform's list limit. */

@@ -1,7 +1,6 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { formatUsdText } from '@campuspilot/assistant-contract/money';
 import { BILLING_PERIOD_DAYS } from '@campuspilot/api/billing/billing.contract';
 import { schoolTierCatalogue } from '@campuspilot/api/routers/school/feature-flags/feature-flags.dto';
 import { Bot, CalendarClock, Sparkles, type LucideIcon } from 'lucide-react';
@@ -37,14 +36,17 @@ function TrialPlanFact({ schoolId, endsAt }: { schoolId: string; endsAt: string 
   );
 }
 
-/** The assistant's spending limit, shown only when the school has the assistant with a limit. */
+/**
+ * The assistant's allowance, shown only when the school has the assistant
+ * with a limit (the feature's `limited` fact; schools are never told the
+ * amount behind it).
+ */
 function AssistantFact({ schoolId }: { schoolId: string }) {
   const assistant = useSchoolFeature(schoolId, 'assistant');
-  const limit = assistant.enabled ? assistant.config?.monthlyLimitUsd : null;
-  if (limit === null || limit === undefined) return null;
+  if (!assistant.enabled || !assistant.config?.limited) return null;
   return (
     <WelcomeFact icon={Bot} title="AI assistant included">
-      {`Up to ${formatUsdText(String(limit))} of use every ${BILLING_PERIOD_DAYS} days.`}
+      {`With an AI allowance every ${BILLING_PERIOD_DAYS} days.`}
     </WelcomeFact>
   );
 }

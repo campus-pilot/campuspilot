@@ -1,3 +1,4 @@
+import { allowanceReachedMessage } from '@campuspilot/assistant-contract/allowance';
 import type { DatabaseExecutor } from '@campuspilot/db';
 import { readSchoolFeatureConfig } from '@campuspilot/db/feature-flags/store';
 import type { Role } from '@campuspilot/db/schema/jsonb/role';
@@ -18,7 +19,7 @@ import {
 } from '../school-access/school-access.contract';
 import { spendReachedLimit } from './money';
 import { readAssistantEnabledRoles } from './roles';
-import { schoolWindowSpendUsd } from './spend';
+import { readSchoolWindowSpend, type SchoolWindowSpend } from './spend';
 
 /**
  * Why a user may not use the assistant in a school now, each its own fact:
@@ -33,8 +34,9 @@ import { schoolWindowSpendUsd } from './spend';
  * - `no_plan`: the school has no active plan (no subscription and no active
  *   trial), so it is read-only in the same way (docs/school-billing.md). A
  *   suspension wins when both apply;
- * - `limit_reached`: the school's saved spend this IST month reached its
- *   monthly limit.
+ * - `limit_reached`: the school's saved spend in its current spend window
+ *   (`schoolSpendWindow`) reached its limit: 100% of the window's AI
+ *   allowance is used. Its message names the day the window resets.
  */
 export type AssistantAccessRefusalCode =
   | 'feature_disabled'
@@ -72,8 +74,16 @@ export type AssistantAccessDecision = {
    * settings), and then the amount, null meaning "no limit".
    */
   limit: AssistantLimit;
-  /** Whether the school's spend this IST month reached its limit (false without a limit). */
+  /** Whether the school's spend in its current spend window reached its limit (false without a limit). */
   limitReached: boolean;
+  /**
+   * The school's spend in its current window as the limit check read it,
+   * with the window; null when the check did not run (no limit, or the
+   * decision stopped before it). Kept so a caller showing the allowance
+   * (`assistantAllowanceOf`) reports exactly the figure this decision was
+   * made from, without a second read.
+   */
+  windowSpend: SchoolWindowSpend | null;
   /**
    * Whether the school's assistant feature has voice switched on
    * (`config.voice.enabled`). False when the decision stopped before reading
@@ -98,7 +108,8 @@ const MESSAGES: Record<AssistantAccessRefusalCode, string> = {
     'Your role cannot use the AI assistant in this school. Your principal or manager can switch it on in Settings.',
   school_suspended: SCHOOL_SUSPENDED_MESSAGE,
   no_plan: SCHOOL_NO_PLAN_MESSAGE,
-  limit_reached: 'This school has reached its AI assistant spending limit for the current period.',
+  // Replaced by `allowanceReachedMessage` with the reset date wherever the window is known (always, today).
+  limit_reached: 'You’ve used 100% of this period’s AI allowance.',
 };
 
 /** A refused decision; `message` replaces the code's own words where the school's kind words it differently. */
@@ -127,9 +138,9 @@ function refused(
  *
  * The flag is read here directly (enabled and config together) rather than
  * through the gate helper, because use needs the config anyway. The limit
- * check reads the cached spend of the school's billing period
- * (`schoolWindowSpendUsd`, up to 10
- * minutes old) and only when everything else allows use.
+ * check reads the cached spend of the school's spend window
+ * (`readSchoolWindowSpend`, up to 10 minutes old) and only when everything
+ * else allows use; the decision keeps it (`windowSpend`).
  */
 export async function resolveAssistantAccess(
   db: DatabaseExecutor,
@@ -146,6 +157,7 @@ export async function resolveAssistantAccess(
     noPlan: false,
     limit: { known: false } as AssistantLimit,
     limitReached: false,
+    windowSpend: null as SchoolWindowSpend | null,
     voiceEnabled: false,
   };
   if (!featureEnabled) return refused(base, 'feature_disabled');
@@ -195,10 +207,10 @@ export async function resolveAssistantAccess(
     return refused(withSuspension, writeRefusal === 'SCHOOL_SUSPENDED' ? 'school_suspended' : 'no_plan', message);
   }
 
-  const limitReached =
-    monthlyLimitUsd !== null && spendReachedLimit(await schoolWindowSpendUsd(db, schoolId, input.now), monthlyLimitUsd);
-  const decided = { ...withSuspension, limitReached };
-  if (limitReached) return refused(decided, 'limit_reached');
+  const windowSpend = monthlyLimitUsd === null ? null : await readSchoolWindowSpend(db, schoolId, input.now);
+  const limitReached = windowSpend !== null && monthlyLimitUsd !== null && spendReachedLimit(windowSpend.spendUsd, monthlyLimitUsd);
+  const decided = { ...withSuspension, limitReached, windowSpend };
+  if (limitReached) return refused(decided, 'limit_reached', allowanceReachedMessage(windowSpend.end));
   return { ...decided, allowed: true, refusal: null };
 }
 

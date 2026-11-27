@@ -438,6 +438,9 @@ An add-on on every tier (in no tier's `tiers`), switched on per school on
 its own page with its settings.
 
 Config: `{ monthlyLimitUsd: number | null, voice: { enabled: boolean } }`.
+Schools read it through `school.getFeatureFlags` as `{ limited: boolean,
+voice: { enabled } }` (`schoolFacingFeatureFlagsSchema`): the dollar limit
+never reaches a school; administrators read the full config.
 `voice.enabled` is a switch inside the feature:
 whether the school has [voice mode](assistant.md#voice-mode). It only narrows
 the assistant, and settings saved before it existed read as off. A config
@@ -454,7 +457,7 @@ spend in the school's billing period, or IST month without one, under the limit)
 | Delegated token issue (`issueAssistantRunToken`) | Disabled-feature error: no token. |
 | Worker, before every model request | The run fails with `feature_disabled`; changes already approved and made stay made. A run waiting for approval stays paused until the feature is on again. |
 | `systemAdmin.updateSchoolFeatureFlag` | Enabling needs the settings (`monthlyLimitUsd`); BAD_REQUEST without them. Switching it on for a school with no role switched on switches on the default roles. |
-| `school.getAssistantAccess`, `school.updateAssistantRoles`, `school.getAssistantUsage` | Disabled-feature error after the permission check. |
+| `school.getAssistantAccess`, `school.updateAssistantRoles`, `school.getAssistantAllowance` | Disabled-feature error after the permission check. |
 | Management UI | The navbar panel button, sidebar link and ⌘K entry (`AssistantAccess`), the assistant pages (`FeaturePage`), Settings › AI assistant and Settings › Usage disappear. |
 | Question papers (every `exam_question_paper` procedure and upload route, the chat image upload and the question paper MCP tools) | `assistant` also gates question papers; there is no separate flag (decision D26). After the OPA class permission, `requireQuestionPaperAssistantAccess` refuses with the disabled-feature error or the assistant's own refusal (`role_not_enabled`, `not_member`, `limit_reached` for generation only). The `question_paper` document template (settings, marketplace preview and selection) needs the feature too (`requireDocumentTypePermission`). A running generation job stops with `feature_disabled`. |
 | Management UI (question papers) | The Question paper tab of an examination, its marketplace card and Settings › Templates › Question paper disappear; the exam lands on Results. |

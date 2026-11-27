@@ -2,16 +2,17 @@ import { schoolWriteRefusalOf } from '@campuspilot/api/school-access/school-acce
 import {
   DISABLED_SCHOOL_FEATURE,
   readSchoolFeatureDisabled,
-  type SchoolFeatureFlags,
+  type SchoolFacingFeatureFlags,
+  type SchoolFacingFeatureState,
   type SchoolFeatureKey,
-  type SchoolFeatureState,
 } from '@campuspilot/api/routers/school/feature-flags/feature-flags.dto';
 
 /** The parts of the school feature-flags query that decide what to render. */
 export type FeatureFlagsQueryState = {
   isPending: boolean;
   isError: boolean;
-  features: SchoolFeatureFlags | undefined;
+  /** As `school.getFeatureFlags` returns them: the assistant's config says whether it is limited, never the amount. */
+  features: SchoolFacingFeatureFlags | undefined;
 };
 
 /**
@@ -29,7 +30,7 @@ export type FeatureFlagsQueryState = {
  * `enabled` and `config` are independent: a disabled feature may still
  * carry its stored config.
  */
-export type SchoolFeatureView<K extends SchoolFeatureKey> = Pick<SchoolFeatureState<K>, 'enabled' | 'config'> & {
+export type SchoolFeatureView<K extends SchoolFeatureKey> = Pick<SchoolFacingFeatureState<K>, 'enabled' | 'config'> & {
   status: 'pending' | 'unknown' | 'ready';
 };
 
@@ -51,7 +52,7 @@ export function resolveSchoolFeature<K extends SchoolFeatureKey>(
   // (no entry for a new feature, or entries without `active`): such an answer
   // does not say whether the school has the feature, so it is `unknown`, not
   // a crash and not "disabled".
-  const state: Partial<SchoolFeatureState<K>> | undefined = query.features?.[feature];
+  const state: Partial<SchoolFacingFeatureState<K>> | undefined = query.features?.[feature];
   if (state && typeof state.active === 'boolean') {
     return { enabled: state.active, config: state.config ?? null, status: 'ready' };
   }
