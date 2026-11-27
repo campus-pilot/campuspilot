@@ -1,5 +1,5 @@
 import { phoneNumberSchema } from '@campuspilot/db/phone';
-import { SCHOOL_FEATURE_KEYS, schoolTierSchema, type SchoolFeatureKey } from '@campuspilot/db/feature-flags/catalogue';
+import { ASSISTANT_MIN_LIMIT_USD, SCHOOL_FEATURE_KEYS, schoolTierSchema, type SchoolFeatureKey } from '@campuspilot/db/feature-flags/catalogue';
 import { examNameKey } from '@campuspilot/db/schema/jsonb/session-config';
 import { z } from 'zod';
 
@@ -116,7 +116,8 @@ export const schoolSetupDraftSchema = z.object({
   }),
   features: z.object({
     adjustments: z.partialRecord(z.enum(SCHOOL_FEATURE_KEYS), z.boolean()),
-    assistantMonthlyLimitUsd: z.number().positive().max(1_000_000).nullable(),
+    // The same bounds as the assistant feature's config, which this becomes.
+    assistantMonthlyLimitUsd: z.number().min(ASSISTANT_MIN_LIMIT_USD).max(1_000_000).nullable(),
   }),
   session: z.object({
     startYear: z.number().int().min(2000).max(2100),
