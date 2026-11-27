@@ -1,6 +1,7 @@
 import type { DatabaseExecutor } from '@campuspilot/db';
 import { user as userTable } from '@campuspilot/db/schema/auth';
 import { assistantModelRequestTable } from '@campuspilot/db/schema/assistant';
+import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
 import { and, desc, eq, gte, lt, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
@@ -19,16 +20,27 @@ import { readSchoolWindowSpend, schoolSpendWindow, SPEND_CACHE_SECONDS } from '.
  * assistant refuses. The admin app keeps its dollar views (`usage.ts`).
  */
 
-/** One person's share of the allowance this window. */
+/**
+ * One person's share of the allowance this window. How a person signs in is
+ * told only for the school's current members: someone who left keeps their
+ * name and their share, never their email or phone number.
+ */
 export const allowanceUserSchema = z.object({
   userId: z.string(),
   /** Null when the account was deleted; what it used still counts. */
   name: z.string().nullable(),
-  /** Null for a phone-only account (its stored address is a placeholder) and deleted accounts (`toStaffIdentity`). */
+  /**
+   * The member's email (`toStaffIdentity`): null for a phone-only account
+   * (its stored address is a placeholder), someone no longer a member and a
+   * deleted account.
+   */
   email: z.string().nullable(),
-  /** Sign-in phone number in E.164, or null. */
+  /** The member's sign-in phone number in E.164; null for someone no longer a member and a deleted account. */
   phoneNumber: z.string().nullable(),
-  /** Their spend this window as a percentage of the limit, rounded down to one decimal (`spendPercentOfLimit`). */
+  /**
+   * Their spend this window as a percentage of the limit, rounded down to one
+   * decimal, and at least 0.1 for any spend (`spendPercentOfLimit`).
+   */
   usedPercent: z.number(),
 });
 
@@ -37,14 +49,21 @@ export const schoolAssistantAllowanceSchema = z.object({
   limited: z.boolean(),
   /**
    * The school's spend this window as a percentage of its limit, rounded down
-   * to one decimal: 100 or more exactly when the limit is reached. Not capped
-   * (spend may pass the limit by what the spend cache let through). Null
-   * without a limit.
+   * to one decimal (at least 0.1 for any spend): 100 or more exactly when the
+   * limit is reached. Not capped (spend may pass the limit by what the spend
+   * cache let through). Null without a limit.
    */
   usedPercent: z.number().nullable(),
   /** When the current window began. */
   windowStart: z.date(),
-  /** When it ends (exclusive): the allowance resets then. */
+  /**
+   * When it ends (exclusive): the allowance resets then, as the screens say.
+   * One case where that does not free anything: when this is the last step of
+   * a billing period and no period follows, the limit then counts the IST
+   * calendar month (`schoolSpendWindow`), which may already hold this
+   * window's spend; without a standing tier the school is read-only then
+   * anyway. Enforcement is unchanged; this is only what the date promises.
+   */
   windowEnd: z.date(),
   /**
    * How old `usedPercent` may be, in seconds: it is the limit check's cached
@@ -92,11 +111,16 @@ export async function readSchoolAssistantAllowance(
       userId: assistantModelRequestTable.userId,
       name: userTable.name,
       ...staffIdentityColumns,
+      member: sql<boolean>`${schoolMemberTable.userId} is not null`,
       spendUsd: userSpend,
     })
     .from(assistantModelRequestTable)
     // No foreign key on `user_id`: a deleted account's spend stays, without a name.
     .leftJoin(userTable, eq(userTable.id, assistantModelRequestTable.userId))
+    .leftJoin(
+      schoolMemberTable,
+      and(eq(schoolMemberTable.schoolId, assistantModelRequestTable.schoolId), eq(schoolMemberTable.userId, assistantModelRequestTable.userId)),
+    )
     .where(
       and(
         eq(assistantModelRequestTable.schoolId, schoolId),
@@ -104,7 +128,14 @@ export async function readSchoolAssistantAllowance(
         lt(assistantModelRequestTable.createdAt, spend.end),
       ),
     )
-    .groupBy(assistantModelRequestTable.userId, userTable.name, userTable.email, userTable.emailIsPlaceholder, userTable.phoneNumber)
+    .groupBy(
+      assistantModelRequestTable.userId,
+      userTable.name,
+      userTable.email,
+      userTable.emailIsPlaceholder,
+      userTable.phoneNumber,
+      schoolMemberTable.userId,
+    )
     .orderBy(desc(sql`sum(${assistantModelRequestTable.costUsd})`), assistantModelRequestTable.userId);
   return {
     limited: true,
@@ -115,8 +146,8 @@ export async function readSchoolAssistantAllowance(
     users: rows.map((row) => ({
       userId: row.userId,
       name: row.name,
-      // A deleted account has no identity left to show.
-      ...(row.email === null || row.emailIsPlaceholder === null
+      // How a person signs in is the school's to see only while they are its member; a deleted account has none.
+      ...(!row.member || row.email === null || row.emailIsPlaceholder === null
         ? { email: null, phoneNumber: null }
         : toStaffIdentity({ email: row.email, emailIsPlaceholder: row.emailIsPlaceholder, phoneNumber: row.phoneNumber })),
       usedPercent: spendPercentOfLimit(row.spendUsd, limitUsd),

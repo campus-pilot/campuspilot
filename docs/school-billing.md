@@ -144,8 +144,10 @@ about AI use is the share of the **current window's** allowance used, with the
 day it resets (`readSchoolWindowSpend`: the same window and the same cached
 total the limit check reads, so the meter reads 100% exactly when the
 assistant refuses). The share is computed with integers and rounded down to
-one decimal (`spendPercentOfLimit`), shown as whole percents
-(`@campuspilot/assistant-contract/allowance`).
+one decimal (`spendPercentOfLimit`; any spend reads at least 0.1, so a tiny
+share shows "<1%", never "0%"), shown as whole percents
+(`@campuspilot/assistant-contract/allowance`). The limit is at least one cent
+(`ASSISTANT_MIN_LIMIT_USD`), so the division always has a divisor.
 
 - Settings › Usage › AI usage (`school.getAssistantAllowance`, principal and
   manager: `school.assistant.usage.read`) is the current window only: a meter
@@ -153,7 +155,8 @@ one decimal (`spendPercentOfLimit`), shown as whole percents
   "Updated within the last 10 minutes": the total is the 10-minute spend cache)
   and each person's share, largest first (read fresh from the saved rows, so
   the shares may add up to a little more than the cached total). People who
-  left the school and deleted accounts are listed too.
+  left the school are listed by name only (no email or phone number), deleted
+  accounts as such.
 - Settings › AI assistant says whether the plan has an allowance and shows the
   same meter to those who may read usage.
 - Everyone who may use the assistant sees the overall share in the panel
@@ -162,6 +165,12 @@ one decimal (`spendPercentOfLimit`), shown as whole percents
   17 Dec." (the `limit_reached` refusal).
 - A school without a limit sees no meter and no share: "Your plan has no AI
   usage limit."
+- The reset date is the window's end. When that is the end of the last step of
+  a billing period and no period follows, the limit then counts the IST
+  calendar month (a school on a standing tier; one without a plan is read-only
+  anyway), which may already hold the spend of the step that ended, so the
+  reset may free less than the whole allowance. Enforcement is deliberately
+  unchanged; only the promise of the date is limited.
 
 No school-facing procedure returns the dollar limit or spend:
 `school.getAssistantAccess` and `updateAssistantRoles` say `limited`, and

@@ -28,6 +28,13 @@ const STEP_MS = BILLING_PERIOD_DAYS * 24 * 60 * 60 * 1000;
  * extended trial gets one limit per 28 days from its start. A school without
  * a period (on a standing tier alone) counts the IST calendar month of `now`,
  * as before billing periods existed.
+ *
+ * `end` is when the window's allowance resets, and the screens say so. When
+ * the active period's last step ends with no period after it, the school
+ * falls back to the IST calendar month at that moment (if a standing tier
+ * keeps its plan; otherwise it is read-only): that month may already hold
+ * spend from the step that just ended, so the reset need not free the whole
+ * allowance, or any of it. This is the intended counting, not corrected here.
  */
 export async function schoolSpendWindow(
   db: DatabaseExecutor,
