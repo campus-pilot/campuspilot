@@ -378,7 +378,8 @@ actions contains {
   "resourceKind": "school",
 } if { true }
 
-# Reading what the school spends on the assistant (USD, per day).
+# Reading how much of the school's AI allowance this period is used, as a
+# percentage, overall and per person (never amounts of money).
 actions contains {
   "id": "school.assistant.usage.read",
   "key": "READ_ASSISTANT_USAGE",
