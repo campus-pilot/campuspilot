@@ -1211,7 +1211,7 @@ the model to that provider's own model; a `QUESTION_PAPER_MODEL` needs all four 
 and prices without a model are refused (`packages/env/src/assistant.ts`). The API server
 and the worker both call `configureQuestionPaperModel(createQuestionPaperModel())`; the
 worker also needs the provider key, `katex` and `sharp`. Cost rows are written by `recordQuestionPaperRequest`
-and count toward AI usage by feature ("By feature" in the usage views); see
+and count toward AI usage by feature ("By feature" in the admin usage views) and the school's allowance; see
 [In-app assistant](assistant.md#cost-saved-never-recomputed).
 
 **Figure route** (optional, worker only). A hand-drawn diagram (a strip divided into

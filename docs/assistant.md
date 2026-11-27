@@ -15,7 +15,7 @@ permissions.
 | Tables | `packages/db/src/schema/assistant.ts` (main migrations, `assistant_` prefix) | Conversations, runs, items, approvals, transcript, `assistant_model_request` (saved costs, also the question paper job's), `assistant_attachment` (chat images and PDFs), `school_assistant_access_role` |
 | Contract | `packages/assistant-contract` | DTOs, the oRPC contract of `/model/*`, shared protocol constants, exact USD sums (`money.ts`) |
 | Chat UI pieces | `packages/components/src/assistant` | Presentational timeline, approval card, composer (props and callbacks only) |
-| Usage UI pieces | `packages/components/src/assistant-usage` | Date range form, spend chart and table (props only) |
+| Usage UI pieces | `packages/components/src/assistant-usage`, `assistant-allowance` | Date range form, spend chart and table for the admin app; the school's allowance meter and per-person shares (props only, no amounts) |
 | Management surfaces | `apps/management/components/assistant`, `components/assistant-settings` | Data hooks, the surfaces (the voice overlay, the page, the palette), Settings › AI assistant and Settings › Usage |
 | Admin pages | `apps/admin/components/assistant` | School › AI (the feature, its limit, the role list, spend), AI billing (platform) |
 | Voice mode | `packages/assistant/src/voice`, `packages/assistant-contract/src/voice.ts`, `apps/management/components/assistant/voice`, `packages/components/src/assistant/assistant-voice*.tsx` | The voice endpoint and session on the API server, the voice model's adapter, the wire format, the browser's microphone and speakers, the avatar and the voice bar (see [Voice mode](#voice-mode)) |
@@ -108,7 +108,9 @@ permissions.
 ## Access
 
 The school feature `assistant` (see [School feature flags](feature-flags.md))
-carries `{ monthlyLimitUsd: number | null, voice: { enabled } }`. It is an
+carries `{ monthlyLimitUsd: number | null, voice: { enabled } }` (schools
+read it as `{ limited, voice }`: they are never told the dollar limit, see
+[School billing](school-billing.md#the-ai-limit-counts-per-period)). It is an
 add-on on every subscription tier: off for every school until a platform
 administrator switches it on, demo schools included, on the admin app's
 School › AI page.
@@ -148,8 +150,12 @@ its own check, and the first that fails is returned with a message for the user:
    suspension is named when both apply;
 6. the school's saved spend in its current billing period (the IST month for
    a school on a standing tier alone; [School billing](school-billing.md#the-ai-limit-counts-per-period))
-   is below `monthlyLimitUsd` (`limit_reached`). The spend is cached in Redis for
-   10 minutes, so a limit can be overshot by what is spent in that window.
+   is below `monthlyLimitUsd` (`limit_reached`: "You've used 100% of this
+   period's AI allowance. It resets on 17 Dec."). The spend is cached in Redis
+   for 10 minutes, so a limit can be overshot by what is spent in that window.
+   The decision keeps the spend it read (`windowSpend`), and `getStatus`
+   reports it to everyone who may see the assistant as `allowance:
+   { usedPercent, resetsAt }` (null without a limit); the panel warns from 80%.
 
 There is no OPA grant to use the assistant: the school's role list is the only
 source of who may. It is used by `/model/*` (sending, approving), the token
@@ -176,7 +182,8 @@ working is refused at its next model request.
 | Admin School › AI, AI billing | `system.assistant.usage.read` (+ `system.school.feature_flags.*` for the settings and the role list) | platform admin |
 
 Procedures: `school.getAssistantAccess`, `school.updateAssistantRoles`,
-`school.getAssistantUsage`, `systemAdmin.getSchoolAssistantRoles`,
+`school.getAssistantAllowance` (the current window's share used, overall and
+per person, never dollars), `systemAdmin.getSchoolAssistantRoles`,
 `systemAdmin.updateSchoolAssistantRoles`, `systemAdmin.getSchoolAssistantUsage`,
 `systemAdmin.getPlatformAssistantUsage` (all hidden from MCP, so never offered
 to the assistant itself).
@@ -482,13 +489,12 @@ the optional repair, and every failed attempt the provider billed), keyed
 limit and every usage read use this table only, question paper cost counts
 toward the school's AI limit and usage with no other change. The usage
 answers carry `sources` (every source listed, a quiet one with zeros); the
-usage tab and the admin AI pages show it as "By feature" (Assistant chat,
-Question paper). Cost rows are removed only with their school
+admin AI pages show it as "By feature" (Assistant chat, Question paper). Cost rows are removed only with their school
 (`school_id` cascades on every assistant table; Postgres checks `NO ACTION` at
 the end of that one statement, when the cost rows are gone too) and by
 `purge_demo_school`, which deletes them first. Spend, limits and bills never
-drop when a conversation is deleted. Limits, the usage tab and the admin pages
-read only `assistant_model_request`, never runs. Amounts travel as decimal
+drop when a conversation is deleted. Limits, the school's allowance and the
+admin pages read only `assistant_model_request`, never runs. Amounts travel as decimal
 text and are added exactly (`sumUsd`), never as floats; token sums are
 `bigint` and reach clients as a number while it is a safe integer and as
 decimal text beyond (`TokenCount`).
@@ -498,8 +504,10 @@ Days and months are **IST** (Asia/Kolkata, fixed UTC+05:30): a month is the
 "current time" is the run's start as an IST instant with its offset
 (`2026-11-12T04:55:12+05:30`), read in the run's first durable step so a
 replay keeps it; the model uses it for "received today" payment times. The AI billing
-page opens on the current IST month; the other usage views on the last 7
-days. Usage reads (`packages/api/src/assistant/usage.ts`) are
+page opens on the current IST month; the other admin usage views on the last 7
+days. The school's own usage tab has no range: it shows the current window's
+allowance as a percentage ([School billing](school-billing.md#the-ai-limit-counts-per-period)).
+Usage reads (`packages/api/src/assistant/usage.ts`) are
 cached in Redis for an hour. Every answer carries `computedAt`, which each
 usage page shows ("Updated 11 Nov, 7:12 pm IST") next to a Refresh button;
 Refresh sends `refresh: true`, which computes the figures again from the saved
