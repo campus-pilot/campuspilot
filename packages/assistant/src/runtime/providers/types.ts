@@ -146,13 +146,49 @@ export type AttachmentFile =
   /** Left out so the request stays within the attachment budget. */
   | { kind: 'omitted' };
 
+/** A tool result found in a stored entry, for pruning. */
+export type ToolResultStubInput = { toolName: string; chars: number };
+
+/** One long text field of a tool call's input, for pruning. */
+export type ToolInputStubInput = { toolName: string; field: string; chars: number };
+
 /**
- * How `buildModelContext` (runtime/context.ts) shows this provider's stored
- * attachments to the model. Everything format-specific lives here.
+ * How `buildModelContext` (runtime/context.ts) reads and rewrites this
+ * provider's stored transcript. Everything format-specific lives here, so the
+ * pruning algorithm itself is one function for every provider.
  */
 export interface ContextAdapter {
+  /** A user entry that carries the person's words or images, not just tool results. */
+  isHumanTurn(entry: TranscriptEntry): boolean;
+  /** Model-facing tool name by tool call id, for every call in the transcript. */
+  toolNamesByUseId(entries: readonly TranscriptEntry[]): Map<string, string>;
+  /**
+   * The entry with every tool result of at least `minChars` characters
+   * replaced by `stub`'s text. Only a result's content changes: the entry,
+   * its ids and the calls they answer stay exactly as they were.
+   */
+  stubToolResults(
+    entry: TranscriptEntry,
+    toolNames: ReadonlyMap<string, string>,
+    stub: (result: ToolResultStubInput) => string,
+    minChars: number,
+  ): TranscriptEntry;
+  /**
+   * The entry with every long top-level text field of its tool call inputs
+   * (at least `minChars` characters) replaced by `stub`'s text. The call, its
+   * id, its name and every other field stay exactly as they were, so each call
+   * keeps its result. Use `stubLongInputFields` (runtime/context.ts) for the
+   * input itself.
+   */
+  stubToolInputs(
+    entry: TranscriptEntry,
+    stub: (input: ToolInputStubInput) => string,
+    minChars: number,
+  ): TranscriptEntry;
   /** The parts that show an attachment to the model: a label, then the image or document, or a note. */
   materializeAttachment(marker: AttachmentMarker, file: AttachmentFile): unknown[];
+  /** The part that tells the model an older attachment is no longer shown. */
+  stubAttachment(marker: AttachmentMarker): unknown[];
   /** A text part, in this provider's format. */
   text(text: string): unknown;
   /** The part that carries an image, in this provider's format, or null when the provider cannot read its type. */
@@ -187,7 +223,7 @@ export interface ModelProvider {
    * request creates its own provider with it (see `question-paper-model.ts`).
    */
   generateText(input: TextRequest): Promise<TextResult>;
-  /** Shows this provider's stored attachments to the model for each request. */
+  /** Reads and rewrites this provider's transcript for each request (pruning, attachments). */
   readonly context: ContextAdapter;
   /** A user message as transcript content. */
   userContent(body: AssistantUserMessageBody): unknown[];

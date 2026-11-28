@@ -421,21 +421,42 @@ existing paper, a syllabus or notes as a PDF
   the card reads "Saved as a new version." and offers no Save (`draftSaved`); a draft replaced by a later ready draft of the same paper shrinks to a
   collapsed "Replaced by Draft N" line). No marks are shown anywhere. The `question_paper` view shows a saved version with Preview and
   Download (see Views below). Drafts exist only in the conversation.
-- **Full context** (`runtime/context.ts`, `buildModelContext`, applied after the
+- **Context window** (`runtime/context.ts`, `buildModelContext`, applied after the
   transcript is read and before the provider adapter; the stored transcript and the UI
-  are never changed). Nothing the model was given is taken away later in the conversation:
-  every tool result (the paper's html, the learn guide), every tool call input (the html of
-  every draft and save), the page each message was sent from and every attachment stay in
-  full for as long as the chat lasts. Context pruning (a window of the last two human
-  messages, with stubs for long results, long inputs, older attachments and older page text)
-  was removed on 2026-11-17: the model lost the guide and the paper it was editing two
-  messages in, could not see an image it had been shown, and rewrote papers from memory.
-  Images and PDFs are materialised newest first within one 16 MiB budget counted as base64
-  (the providers' request limit), with a note for any that are missing, unreadable or left
-  out over the budget. Entry count, order, tool call ids and thought signatures are never
-  touched, and the function is pure. Each provider supplies a `ContextAdapter`
-  (`anthropicContext`, `geminiContext`, `fakeContext`) that shows an attachment in its own
-  message format.
+  are never changed). The newest human messages are shown in full: at least five
+  (`CONTEXT_FULL_HUMAN_MESSAGES`) and up to nine, because the cut moves in steps of five
+  (`CONTEXT_PRUNE_STEP_HUMAN_MESSAGES`): nothing is cut up to nine messages, the oldest five
+  at ten to fourteen, the oldest ten at fifteen. Before the cut, tool results of 8,000
+  characters or more and long text fields of tool call inputs (4,000 or more, such as a
+  draft's whole `html`) become a one-line note that names the tool to read the content back
+  (`getQuestionPaperDraft` or `getQuestionPaper`, `getStandalonePaperDraft` or
+  `getStandalonePaper`), attachments become a note that keeps their id, and a page's text
+  becomes a one-line note (its path and title stay). A tool call that copies such a note into
+  its input is refused before it runs (`findCopiedContextNote`). Why steps: whatever the
+  cut shortens changes the request from that entry on, and the provider writes everything
+  after it to its prompt cache again at the cache-write price; a cut that moved with every
+  message would pay that on every message, in steps it is paid once every five. History:
+  a window of the last two messages until 2026-11-17, then no pruning at all (the model lost
+  the guide and the paper it was editing two messages in, could not see an image it had been
+  shown, and rewrote papers from memory), then on 2026-11-28 this wider, stepped window,
+  because long paper chats on Pro had become expensive.
+  Images and PDFs of the full part are materialised newest first within one 16 MiB budget
+  counted as base64 (the providers' request limit), with a note for any that are missing,
+  unreadable or left out over the budget. Entry count, order, tool call ids and thought
+  signatures are never touched, and the function is pure. Each provider supplies a
+  `ContextAdapter` (`anthropicContext`, `geminiContext`, `fakeContext`) that reads and
+  rewrites its own message format.
+- **No time in the system prompt.** The system prompt (instructions, then the facts block:
+  school, user, withheld features) is the same for every message of a conversation. The time
+  is the last block of each stored user message instead (`sentAtText`: "[Sent
+  2026-11-28T10:15:00+05:30 (India time). Today's date is 2026-11-28. ...]", the run's
+  start, journaled with the run), and the instructions say the newest message's line is the
+  current time. Until 2026-11-28 the facts ended with the run's start to the second, so every
+  new message missed the provider's prompt cache from the system prompt on and the whole
+  conversation was written to the cache again: in production that was about 70% of Pro
+  spend (requests seconds apart reading 0 cached tokens). A message another provider
+  answered reaches this one as a handoff without its time line. Keep anything that changes
+  per run out of the system prompt.
 - **The paper's photos in its chat.** A conversation shared with a question paper
   (`sharedPaperOf`, carried on the run as `RunFacts.paper`) shows the paper's photographed
   pages before its first message on every request: each page's model copy (the upright JPEG

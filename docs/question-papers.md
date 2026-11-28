@@ -1304,7 +1304,8 @@ use the source's `qpf_` figure ids, which a save refuses).
   construction); learn 40,000 (guide, limits and example are about 10 KB). The numbers live in
   `question-paper.dto.ts` and are derived from `QUESTION_PAPER_LIMITS`, so raising the fragment
   limit raises the cap; `question-paper.dto.test.ts` pins the relation. The model keeps every
-  result and every paper it wrote for the whole conversation (see "Full context").
+  result and every paper it wrote for its newest five to nine messages; older ones become notes
+  that name the tool to read them back (see "Context window").
 - **Drafts** are not database rows. A draft is the input of a `validateQuestionPaperDraft`
   call in the conversation; the chat shows it as a card (ready or not, the problems in plain
   sentences, what the sanitiser removed behind a collapsed list, Preview, Save as new
@@ -1342,11 +1343,15 @@ use the source's `qpf_` figure ids, which a save refuses).
   refuses a seed that does not resolve to a paper of the school
   (`resolvePaperScope`) before it reaches the model, and the chip says so when the
   paper cannot be opened.
-- **Full context** (`runtime/context.ts`, applied to what the model sees only, never
-  to the stored transcript): every message, tool result, tool call input and attachment is
-  sent in full for the whole conversation (images and PDFs newest first within the 16 MiB
-  request budget). Pruning older turns was removed on 2026-11-17 (see
-  [In-app assistant](assistant.md#attachments-question-paper-tools-and-the-models-context)).
+- **Context window** (`runtime/context.ts`, applied to what the model sees only, never
+  to the stored transcript): the newest five to nine human messages are sent in full (the cut
+  moves in steps of five so the prompt cache survives between steps); before the cut, long
+  tool results, a draft's or a save's long `html` and the attachments become notes that name
+  the way back (`getQuestionPaperDraft` with the draft's `draftId`, `getQuestionPaper`, or
+  their standalone counterparts), and the guide tells the agent never to send such a note as
+  html. The paper's photographed pages are shown before the first message on every request
+  however old it is. Full context from 2026-11-17 to 2026-11-28; see
+  [In-app assistant](assistant.md#attachments-question-paper-tools-and-the-models-context).
 - **Attachment ids.** The model must be told each attachment's id or it cannot write a
   `data-figure-id`. Every image part is preceded by a server-built line
   `[Attachment asat_...: <sanitised file name>, image/png (1 of 2). Use this id as data-figure-id on an <img> to put the image in a question paper.]`

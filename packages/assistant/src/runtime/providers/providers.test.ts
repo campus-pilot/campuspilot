@@ -19,7 +19,7 @@ const tool = (name: string, exposure: 'core' | 'advanced', readOnly: boolean): A
   modelName: name, mcpName: name.replace('_', '.'), title: 'Title', description: 'Description.',
   inputSchema: { type: 'object', properties: {} }, schoolScoped: false, readOnly, destructive: false, exposure, module: 'students', features: [], schoolKinds: ['school'],
 });
-const facts = { schoolId: 's', schoolName: 'Maple', userName: 'U', userEmail: 'u@x', today: '2026-11-05', now: '2026-11-05T09:30:00+05:30' };
+const facts = { schoolId: 's', schoolName: 'Maple', userName: 'U', userEmail: 'u@x' };
 const results = [
   { toolUseId: 'a', toolName: 'school_listStudents', content: '{"items":[]}', isError: false },
   { toolUseId: 'b', toolName: 'school_updateStudent', content: 'declined', isError: true },
