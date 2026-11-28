@@ -1,35 +1,80 @@
 import { encodedImageBytes, MODEL_REQUEST_ATTACHMENT_BUDGET_BYTES } from '@campuspilot/assistant-contract/attachments';
 
-import { isAttachmentMarker, type AttachmentMarker } from '../transcript';
+import { isAttachmentMarker, omitPageText, type AttachmentMarker } from '../transcript';
 import type { ReadableMimeTypes } from './providers/image-types';
-import type { AttachmentFile, ModelProvider, TranscriptEntry } from './providers/types';
+import type { AttachmentFile, ModelProvider, ToolInputStubInput, TranscriptEntry } from './providers/types';
 
 /**
  * The model's context for one request, built from the stored transcript. It
  * is a view for the model only: the stored transcript, the items and the UI
  * are never changed.
  *
- * Nothing the model was given is taken away later in the conversation: every
- * tool result and tool call input stays in full, and so does the page a
- * message was sent from. A conversation shared with a question paper also
- * shows the paper's photographed pages before its first message, on every
- * request, so the model can always check the paper against them. Attachment
- * markers become the provider's image or document parts, newest first within
- * one byte budget shared with the page photos (the providers' request limit),
- * with a short note for anything that cannot be shown.
+ * - The newest human messages are shown in full: at least
+ *   `CONTEXT_FULL_HUMAN_MESSAGES` (5), and up to one step
+ *   (`CONTEXT_PRUNE_STEP_HUMAN_MESSAGES`, 5) more, so between five and nine.
+ *   The cut moves in steps on purpose. Whatever the cut shortens changes the
+ *   request from that entry on, and the provider then writes everything after
+ *   it to its prompt cache again at the cache-write price; a cut that moved
+ *   with every message would do that on every message. In steps it happens
+ *   once every five messages, and every request in between reads the earlier
+ *   turns from the cache.
+ * - Entries before the cut are shortened: tool results that are long become a
+ *   one-line stub, and every attachment becomes a note that keeps its id but
+ *   says its content is no longer visible (the model may still embed an image
+ *   by id; it asks the user to attach a file again only to look at or read
+ *   it). The text of the page a message was sent from becomes a one-line note
+ *   as well; its path and title stay. Long text fields of old tool CALL inputs
+ *   (the whole paper a model wrote into `validateQuestionPaperDraft` or
+ *   `saveQuestionPaperVersion`) become a one-line stub too: every revision of
+ *   a long paper would otherwise stay in the context in full for the rest of
+ *   the chat. Each stub names the tool that reads the content back.
+ * - A conversation shared with a question paper shows the paper's
+ *   photographed pages before its first message, on every request, however
+ *   old that message is, so the model can always check the paper against
+ *   them. Attachment markers of the full part become the provider's image or
+ *   document parts, newest first within one byte budget shared with the page
+ *   photos (the providers' request limit), with a short note for anything that
+ *   cannot be shown.
+ *
+ * Window history: two messages until 2026-11-17, when pruning was removed
+ * because the model lost the guide and the paper it was editing two messages
+ * in; the full context then made every long paper chat expensive, so it came
+ * back on 2026-11-28 with the wider, stepped window.
  *
  * Properties the tests pin: the number and order of entries never change; no
- * tool call or its id is touched; the output depends only on stored data and
- * the loaded files, so the same transcript gives byte-identical context.
+ * tool call or its id is touched, so every call keeps its result (Anthropic
+ * `tool_use`/`tool_result`, Gemini `functionCall`/`functionResponse`); the
+ * output depends only on stored data (tool name, length, file name, type) and
+ * the loaded files, so the same transcript gives byte-identical context and
+ * pruning twice equals pruning once.
  *
  * Imports only provider types: the turn loop may not reach school tables or
  * API code (see boundary.test.ts). Loading an attachment's bytes is injected.
  */
 
+/** How many of the newest human messages are always shown to the model in full. */
+export const CONTEXT_FULL_HUMAN_MESSAGES = 5;
+/**
+ * How many human messages the cut moves by at once (see the module comment):
+ * the full part grows from `CONTEXT_FULL_HUMAN_MESSAGES` until it holds this
+ * many more, then the oldest `CONTEXT_PRUNE_STEP_HUMAN_MESSAGES` are shortened together.
+ */
+export const CONTEXT_PRUNE_STEP_HUMAN_MESSAGES = 5;
+/** Tool results of at least this many characters (about 2,000 tokens) are stubbed once old. */
+export const CONTEXT_TOOL_RESULT_MIN_CHARS = 8_000;
+/**
+ * A long text field of an old tool call input (about 1,000 tokens) is stubbed. Lower than
+ * the result threshold on purpose: an input is the model's own words, which it can always re-send.
+ */
+export const CONTEXT_TOOL_INPUT_MIN_CHARS = 4_000;
 /** Attachment bytes (images and PDFs), as sent (base64), one chat request may carry; shared with the question paper job. */
 export const CONTEXT_ATTACHMENT_BUDGET_BYTES = MODEL_REQUEST_ATTACHMENT_BUDGET_BYTES;
 
 export type ModelContextOptions = {
+  fullHumanMessages?: number;
+  pruneStepHumanMessages?: number;
+  toolResultMinChars?: number;
+  toolInputMinChars?: number;
   attachmentBudgetBytes?: number;
 };
 
@@ -60,6 +105,97 @@ export const paperPageNote = (page: Pick<PaperPagePhoto, 'pageId' | 'position' |
     ? `[Page ${page.position} of ${page.total} of this question paper as photographed (${page.pageId}) - left out because the photos in this chat are too large to show at once.]`
     : `[Page ${page.position} of ${page.total} of this question paper as photographed (${page.pageId}) - in a format this assistant cannot read.]`;
 
+/** Fixed wording of the stubs below, shared with `findCopiedContextNote` so the two never drift apart. */
+const RESULT_STUB_MARK = 'omitted to keep the chat short (';
+const INPUT_STUB_MARK = 'was removed from this chat to keep it short. This note is not the content';
+
+/** The note that replaces a long tool result in an old entry. */
+export const toolResultStub = ({ toolName, chars }: { toolName: string; chars: number }) =>
+  `[Earlier result of ${toolName} ${RESULT_STUB_MARK}${chars.toLocaleString('en-US')} characters). Call the tool again if you need it.]`;
+
+/** An exam paper's tools, then a quick (standalone) paper's: each is read back with its own family's tools. */
+const VALIDATE_DRAFT_TOOL = /(^|[._])validateQuestionPaperDraft$/;
+const SAVE_VERSION_TOOL = /(^|[._])saveQuestionPaperVersion$/;
+const VALIDATE_STANDALONE_DRAFT_TOOL = /(^|[._])validateStandalonePaperDraft$/;
+const SAVE_STANDALONE_VERSION_TOOL = /(^|[._])saveStandalonePaperVersion$/;
+
+/**
+ * The note that replaces a long text field of an old tool call input. The stored
+ * transcript keeps the text (a draft id is the hash of it and saving resolves the id from
+ * the stored call), so the note names the way back that works for the tool that wrote it:
+ *
+ * - `validateQuestionPaperDraft`: an unsaved draft is read again with `getQuestionPaperDraft`
+ *   and the `draftId` in that call's result; a paper saved since is read with `getQuestionPaper`.
+ * - `saveQuestionPaperVersion` (pasted `html`): the paper is saved, so `getQuestionPaper`.
+ * - the quick paper's `validateStandalonePaperDraft` and `saveStandalonePaperVersion`: the same,
+ *   with `getStandalonePaperDraft` and `getStandalonePaper`.
+ * - any other tool: no draft is involved, so no `draftId` is mentioned; the model writes it again.
+ *
+ * The note is deliberately plain bracketed prose that says it is not the content. A model that
+ * copies it into a call anyway is refused by the runtime (`findCopiedContextNote`) before the
+ * tool runs, whatever the tool. Only the tool name, field name and length are named, so the note
+ * is stable and far shorter than the threshold.
+ */
+export const toolInputStub = ({ toolName, field, chars }: ToolInputStubInput) => {
+  const head = `[Omitted: the \`${field}\` of ${toolName} (${chars.toLocaleString('en-US')} characters) ${INPUT_STUB_MARK}; never send it as ${field}.`;
+  if (VALIDATE_DRAFT_TOOL.test(toolName)) {
+    return `${head} To read that draft again call getQuestionPaperDraft with the draftId in the result of that call; if the paper was saved since, call getQuestionPaper instead.]`;
+  }
+  if (SAVE_VERSION_TOOL.test(toolName)) {
+    return `${head} That paper was saved: call getQuestionPaper to read it.]`;
+  }
+  if (VALIDATE_STANDALONE_DRAFT_TOOL.test(toolName)) {
+    return `${head} To read that draft again call getStandalonePaperDraft with the draftId in the result of that call; if the paper was saved since, call getStandalonePaper instead.]`;
+  }
+  if (SAVE_STANDALONE_VERSION_TOOL.test(toolName)) {
+    return `${head} That paper was saved: call getStandalonePaper to read it.]`;
+  }
+  return `${head} Write it again if you still need it.]`;
+};
+
+/**
+ * The path of the first string in a tool call input (at any depth) that carries
+ * one of the notes above, or null. A model can copy a note into a new call
+ * instead of writing the content again; the note is plain text, so most tools
+ * would accept it (a school template saved as one line of prose), and only the
+ * question paper draft check happens to refuse it. The runtime refuses such a
+ * call before it reaches the API or asks the user to approve it.
+ */
+export function findCopiedContextNote(input: unknown, path: string[] = []): string | null {
+  if (typeof input === 'string') {
+    return input.includes(INPUT_STUB_MARK) || input.includes(RESULT_STUB_MARK) ? path.join('.') || 'input' : null;
+  }
+  if (typeof input !== 'object' || input === null) return null;
+  for (const [key, value] of Object.entries(input)) {
+    const found = findCopiedContextNote(value, [...path, key]);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
+/**
+ * Replaces each top-level string field of a tool call input that has at least
+ * `minChars` characters by the stub. Returns the same object when nothing is
+ * long, and leaves non-string and nested values alone (the large inputs are
+ * flat text fields such as `html`). A stub is far shorter than any threshold a
+ * caller uses, so stubbing twice equals stubbing once.
+ */
+export function stubLongInputFields(
+  toolName: string,
+  input: unknown,
+  stub: (input: ToolInputStubInput) => string,
+  minChars: number,
+): unknown {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) return input;
+  const entries = Object.entries(input);
+  if (!entries.some(([, value]) => typeof value === 'string' && value.length >= minChars)) return input;
+  return Object.fromEntries(
+    entries.map(([field, value]) =>
+      typeof value === 'string' && value.length >= minChars ? [field, stub({ toolName, field, chars: value.length })] : [field, value],
+    ),
+  );
+}
+
 /**
  * Server-generated and sanitised facts only: the id (`asat_...`), the sanitised
  * file name (brackets and line breaks removed so it cannot close or split the
@@ -77,10 +213,12 @@ const FIGURE_HINT = 'Use this id as data-figure-id on an <img> to put the image 
 const DOCUMENT_HINT = 'It is a PDF document: read it as source material. It is not an image and cannot be used as data-figure-id.';
 
 /** Why an attachment is shown as a note instead of its content. */
-export type AttachmentNoteReason = Exclude<AttachmentFile['kind'], 'image' | 'document'>;
+export type AttachmentNoteReason = Exclude<AttachmentFile['kind'], 'image' | 'document'> | 'old';
 
 function imageNote(head: string, reason: AttachmentNoteReason): string {
   switch (reason) {
+    case 'old':
+      return `${head} - the image content is no longer visible to you (it was shown earlier). ${FIGURE_HINT} Ask the user to attach it again only if you need to look at it.]`;
     case 'unreadable':
       return `${head} - in a format this assistant cannot read. Ask the user to convert it to JPEG and attach it again.]`;
     case 'omitted':
@@ -92,6 +230,8 @@ function imageNote(head: string, reason: AttachmentNoteReason): string {
 
 function documentNote(head: string, reason: AttachmentNoteReason): string {
   switch (reason) {
+    case 'old':
+      return `${head} - the document's content is no longer visible to you (it was shown earlier). ${DOCUMENT_HINT} Ask the user to attach it again only if you need to read it.]`;
     case 'unreadable':
       return `${head} - a document this assistant cannot read. Ask the user to attach photos of its pages instead.]`;
     case 'omitted':
@@ -102,10 +242,10 @@ function documentNote(head: string, reason: AttachmentNoteReason): string {
 }
 
 /**
- * The text that stands in for an attachment whose content cannot be shown.
- * Every note keeps the attachment's id: an image id stays valid for figures
- * while the attachment exists server-side for this user; a document note says
- * it is not a figure.
+ * The text that stands in for an attachment whose content is not shown. Every
+ * note keeps the attachment's id: an image id stays valid for figures while the
+ * attachment exists server-side for this user, even when its pixels are not
+ * shown any more; a document note says it is not a figure.
  */
 export function attachmentNote(marker: AttachmentMarker, reason: AttachmentNoteReason): string {
   const head = `[Attachment ${describe(marker)}`;
@@ -121,7 +261,45 @@ export function attachmentNote(marker: AttachmentMarker, reason: AttachmentNoteR
 export const attachmentLabel = (marker: AttachmentMarker) =>
   `[Attachment ${describe(marker)} (${marker.ordinal} of ${marker.total}). ${marker.kind === 'document' ? DOCUMENT_HINT : FIGURE_HINT}]`;
 
+/**
+ * Index of the first entry of the oldest human message that is still shown in
+ * full (0 while nothing is cut). Of `n` human messages, the oldest
+ * `floor((n - full) / step) * step` are cut, so with 5 and 5 nothing is cut up to nine
+ * messages, the first five at ten to fourteen, the first ten at fifteen, and
+ * the full part always holds five to nine. A step of 1 moves the cut with every
+ * message (the window before 2026-11-17).
+ */
+export function fullContextBoundary(
+  entries: readonly TranscriptEntry[],
+  provider: Pick<ModelProvider, 'context'>,
+  fullHumanMessages = CONTEXT_FULL_HUMAN_MESSAGES,
+  step = CONTEXT_PRUNE_STEP_HUMAN_MESSAGES,
+): number {
+  const humans: number[] = [];
+  entries.forEach((entry, index) => {
+    if (entry.role === 'user' && provider.context.isHumanTurn(entry)) humans.push(index);
+  });
+  const cut = humans.length > fullHumanMessages ? Math.floor((humans.length - fullHumanMessages) / Math.max(1, step)) * Math.max(1, step) : 0;
+  return cut === 0 ? 0 : humans[cut]!;
+}
+
 const markersOf = (entry: TranscriptEntry): AttachmentMarker[] => entry.content.filter(isAttachmentMarker);
+
+/**
+ * A user entry whose `<current_page>` block no longer carries the page's text
+ * (`omitPageText`). Every provider's text block keeps its words in `text`, so
+ * this needs no adapter; an entry without such a block is returned as it is.
+ */
+function withoutPageText(entry: TranscriptEntry): TranscriptEntry {
+  // The page block is the first block of a user message (`buildUserTranscriptContent`); only it is looked at, so
+  // nothing the user typed in the same shape, which comes after it, is ever taken for one.
+  const [first, ...rest] = entry.content;
+  if (entry.role !== 'user' || typeof first !== 'object' || first === null) return entry;
+  const text = (first as { text?: unknown }).text;
+  if (typeof text !== 'string') return entry;
+  const shortened = omitPageText(text);
+  return shortened === text ? entry : { ...entry, content: [{ ...first, text: shortened }, ...rest] };
+}
 
 /** The context for one request, and how many PDFs it shows the model (a refused request is then explained as a PDF problem). */
 export type ModelContext = { entries: TranscriptEntry[]; documentsShown: number };
@@ -151,6 +329,10 @@ export async function buildModelContextWithStats(
   deps: ModelContextDeps,
   options: ModelContextOptions = {},
 ): Promise<ModelContext> {
+  const minChars = options.toolResultMinChars ?? CONTEXT_TOOL_RESULT_MIN_CHARS;
+  const inputMinChars = options.toolInputMinChars ?? CONTEXT_TOOL_INPUT_MIN_CHARS;
+  const boundary = fullContextBoundary(entries, provider, options.fullHumanMessages, options.pruneStepHumanMessages);
+  const toolNames = provider.context.toolNamesByUseId(entries);
   const readable: ReadableMimeTypes = { image: provider.imageMimeTypes, document: provider.documentMimeTypes };
   let remaining = options.attachmentBudgetBytes ?? CONTEXT_ATTACHMENT_BUDGET_BYTES;
 
@@ -170,7 +352,8 @@ export async function buildModelContextWithStats(
   // Newest first, so when the budget runs out it is the older pages and files that are left out.
   let documentsShown = 0;
   const files = new Map<string, AttachmentFile>();
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
+  // Only the full part is loaded: an attachment before the cut is a note, whatever its size.
+  for (let index = entries.length - 1; index >= boundary; index -= 1) {
     for (const marker of markersOf(entries[index]!).reverse()) {
       const loaded = await deps.loadAttachment(marker.attachmentId, readable);
       const carried = loaded.kind === 'image' || loaded.kind === 'document';
@@ -196,12 +379,19 @@ export async function buildModelContextWithStats(
 
   const firstUser = entries.findIndex((entry) => entry.role === 'user');
   const built = entries.map((entry, index) => {
+    const old = index < boundary;
+    const shortened = old
+      ? withoutPageText(provider.context.stubToolInputs(provider.context.stubToolResults(entry, toolNames, toolResultStub, minChars), toolInputStub, inputMinChars))
+      : entry;
     const pages = index === firstUser ? pageParts : [];
-    if (!entry.content.some(isAttachmentMarker) && pages.length === 0) return entry;
-    const content = entry.content.flatMap((block) =>
-      isAttachmentMarker(block) ? provider.context.materializeAttachment(block, files.get(block.attachmentId) ?? { kind: 'missing' }) : [block],
-    );
-    return { ...entry, content: [...pages, ...content] };
+    if (!shortened.content.some(isAttachmentMarker) && pages.length === 0) return shortened;
+    const content = shortened.content.flatMap((block) => {
+      if (!isAttachmentMarker(block)) return [block];
+      return old
+        ? provider.context.stubAttachment(block)
+        : provider.context.materializeAttachment(block, files.get(block.attachmentId) ?? { kind: 'missing' });
+    });
+    return { ...shortened, content: [...pages, ...content] };
   });
   return { entries: built, documentsShown };
 }

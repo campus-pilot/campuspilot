@@ -14,7 +14,7 @@ import {
 
 import type { AssistantUserMessageBody } from '@campuspilot/db/schema/assistant';
 import { buildUserTranscriptContent, isAttachmentMarker, type AttachmentMarker } from '../../transcript';
-import { attachmentLabel, attachmentNote } from '../context';
+import { attachmentLabel, attachmentNote, stubLongInputFields } from '../context';
 import { GEMINI_API_VERSION } from './gemini-api-version';
 import type { AssistantPrompt } from '../prompt';
 import { modelToolDescription, type AssistantTool } from '../tools';
@@ -147,8 +147,53 @@ export function geminiToolResultParts(results: readonly ModelToolResult[]): Part
   }));
 }
 
-/** How an attachment in Gemini's transcript is shown to the model. */
+/**
+ * Pruning and attachment rules of Gemini's transcript (design G3). A human
+ * turn is a user entry without `functionResponse` parts. Only the text of a
+ * response's `output`/`error` changes when it is stubbed: `id` and `name`
+ * stay, so every `functionCall` keeps its response; call parts and thought
+ * signatures are never touched.
+ */
 export const geminiContext: ContextAdapter = {
+  isHumanTurn: (entry) => entry.role === 'user' && !(entry.content as Part[]).some((part) => part.functionResponse),
+  toolNamesByUseId(entries) {
+    const names = new Map<string, string>();
+    for (const entry of entries) {
+      for (const part of entry.content as Part[]) {
+        if (part.functionCall?.id && part.functionCall.name) names.set(part.functionCall.id, part.functionCall.name);
+      }
+    }
+    return names;
+  },
+  stubToolResults(entry, toolNames, stub, minChars) {
+    if (!(entry.content as Part[]).some((part) => part.functionResponse)) return entry;
+    return {
+      ...entry,
+      content: (entry.content as Part[]).map((part) => {
+        const response = part.functionResponse;
+        if (!response) return part;
+        const body = (response.response ?? {}) as { output?: unknown; error?: unknown };
+        const key = typeof body.error === 'string' ? 'error' : 'output';
+        const text = typeof body[key] === 'string' ? (body[key] as string) : JSON.stringify(body[key] ?? '');
+        if (text.length < minChars) return part;
+        const toolName = response.name ?? toolNames.get(response.id ?? '') ?? 'a tool';
+        return { ...part, functionResponse: { ...response, response: { [key]: stub({ toolName, chars: text.length }) } } };
+      }),
+    };
+  },
+  stubToolInputs(entry, stub, minChars) {
+    if (!(entry.content as Part[]).some((part) => part.functionCall)) return entry;
+    return {
+      ...entry,
+      content: (entry.content as Part[]).map((part) => {
+        const call = part.functionCall;
+        if (!call) return part;
+        // Only `args` changes: id, name and the part's thought signature stay.
+        const args = stubLongInputFields(call.name ?? 'a tool', call.args, stub, minChars) as typeof call.args;
+        return args === call.args ? part : { ...part, functionCall: { ...call, args } };
+      }),
+    };
+  },
   materializeAttachment(marker: AttachmentMarker, file: AttachmentFile) {
     if (file.kind === 'document') {
       if (marker.kind !== 'document' || !GEMINI_DOCUMENT_MIME_TYPES.some((supported) => supported === file.mimeType)) {
@@ -162,6 +207,7 @@ export const geminiContext: ContextAdapter = {
     }
     return [{ text: attachmentLabel(marker) }, { inlineData: { mimeType: file.mimeType, data: Buffer.from(file.bytes).toString('base64') } }];
   },
+  stubAttachment: (marker) => [{ text: attachmentNote(marker, 'old') }],
   text: (text) => ({ text }),
   image: ({ mimeType, bytes }) =>
     GEMINI_IMAGE_MIME_TYPES.some((supported) => supported === mimeType) ? { inlineData: { mimeType, data: Buffer.from(bytes).toString('base64') } } : null,

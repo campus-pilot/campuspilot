@@ -61,6 +61,8 @@ function seedText(seed: NonNullable<AssistantUserMessageBody['seed']>): string {
 /** The line that introduces the page's text inside a `<current_page>` block. */
 const PAGE_TEXT_INTRO =
   'The page’s text (all of it, above and below the user’s view too; top to bottom, cells of a row joined by " | "; the part on their screen now is framed by marker lines; it may be cut where it says so):';
+/** What stands in for the page's text once its message is old (see {@link omitPageText}). */
+export const PAGE_TEXT_OMITTED = '(The text of this page was shown to you here earlier. It is omitted now to keep the chat short, and the page may have changed since.)';
 const PAGE_FENCE = '"""';
 const PAGE_BLOCK_END = '</current_page>';
 /** An opening or closing tag of the page block, however it is spaced or cased. */
@@ -113,6 +115,25 @@ function editorSourceText(source: NonNullable<AssistantUserMessageBody['editorSo
 }
 
 /**
+ * The text of a `<current_page>` block without the page's text: its path and
+ * title stay, a one-line note stands where the text was. Any other text is
+ * returned as it is, and so is a block that has no page text (also one already
+ * shortened: doing it twice changes nothing).
+ *
+ * The model context uses it for messages that are no longer recent: a page's
+ * text is up to twelve thousand characters and answers only the question it
+ * came with, so replaying it on every later step would be paid for again and
+ * again without being read. The stored transcript keeps it.
+ */
+export function omitPageText(text: string): string {
+  const closing = `\n${PAGE_FENCE}\n${PAGE_BLOCK_END}`;
+  if (!text.startsWith('<current_page>\n') || !text.endsWith(closing)) return text;
+  const start = text.indexOf(`\n${PAGE_TEXT_INTRO}\n${PAGE_FENCE}\n`);
+  if (start === -1) return text;
+  return `${text.slice(0, start)}\n${PAGE_TEXT_OMITTED}\n${PAGE_BLOCK_END}`;
+}
+
+/**
  * A user message as blocks, in order: the page the user was on (context, not
  * part of what they asked), the screen a seeded conversation started from,
  * the template editor's unsaved source when it was sent, one marker per
@@ -151,3 +172,15 @@ export function buildUserTranscriptContent(body: AssistantUserMessageBody): unkn
   if (body.text.length > 0) blocks.push({ type: 'text', text: body.text });
   return blocks;
 }
+
+/**
+ * The line the app adds at the end of each stored user message: when the run
+ * that answers it began, in India's wall-clock time (`istInstant`). It lives
+ * in the message, not the system prompt, so the prompt stays byte-identical
+ * for the whole conversation and every earlier turn stays a cache hit: a time
+ * in the system prompt changed on every message and made the provider write
+ * the entire conversation to its cache again. It is the last block, after
+ * anything the user typed, so the newest message's line is the current time.
+ */
+export const sentAtText = (instant: string) =>
+  `[Sent ${instant} (India time). Today's date is ${instant.slice(0, 10)}. This line is added by the app.]`;

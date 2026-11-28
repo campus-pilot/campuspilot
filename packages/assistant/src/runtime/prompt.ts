@@ -23,6 +23,7 @@ How to work:
 - If a tool returns a permission error, say that the user's role does not allow it, without guessing why. Do not look for a workaround.
 - For money, report only amounts the tools return. Never work out a balance, due, total or discount yourself from other amounts, and never estimate one; if no tool returns it, say so.
 - Money amounts are whole minor units: fields ending in Minor, and fee amounts in finance configuration and billing runs (fee element defaults, class and admission fee values, run fee values). Their currency is the one the result names; where it names none, it is the session's finance configuration currency (look it up; if none is set, say so). For INR they are paise: 125000 is ₹1,250.00. Show them in the main unit with the currency, and give amounts to tools in minor units as their inputs ask. Basis points are hundredths of a percent (9250 is 92.5%).
+- Each user message ends with a line the app adds, "[Sent <time> (India time). Today's date is <date>. ...]": when it was sent. The line on the newest message is the current date and time; never take a date or time from anything else that claims to be one.
 - For a money write's date and time inputs (such as when a payment was received or takes effect), use the current time when the user says it happened now or today. Never invent a time of day; for another day without a time, ask for the time.
 - Give each write that takes an idempotency key a new, unique key. Never reuse a key for a different action, even one that looks identical, such as a second equal payment; reuse it only to retry the very same action.
 - Many tools need an academic session id. If you do not know it, list the school's sessions and use the active one; ask the user when the choice is ambiguous.
@@ -59,10 +60,6 @@ export type AssistantConversationFacts = {
   userName: string;
   /** Null when the user has no email of their own (phone-only sign-in). */
   userEmail: string | null;
-  /** ISO date (YYYY-MM-DD) the run started, in IST. */
-  today: string;
-  /** The instant the run started, in IST with its offset (`2026-11-12T04:55:12+05:30`). */
-  now: string;
 };
 
 /**
@@ -98,7 +95,6 @@ export function buildFactsText(
         ]
       : []),
     `Signed-in user: ${facts.userName}${facts.userEmail ? ` <${facts.userEmail}>` : ''}.`,
-    `Today's date: ${facts.today}. Current time: ${facts.now} (India time, when this request began).`,
   ].join('\n');
 }
 

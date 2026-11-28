@@ -99,6 +99,8 @@ const getRunTokenMock = vi.mocked(getRunToken);
 
 const TOKEN = 'delegated-run-token-for-tests';
 const QUESTION = 'Rename student stu_1 to Asha R.';
+/** The line the run adds at the end of every stored user message: when it began, in India time (`sentAtText`). */
+const SENT_AT = { type: 'text', text: expect.stringMatching(/^\[Sent \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+05:30 \(India time\)\. Today's date is \d{4}-\d{2}-\d{2}\./) };
 
 const listStudents = mcpTool('students.list', 'read');
 const updateStudent = mcpTool('students.update', 'write');
@@ -194,6 +196,7 @@ describe('a message with images', () => {
       { type: 'campuspilot_attachment', attachmentId: 'asat_1', kind: 'image', fileName: 'page1.jpg', contentType: 'image/jpeg', ordinal: 1, total: 2 },
       { type: 'campuspilot_attachment', attachmentId: 'asat_2', kind: 'image', fileName: 'page2.jpg', contentType: 'image/jpeg', ordinal: 2, total: 2 },
       { type: 'text', text: QUESTION },
+      SENT_AT,
     ]);
     // The model got labelled images in the order attached, then the words.
     expect(provider.calls[0]!.transcript[0]!.content).toEqual([
@@ -202,6 +205,7 @@ describe('a message with images', () => {
       { type: 'text', text: '[Attachment asat_2: page2.jpg, image/jpeg (2 of 2). Use this id as data-figure-id on an <img> to put the image in a question paper.]' },
       { type: 'image', mimeType: 'image/jpeg', byteLength: 3 },
       { type: 'text', text: QUESTION },
+      SENT_AT,
     ]);
     expect(loaded.sort()).toEqual(['asat_1', 'asat_2']);
   });
@@ -264,6 +268,7 @@ describe('a message with a PDF', () => {
       { type: 'text', text: '[Attachment asat_pdf: paper.pdf, application/pdf (1 of 1). It is a PDF document: read it as source material. It is not an image and cannot be used as data-figure-id.]' },
       { type: 'document', mimeType: 'application/pdf', byteLength: 9 },
       { type: 'text', text: QUESTION },
+      SENT_AT,
     ]);
     // The loader was told the provider reads PDFs.
     expect(asked).toEqual([{ id: 'asat_pdf', document: ['application/pdf'] }]);
@@ -332,7 +337,7 @@ describe('a text-only reply', () => {
       { kind: 'assistant_message', status: 'complete', body: { text: reply } },
     ]);
     expect(transcript).toEqual([
-      { role: 'user', entryKey: userTranscriptKey(turn.runId), content: [{ type: 'text', text: QUESTION }] },
+      { role: 'user', entryKey: userTranscriptKey(turn.runId), content: [{ type: 'text', text: QUESTION }, SENT_AT] },
       { role: 'assistant', entryKey: modelTranscriptKey(turn.runId, 0), content: [{ type: 'text', text: reply }] },
     ]);
     expect(approvals).toEqual([]);
@@ -342,7 +347,7 @@ describe('a text-only reply', () => {
     expect(provider.calls).toHaveLength(1);
     expect(provider.calls[0]).toMatchObject({
       toolNames: [listStudents.modelName, updateStudent.modelName],
-      transcript: [{ role: 'user', content: [{ type: 'text', text: QUESTION }] }],
+      transcript: [{ role: 'user', content: [{ type: 'text', text: QUESTION }, SENT_AT] }],
     });
     expect(provider.calls[0]?.prompt.facts).toContain('Asha Rao <asha.rao@school.test>');
     expect(provider.calls[0]?.prompt.facts).toContain(turn.schoolId);
@@ -1542,6 +1547,7 @@ describe('a conversation shared with a question paper', () => {
       { type: 'text', text: paperPageLabel(pages[1]!) },
       { type: 'image', mimeType: 'image/jpeg', byteLength: 64 },
       { type: 'text', text: 'Check question 6 against the photo.' },
+      SENT_AT,
     ]);
   });
 
@@ -1549,5 +1555,23 @@ describe('a conversation shared with a question paper', () => {
     const { provider, asked } = await run(null);
     expect(asked).toEqual([]);
     expect(JSON.stringify(provider.calls[0]!.transcript)).not.toContain('qpg_');
+  });
+});
+
+describe('the prompt cache across messages', () => {
+  it('sends the same system prompt for every message of a conversation, with the time only in each message', async () => {
+    // Production cost rows showed every new message missing the prompt cache while the run's start time was in the prompt.
+    const provider = createFakeProvider({ whenExhausted: fakeReply({ text: 'Done.' }) });
+    const processRun = createRunProcessor({ providers: fakeProviderRegistry(provider), log, checkAccess: async () => ({ allowed: true as const }) });
+    let turn = await seedTurn({ text: 'First.' });
+    await processRun(createFakeRunContext(), turn.input);
+    turn = await seedNextTurn(turn, 'Second.');
+    await processRun(createFakeRunContext(), turn.input);
+
+    const [first, second] = provider.calls;
+    expect(second!.prompt).toEqual(first!.prompt);
+    // The earlier message is sent exactly as the first time, its own time line included, so it stays a cache hit.
+    expect(second!.transcript[0]).toEqual(first!.transcript[0]);
+    expect(second!.transcript.at(-1)!.content.at(-1)).toEqual(SENT_AT);
   });
 });

@@ -1,6 +1,6 @@
 import type { AssistantUserMessageBody } from '@campuspilot/db/schema/assistant';
 import { type AttachmentMarker } from '../../transcript';
-import { attachmentLabel, attachmentNote } from '../context';
+import { attachmentLabel, attachmentNote, stubLongInputFields } from '../context';
 import type { AssistantPrompt } from '../prompt';
 import type { ModelPrices } from './config';
 import type { ProviderRegistry } from './registry';
@@ -42,8 +42,36 @@ export type FakeDocumentBlock = { type: 'document'; mimeType: string; byteLength
 export type FakeAttachmentMarkerBlock = AttachmentMarker;
 export type FakeBlock = FakeTextBlock | FakeToolUseBlock | FakeToolResultBlock | FakeImageBlock | FakeDocumentBlock | FakeAttachmentMarkerBlock;
 
-/** How the fake shows an attachment (see {@link ContextAdapter}); same shape as the real adapters, in its own format. */
+/** The fake's pruning and attachment rules (see {@link ContextAdapter}); same shape as the real adapters, in its own format. */
 export const fakeContext: ContextAdapter = {
+  isHumanTurn: (entry) => entry.role === 'user' && !(entry.content as FakeBlock[]).some((block) => block.type === 'tool_result'),
+  toolNamesByUseId(entries) {
+    const names = new Map<string, string>();
+    for (const entry of entries) {
+      for (const block of entry.content as FakeBlock[]) if (block.type === 'tool_use') names.set(block.id, block.name);
+    }
+    return names;
+  },
+  stubToolResults(entry, toolNames, stub, minChars) {
+    if (!(entry.content as FakeBlock[]).some((block) => block.type === 'tool_result')) return entry;
+    return {
+      ...entry,
+      content: (entry.content as FakeBlock[]).map((block) =>
+        block.type === 'tool_result' && block.content.length >= minChars
+          ? { ...block, content: stub({ toolName: toolNames.get(block.toolUseId) ?? block.toolName, chars: block.content.length }) }
+          : block,
+      ),
+    };
+  },
+  stubToolInputs(entry, stub, minChars) {
+    if (!(entry.content as FakeBlock[]).some((block) => block.type === 'tool_use')) return entry;
+    return {
+      ...entry,
+      content: (entry.content as FakeBlock[]).map((block) =>
+        block.type === 'tool_use' ? { ...block, input: stubLongInputFields(block.name, block.input, stub, minChars) } : block,
+      ),
+    };
+  },
   materializeAttachment(marker: AttachmentMarker, file: AttachmentFile) {
     if (file.kind === 'document') {
       if (marker.kind !== 'document') return [{ type: 'text', text: attachmentNote(marker, 'unreadable') }];
@@ -59,6 +87,7 @@ export const fakeContext: ContextAdapter = {
       { type: 'image', mimeType: file.mimeType, byteLength: file.bytes.byteLength },
     ];
   },
+  stubAttachment: (marker) => [{ type: 'text', text: attachmentNote(marker, 'old') }],
   text: (text) => ({ type: 'text', text }),
   image: ({ mimeType, bytes }) => ({ type: 'image', mimeType, byteLength: bytes.byteLength }),
 };

@@ -18,6 +18,7 @@ import {
   assistantMessageItemKey,
   interruptedTranscriptKey,
   modelTranscriptKey,
+  sentAtText,
   toolCallItemKey,
   toolResultsTranscriptKey,
   userMessageItemKey,
@@ -29,7 +30,7 @@ import {
   type AssistantConversationHandlers,
   type ProcessRunInput,
 } from './contract';
-import { buildModelContextWithStats, type ModelContextDeps, type PaperPagePhoto } from './context';
+import { buildModelContextWithStats, findCopiedContextNote, type ModelContextDeps, type PaperPagePhoto } from './context';
 import { foreignRunIds, transcriptForProvider, type HandoffEntry } from './handoff';
 import { buildAssistantPrompt, istInstant, type AssistantConversationFacts } from './prompt';
 import { readActiveSchoolFeatures, readSchoolKind } from './school-features';
@@ -369,8 +370,10 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
 
     /**
      * The run's start, read once here, inside the run's first durable step:
-     * a Restate replay returns this step's journaled result, so the prompt's
+     * a Restate replay returns this step's journaled result, so the message's
      * date and time never move. A retried step reuses a start already saved.
+     * It is stored as the last block of the user's message (`sentAtText`),
+     * never in the system prompt, which must not change between runs.
      */
     const startedAt = run.startedAt ?? new Date();
     const now = istInstant(startedAt);
@@ -379,7 +382,7 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
         conversationId: run.conversationId,
         runId: run.id,
         role: 'user',
-        content: provider.userContent(item.body as AssistantUserMessageBody),
+        content: [...provider.userContent(item.body as AssistantUserMessageBody), provider.context.text(sentAtText(now))],
         entryKey: userTranscriptKey(run.id),
       });
       // The model the provider is configured to call now, which is what this
@@ -409,8 +412,6 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
         schoolName: await lookUpSchoolName(run.id, run.schoolId),
         userName: user.name,
         userEmail: user.email,
-        today: now.slice(0, 10),
-        now,
       },
     };
   }
@@ -710,6 +711,28 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
           toolUseId: toolUse.id,
           toolName: toolUse.name,
           content: JSON.stringify({ code: 'FORBIDDEN', message: TEMPLATE_EDITOR_REFUSED_MESSAGE }),
+          isError: true,
+        },
+      };
+    }
+
+    // Refused before anything is recorded or put to the user for approval:
+    // the call would send a context note as if it were the content.
+    const copiedNote = findCopiedContextNote(toolUse.input ?? {});
+    if (copiedNote !== null) {
+      deps.log.warn(
+        { runId: run.runId, conversationId: run.conversationId, tool: tool.mcpName, field: copiedNote },
+        'assistant.tool.copied-context-note',
+      );
+      return {
+        action: 'result',
+        result: {
+          toolUseId: toolUse.id,
+          toolName: toolUse.name,
+          content: JSON.stringify({
+            code: 'BAD_REQUEST',
+            message: `\`${copiedNote}\` holds a note that replaced earlier content in this chat, not the content itself. Nothing was sent. Write the full ${copiedNote} again (read it back with a tool first if needed) and call ${toolUse.name} again.`,
+          }),
           isError: true,
         },
       };
